@@ -1,0 +1,3 @@
+一、Supabase：SQL Editor 执行 supabase/schema.sql；Authentication 创建老板账号。
+二、GitHub：上传解压目录全部内容，必须看到 src/config、src/components、src/pages、src/lib。
+三、Vercel：Vite；Root ./；添加 URL 和 Publishable Key；Deploy。
