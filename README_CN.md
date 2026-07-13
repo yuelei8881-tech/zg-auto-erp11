@@ -1,15 +1,26 @@
-# Z&G AUTO ERP Enterprise v1.0 COMPLETE
+# Z&G AUTO ERP v0.74.0 稳定基线
 
-完整可部署基础版，包含 17 个业务模块、Supabase 登录、多租户 RLS、角色菜单、经营驾驶舱、CRUD 编辑、电脑/平板/手机响应式。
+此版本依据原聊天记录中的 v0.7.4 需求重建，采用浏览器本地存储，适合先恢复原有工作流程和界面。
 
-## 部署
-1. Supabase SQL Editor 执行 `supabase/schema.sql`。
-2. Supabase Authentication → Users 创建老板账号。
-3. GitHub 上传全部文件。
-4. Vercel 选择 Vite，添加两个环境变量后 Deploy。
+## 已包含
 
-## 环境变量
-- VITE_SUPABASE_URL
-- VITE_SUPABASE_PUBLISHABLE_KEY
+- 老板首页：今日/月营业额、支出、净额、欠款、提醒
+- 客户、车队、司机、车辆
+- 接车检查与维修前/后扫描记录
+- 维修工单明细及自动金额计算
+- 预约、库存、供应商、财务支出
+- 活动、车辆保修
+- 下属账号、单人/双人审批基础记录
+- 包括老板在内的操作日志
+- JSON 数据备份与恢复
+- 电脑、平板、手机响应式布局
 
-注意：前端不能使用 Secret Key / Service Role Key。
+完整范围与实现边界请查看 `功能总表_v0.74.0.md`。
+
+## 本地运行
+
+安装依赖后运行 `npm run dev`。生产构建使用 `npm run build`。
+
+## 重要说明
+
+v0.74.0 是离线稳定基线，数据保存在当前浏览器。跨设备实时同步和真正不可篡改审批应在此基线验证后，再迁移到云数据库。

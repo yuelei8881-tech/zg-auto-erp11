@@ -1,28 +1,21 @@
 {
   "compilerOptions": {
     "target": "ES2022",
-    "useDefineForClassFields": true,
-    "lib": [
-      "ES2022",
-      "DOM",
-      "DOM.Iterable"
-    ],
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "module": "ESNext",
-    "skipLibCheck": true,
     "moduleResolution": "Bundler",
+    "allowImportingTsExtensions": true,
     "resolveJsonModule": true,
     "isolatedModules": true,
-    "esModuleInterop": true,
+    "noEmit": true,
     "jsx": "react-jsx",
     "strict": true,
-    "noEmit": true,
-    "types": [
-      "vite/client",
-      "react",
-      "react-dom"
-    ]
+    "skipLibCheck": true,
+    "types": ["vite/client"]
   },
   "include": [
-    "src"
+    "src/main.tsx",
+    "src/FormalGate.tsx",
+    "src/lib/**/*.ts"
   ]
 }
