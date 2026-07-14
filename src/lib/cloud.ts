@@ -1,13 +1,11 @@
 import type { User } from '@supabase/supabase-js';
 import { supabase } from './supabase';
 
-export type CloudRow = Record<string, string | number | boolean>;
+export type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
+export type CloudRow = { id: string; [key: string]: JsonValue };
 export type CloudStore = Record<string, CloudRow[]>;
 
-export type CloudUser = {
-  email: string;
-  name?: string;
-};
+export type CloudUser = { email: string; name?: string };
 
 export type CloudSession = {
   user: CloudUser;
@@ -18,6 +16,7 @@ export type CloudSession = {
   upsertRecord: (module: string, row: CloudRow) => Promise<void>;
   deleteRecord: (module: string, id: string) => Promise<void>;
   subscribe: (refresh: () => void) => () => void;
+  invokeFunction: <T = unknown>(name: string, body: Record<string, unknown>) => Promise<T>;
   signOut: () => Promise<void>;
 };
 
@@ -48,12 +47,9 @@ export async function openCloudSession(user: User): Promise<CloudSession> {
   }
   if (!membership) throw new Error('无法建立修理厂账号，请联系系统管理员。');
 
-  const organizationId = membership.organization_id as string;
+  const organizationId = String(membership.organization_id);
   const { data: organization, error: organizationError } = await client
-    .from('zg_organizations')
-    .select('name')
-    .eq('id', organizationId)
-    .single();
+    .from('zg_organizations').select('name').eq('id', organizationId).single();
   if (organizationError) throw organizationError;
 
   const loadStore = async () => {
@@ -65,18 +61,17 @@ export async function openCloudSession(user: User): Promise<CloudSession> {
     const store: CloudStore = {};
     for (const item of data || []) {
       const module = String(item.module);
-      const payload = (item.payload || {}) as CloudRow;
+      const payload = (item.payload || {}) as Omit<CloudRow, 'id'>;
       (store[module] ||= []).push({ ...payload, id: String(item.record_id) });
     }
     return store;
   };
 
   const upsertRecord = async (module: string, row: CloudRow) => {
-    const recordId = String(row.id);
     const { error } = await client.from('zg_erp_records').upsert({
       organization_id: organizationId,
       module,
-      record_id: recordId,
+      record_id: row.id,
       payload: row,
       updated_by: user.id,
     }, { onConflict: 'organization_id,module,record_id' });
@@ -90,12 +85,11 @@ export async function openCloudSession(user: User): Promise<CloudSession> {
   };
 
   const subscribe = (refresh: () => void) => {
-    const channel = client.channel(`zg-v074-${organizationId}`)
+    const channel = client.channel(`zg-v075-${organizationId}`)
       .on('postgres_changes', {
         event: '*', schema: 'public', table: 'zg_erp_records',
         filter: `organization_id=eq.${organizationId}`,
-      }, refresh)
-      .subscribe();
+      }, refresh).subscribe();
     const onFocus = () => refresh();
     window.addEventListener('focus', onFocus);
     return () => {
@@ -104,15 +98,18 @@ export async function openCloudSession(user: User): Promise<CloudSession> {
     };
   };
 
+  const invokeFunction = async <T,>(name: string, body: Record<string, unknown>) => {
+    const { data, error } = await client.functions.invoke(name, { body: { ...body, organizationId } });
+    if (error) throw error;
+    return data as T;
+  };
+
   return {
     user: { email: user.email || 'unknown', name: membership.display_name || undefined },
     organizationId,
     organizationName: organization?.name || 'Z&G AUTO REPAIR',
     role: String(membership.role),
-    loadStore,
-    upsertRecord,
-    deleteRecord,
-    subscribe,
+    loadStore, upsertRecord, deleteRecord, subscribe, invokeFunction,
     signOut: async () => { await client.auth.signOut(); },
   };
 }

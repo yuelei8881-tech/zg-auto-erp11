@@ -14,8 +14,7 @@
     "types": ["vite/client"]
   },
   "include": [
-    "src/main.tsx",
-    "src/FormalGate.tsx",
-    "src/lib/**/*.ts"
+    "src/**/*.tsx",
+    "src/**/*.ts"
   ]
 }

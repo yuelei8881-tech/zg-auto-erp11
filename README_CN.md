@@ -1,26 +1,38 @@
-# Z&G AUTO ERP v0.74.0 稳定基线
+# Z&G AUTO ERP v0.75.0
 
-此版本依据原聊天记录中的 v0.7.4 需求重建，采用浏览器本地存储，适合先恢复原有工作流程和界面。
+这是 Z&G AUTO REPAIR 的云端汽修管理系统升级版，可在电脑、平板和手机浏览器使用。
 
-## 已包含
+## 本次核心升级
 
-- 老板首页：今日/月营业额、支出、净额、欠款、提醒
-- 客户、车队、司机、车辆
-- 接车检查与维修前/后扫描记录
-- 维修工单明细及自动金额计算
-- 预约、库存、供应商、财务支出
-- 活动、车辆保修
-- 下属账号、单人/双人审批基础记录
-- 包括老板在内的操作日志
-- JSON 数据备份与恢复
-- 电脑、平板、手机响应式布局
+- 客户、公司车队、司机和车辆完整关联
+- VIN 自动识别年份、品牌、车型和发动机
+- 明细式维修工单：人工、工时、配件、税费、折扣、付款和欠款自动计算
+- 工单保存后自动扣减库存，修改或取消后自动恢复库存
+- Estimate、Repair Order、Invoice、Receipt 四种紧凑打印模板
+- 今日与本月营业、实收、毛利润、支出、净收益和应收款实时汇总
+- OCR 车牌识别和语音生成维修记录
+- AI 故障诊断、AI 照片分类、短信通知和在线付款的服务器接口
+- 手机、平板和电脑响应式界面
 
-完整范围与实现边界请查看 `功能总表_v0.74.0.md`。
+## 云端部署
 
-## 本地运行
+1. 将项目文件上传到 GitHub 仓库根目录。
+2. Vercel 连接该仓库，并设置：
+   - `VITE_SUPABASE_URL`
+   - `VITE_SUPABASE_PUBLISHABLE_KEY`
+3. Supabase 首次安装使用 `supabase/migrations/002_v074_isolated_install.sql`；已运行 v0.74.0 的项目只需执行 `supabase/migrations/003_v075_upgrade.sql`。
+4. Vercel 自动构建并发布。
 
-安装依赖后运行 `npm run dev`。生产构建使用 `npm run build`。
+## 可选服务
 
-## 重要说明
+以下功能需要在 Supabase Edge Functions 中配置相应密钥：
 
-v0.74.0 是离线稳定基线，数据保存在当前浏览器。跨设备实时同步和真正不可篡改审批应在此基线验证后，再迁移到云数据库。
+- AI 故障诊断、AI 照片分类：`OPENAI_API_KEY`
+- 短信通知：Twilio 账号信息
+- 在线付款：Stripe Secret Key 与回跳地址
+
+未配置这些服务时，其余客户、车辆、工单、库存、财务、打印、VIN、OCR 和语音功能仍可正常使用。
+
+## 安全提醒
+
+只能把 Supabase Publishable Key 放在 Vercel 前端环境变量中。不要把 Supabase Secret Key、OpenAI Key、Twilio Token 或 Stripe Secret Key 上传到 GitHub。

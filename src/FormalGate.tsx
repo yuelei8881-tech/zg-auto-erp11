@@ -12,10 +12,7 @@ export function FormalGate({ children }: { children: (cloud: CloudSession) => Re
 
   useEffect(() => {
     if (!supabase) { setLoading(false); return; }
-    void supabase.auth.getSession().then(({ data }) => {
-      setSession(data.session);
-      setLoading(false);
-    });
+    void supabase.auth.getSession().then(({ data }) => { setSession(data.session); setLoading(false); });
     const { data } = supabase.auth.onAuthStateChange((_event, next) => {
       setSession(next);
       if (!next) setCloud(null);
@@ -26,8 +23,8 @@ export function FormalGate({ children }: { children: (cloud: CloudSession) => Re
   useEffect(() => {
     if (!session?.user) return;
     setError('');
-    openCloudSession(session.user).then(setCloud).catch(e => {
-      setError(e instanceof Error ? e.message : '服务器连接失败');
+    openCloudSession(session.user).then(setCloud).catch((reason: unknown) => {
+      setError(reason instanceof Error ? reason.message : '服务器连接失败。');
       setCloud(null);
     });
   }, [session?.user.id]);
@@ -48,7 +45,13 @@ export function FormalGate({ children }: { children: (cloud: CloudSession) => Re
 
   if (!cloudConfigured) return <AuthCard title="服务器尚未配置" error="请在 Vercel 添加 Supabase 项目地址和 Publishable Key。" />;
   if (loading) return <AuthCard title="正在连接正式服务器" subtitle="正在安全读取登录状态…" />;
-  if (!session) return <div className="auth-screen"><form className="auth-card" onSubmit={login}><div className="auth-logo">Z&G</div><h1>Z&G AUTO ERP</h1><p>员工账号登录</p><label><span>邮箱</span><input name="email" type="email" autoComplete="email" required /></label><label><span>密码</span><input name="password" type="password" autoComplete="current-password" required /></label>{error && <p className="auth-error">{error}</p>}<button className="primary" disabled={submitting}>{submitting ? '正在登录…' : '登录系统'}</button></form></div>;
+  if (!session) return <div className="auth-screen"><form className="auth-card" onSubmit={login}>
+    <div className="auth-logo">Z&G</div><h1>Z&G AUTO ERP</h1><p>员工账号登录 · v0.75.0</p>
+    <label><span>邮箱</span><input name="email" type="email" autoComplete="email" required /></label>
+    <label><span>密码</span><input name="password" type="password" autoComplete="current-password" required /></label>
+    {error && <p className="auth-error">{error}</p>}
+    <button className="primary" disabled={submitting}>{submitting ? '正在登录…' : '登录系统'}</button>
+  </form></div>;
   if (error) return <AuthCard title="无法进入系统" error={error} action={() => location.reload()} />;
   if (!cloud) return <AuthCard title="正在连接正式服务器" subtitle="首次登录会自动建立 Z&G 修理厂空间…" />;
   return children(cloud);
