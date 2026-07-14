@@ -50,7 +50,11 @@ export async function openCloudSession(user: User): Promise<CloudSession> {
   if (!membership) {
     const activationCode = sessionStorage.getItem('zg_staff_activation_code') || '';
     const { error: inviteError } = await client.rpc('zg_accept_staff_invite', { p_code: activationCode });
-    if (inviteError && !String(inviteError.message || '').includes('Could not find the function')) throw inviteError;
+    const missingActivationRpc = inviteError && String(inviteError.message || '').includes('Could not find the function');
+    if (inviteError && !missingActivationRpc) throw inviteError;
+    if (missingActivationRpc && activationCode) {
+      throw new Error('员工激活服务正在升级，请稍后再登录。');
+    }
     membership = await findMembership();
     if (membership) sessionStorage.removeItem('zg_staff_activation_code');
   }
@@ -119,10 +123,11 @@ export async function openCloudSession(user: User): Promise<CloudSession> {
   };
 
   const listStaff = async () => {
-    const [memberResult, inviteResult] = await Promise.all([
-      client.from('zg_organization_members').select('user_id,display_name,phone,role,status,permissions').eq('organization_id', organizationId).order('created_at'),
-      client.from('zg_staff_invites').select('id,email,role,status,expires_at,activation_code').eq('organization_id', organizationId).order('created_at', { ascending: false }),
-    ]);
+    const memberResult = await client.from('zg_organization_members').select('user_id,display_name,phone,role,status,permissions').eq('organization_id', organizationId).order('created_at');
+    let inviteResult = await client.from('zg_staff_invites').select('id,email,role,status,expires_at,activation_code').eq('organization_id', organizationId).order('created_at', { ascending: false });
+    if (inviteResult.error && String(inviteResult.error.message || '').includes('activation_code')) {
+      inviteResult = await client.from('zg_staff_invites').select('id,email,role,status,expires_at').eq('organization_id', organizationId).order('created_at', { ascending: false }) as typeof inviteResult;
+    }
     if (memberResult.error) throw memberResult.error;
     if (inviteResult.error) throw inviteResult.error;
     return {
