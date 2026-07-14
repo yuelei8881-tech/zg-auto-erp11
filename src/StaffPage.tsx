@@ -7,9 +7,13 @@ const roles = [
   { value: 'finance', label: '财务' }, { value: 'warehouse', label: '仓库' },
 ];
 const permissionItems = [
-  ['customers', '客户与车辆'], ['workOrders', '工单与报价'], ['finance', '财务与利润'],
+  ['customers', '查看客户与车辆'], ['customerContact', '查看客户电话与地址'],
+  ['workOrders', '查看全部工单'], ['assignedWorkOrders', '仅查看分配给自己的工单'],
+  ['createWorkOrders', '新建工单'], ['diagnosis', '填写诊断与维修记录'],
+  ['pricing', '查看和修改价格'], ['assignTechnician', '分配技师'],
+  ['collectPayment', '收款与结账'], ['finance', '财务与利润'],
   ['inventory', '库存与采购'], ['campaigns', '活动与保修'], ['staff', '员工与授权'],
-  ['delete', '删除资料'], ['approve', '审批操作'],
+  ['archive', '申请作废/归档资料'], ['approve', '审批与双人授权'],
 ] as const;
 
 export function StaffPage({ cloud }: { cloud: CloudSession }) {
@@ -17,7 +21,7 @@ export function StaffPage({ cloud }: { cloud: CloudSession }) {
   const [invites, setInvites] = useState<StaffInvite[]>([]);
   const [email, setEmail] = useState(''); const [role, setRole] = useState('technician');
   const [loading, setLoading] = useState(true); const [busy, setBusy] = useState(false);
-  const canManage = cloud.role === 'owner' || cloud.role === 'manager';
+  const canManage = cloud.role === 'owner' || cloud.role === 'manager' || Boolean(cloud.permissions.staff);
   const refresh = async () => { setLoading(true); try { const data = await cloud.listStaff(); setMembers(data.members); setInvites(data.invites); } catch (error) { alert(`读取员工资料失败：${error instanceof Error ? error.message : error}`); } finally { setLoading(false); } };
   useEffect(() => { void refresh(); }, [cloud.organizationId]);
 

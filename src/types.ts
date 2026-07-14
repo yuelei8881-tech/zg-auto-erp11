@@ -36,6 +36,27 @@ export type PartItem = {
 
 export type WorkOrderStatus = '等待检查' | '等待批准' | '等待配件' | '维修中' | '已完成' | '已交车' | '已取消';
 
+export type InspectionChecklist = {
+  intake: boolean; exterior: boolean; scan: boolean; diagnosis: boolean; estimate: boolean;
+};
+
+export type ReviewHistoryItem = {
+  id: string; action: '提交审查' | '批准维修' | '退回补充'; by: string; at: string; note?: string;
+};
+
+export type EvidencePhoto = {
+  id: string;
+  category: '车牌' | '左前' | '右前' | '左后' | '右后' | '仪表里程' | '已有损伤' | '故障扫描' | '维修中' | '维修完成' | '其他';
+  dataUrl: string;
+  fileName: string;
+  note?: string;
+  capturedAt: string;
+  capturedBy: string;
+  archivedAt?: string;
+  archivedBy?: string;
+  archiveReason?: string;
+};
+
 export type WorkOrder = {
   id: string; number: string; date: string; customerId?: string; customer: string; phone?: string;
   vehicleId?: string; vehicle: string; plate?: string; vin?: string; mileage?: number;
@@ -45,6 +66,27 @@ export type WorkOrder = {
   outsource: number; discount: number; taxRate: number; laborTotal: number; partsTotal: number;
   partsCost: number; tax: number; total: number; paid: number; balance: number; grossProfit: number;
   paymentMethod?: string; inventoryCommitted?: boolean; notes?: string;
+  technicianUserId?: string;
+  archivedAt?: string; archivedBy?: string; archiveReason?: string;
+  inspectionChecklist?: InspectionChecklist;
+  reviewStatus?: '未提交' | '待审查' | '已通过' | '退回补充';
+  reviewNotes?: string; submittedForReviewAt?: string; reviewedBy?: string; reviewedAt?: string;
+  reviewHistory?: ReviewHistoryItem[];
+  evidencePhotos?: EvidencePhoto[];
+  settlementTotal?: number;
+};
+
+export type ApprovalRequest = {
+  id: string; workOrderId: string; workOrderNumber: string;
+  type: '删除工单' | '工单折扣' | '实际结账金额'; status: '待授权' | '已批准' | '已拒绝' | '已执行';
+  requestedBy: string; requestedById: string; requestedAt: string; reason: string;
+  oldValue?: number; newValue?: number; proposedOrder?: WorkOrder;
+  approvedBy?: string; approvedById?: string; approvedAt?: string; decisionNote?: string;
+};
+
+export type ChangeLog = {
+  id: string; workOrderId: string; workOrderNumber: string; action: string;
+  actor: string; actorId: string; at: string; detail: string; before?: unknown; after?: unknown;
 };
 
 export type InventoryLog = {
@@ -81,5 +123,6 @@ export type AppStore = {
   workOrders: WorkOrder[]; parts: Part[]; inventoryLogs: InventoryLog[];
   payments: Payment[]; expenses: Expense[]; settings: ShopSettings[];
   campaigns: Campaign[]; warranties: Warranty[];
+  approvalRequests: ApprovalRequest[]; changeLogs: ChangeLog[];
   [key: string]: unknown[];
 };

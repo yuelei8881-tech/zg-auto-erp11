@@ -1,9 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { FormalGate } from './FormalGate';
-import type { CloudRow, CloudSession, CloudStore } from './lib/cloud';
+import type { CloudRow, CloudSession, CloudStore, StaffMember } from './lib/cloud';
 import { decodeVin, escapeHtml, money, recalculateWorkOrder, today, uid } from './lib/erp';
-import type { AppStore, Campaign, Customer, Driver, Expense, Fleet, InventoryLog, Part, Payment, ShopSettings, Vehicle, Warranty, WorkOrder } from './types';
+import type { AppStore, ApprovalRequest, Campaign, ChangeLog, Customer, Driver, Expense, Fleet, InventoryLog, Part, Payment, ShopSettings, Vehicle, Warranty, WorkOrder } from './types';
 import { WorkOrderEditor } from './WorkOrderEditor';
 import { SmartTools } from './SmartTools';
 import { ActivityCenter } from './ActivityCenter';
@@ -14,7 +14,7 @@ import './extra.css';
 type Page = 'dashboard' | 'customers' | 'fleets' | 'vehicles' | 'workOrders' | 'parts' | 'finance' | 'campaigns' | 'staff' | 'smart' | 'settings';
 type ModalState = { type: 'customer' | 'fleet' | 'driver' | 'vehicle' | 'part' | 'expense' | 'campaign' | 'warranty' | 'settings'; value?: Record<string, unknown> } | null;
 
-const emptyStore: AppStore = { customers: [], fleets: [], drivers: [], vehicles: [], workOrders: [], parts: [], inventoryLogs: [], payments: [], expenses: [], settings: [], campaigns: [], warranties: [] };
+const emptyStore: AppStore = { customers: [], fleets: [], drivers: [], vehicles: [], workOrders: [], parts: [], inventoryLogs: [], payments: [], expenses: [], settings: [], campaigns: [], warranties: [], approvalRequests: [], changeLogs: [] };
 const defaultSettings: ShopSettings = { id: '00000000-0000-4000-8000-000000000075', shopName: 'Z&G AUTO REPAIR', address: '319 Agostino Rd, San Gabriel, CA 91776', phone: '626-508-0888', email: '', defaultLaborRate: 165, defaultTaxRate: 9.5, invoiceTerms: 'Thank you for your business.' };
 
 const nav: Array<{ id: Page; icon: string; label: string }> = [
@@ -26,6 +26,27 @@ const nav: Array<{ id: Page; icon: string; label: string }> = [
   { id: 'settings', icon: '⚙', label: '系统设置' },
 ];
 
+const roleDefaults: Record<string, string[]> = {
+  owner: ['*'],
+  manager: ['customers', 'customerContact', 'workOrders', 'createWorkOrders', 'diagnosis', 'pricing', 'assignTechnician', 'collectPayment', 'finance', 'inventory', 'campaigns', 'staff', 'archive', 'approve', 'smart', 'settings'],
+  frontdesk: ['customers', 'customerContact', 'workOrders', 'createWorkOrders', 'diagnosis', 'pricing', 'assignTechnician', 'collectPayment', 'campaigns', 'smart'],
+  technician: ['assignedWorkOrders', 'diagnosis', 'smart'],
+  finance: ['customers', 'customerContact', 'workOrders', 'pricing', 'collectPayment', 'finance', 'approve'],
+  warehouse: ['workOrders', 'inventory'],
+};
+
+function can(cloud: CloudSession, key: string) {
+  if (cloud.role === 'owner') return true;
+  if (Object.prototype.hasOwnProperty.call(cloud.permissions, key)) return Boolean(cloud.permissions[key]);
+  return (roleDefaults[cloud.role] || []).includes(key);
+}
+
+function canOpenPage(cloud: CloudSession, page: Page) {
+  if (page === 'dashboard') return true;
+  const map: Partial<Record<Page, string>> = { customers: 'customers', fleets: 'customers', vehicles: 'customers', workOrders: cloud.role === 'technician' ? 'assignedWorkOrders' : 'workOrders', parts: 'inventory', finance: 'finance', campaigns: 'campaigns', staff: 'staff', smart: 'smart', settings: 'settings' };
+  return can(cloud, map[page] || page);
+}
+
 function App({ cloud }: { cloud: CloudSession }) {
   const [store, setStore] = useState<AppStore>(emptyStore);
   const [page, setPage] = useState<Page>('dashboard');
@@ -34,6 +55,7 @@ function App({ cloud }: { cloud: CloudSession }) {
   const [search, setSearch] = useState('');
   const [modal, setModal] = useState<ModalState>(null);
   const [editingOrder, setEditingOrder] = useState<WorkOrder | 'new' | null>(null);
+  const [staffMembers, setStaffMembers] = useState<StaffMember[]>([]);
 
   const refresh = async (quiet = false) => {
     if (!quiet) setLoading(true);
@@ -42,9 +64,14 @@ function App({ cloud }: { cloud: CloudSession }) {
     finally { if (!quiet) setLoading(false); }
   };
 
-  useEffect(() => { void refresh(); return cloud.subscribe(() => { void refresh(true); }); }, [cloud.organizationId]);
+  useEffect(() => {
+    void refresh();
+    void cloud.listStaff().then(data => setStaffMembers(data.members.filter(item => item.status === 'active'))).catch(() => undefined);
+    return cloud.subscribe(() => { void refresh(true); });
+  }, [cloud.organizationId]);
 
   const settings = store.settings[0] || defaultSettings;
+  const actorName = cloud.user.name || cloud.user.email;
 
   const persist = async <T extends { id: string }>(module: keyof AppStore, row: T) => {
     setSyncing(true);
@@ -56,17 +83,38 @@ function App({ cloud }: { cloud: CloudSession }) {
   };
 
   const remove = async (module: keyof AppStore, id: string) => {
+    const rows = store[module] as unknown as Array<Record<string, unknown> & { id: string }>;
+    const existing = rows.find(item => item.id === id);
+    if (!existing) return;
+    const reason = prompt('根据数据保留规则，该记录不会被删除，只会作废归档。请输入原因：', '资料录入错误');
+    if (!reason?.trim()) return;
+    const archived = { ...existing, archived: true, archivedAt: new Date().toISOString(), archivedBy: actorName, archiveReason: reason.trim() };
     setSyncing(true);
     const previous = store;
-    setStore(current => ({ ...current, [module]: (current[module] as unknown as Array<{ id: string }>).filter(item => item.id !== id) }));
-    try { await cloud.deleteRecord(String(module), id); }
-    catch (error) { setStore(previous); alert(`删除失败：${error instanceof Error ? error.message : error}`); }
+    setStore(current => ({ ...current, [module]: upsertLocal(current[module] as unknown as Array<Record<string, unknown> & { id: string }>, archived) }));
+    try { await cloud.upsertRecord(String(module), archived as unknown as CloudRow); }
+    catch (error) { setStore(previous); alert(`归档失败：${error instanceof Error ? error.message : error}`); }
     finally { setSyncing(false); }
+  };
+
+  const writeChangeLog = async (order: WorkOrder, action: string, detail: string, before?: unknown, after?: unknown) => {
+    const log: ChangeLog = { id: uid(), workOrderId: order.id, workOrderNumber: order.number, action, actor: actorName, actorId: cloud.user.id, at: new Date().toISOString(), detail, before, after };
+    await persist('changeLogs', log);
+  };
+
+  const requestApproval = async (request: Omit<ApprovalRequest, 'id' | 'status' | 'requestedBy' | 'requestedById' | 'requestedAt'>) => {
+    const row: ApprovalRequest = { ...request, id: uid(), status: '待授权', requestedBy: actorName, requestedById: cloud.user.id, requestedAt: new Date().toISOString() };
+    await persist('approvalRequests', row);
+    const relatedOrder = store.workOrders.find(item => item.id === row.workOrderId) || row.proposedOrder;
+    if (relatedOrder) await writeChangeLog(relatedOrder, '申请双人授权', `${row.type}：${row.reason}`);
   };
 
   const saveWorkOrder = async (rawOrder: WorkOrder) => {
     const order = recalculateWorkOrder(rawOrder);
     const old = store.workOrders.find(item => item.id === order.id);
+    const discountNeedsApproval = Number(order.discount || 0) !== Number(old?.discount || 0);
+    const settlementNeedsApproval = order.settlementTotal !== old?.settlementTotal;
+    const safeOrder = recalculateWorkOrder({ ...order, discount: old?.discount || 0, settlementTotal: old?.settlementTotal });
     const oldUsage = usageMap(old && old.status !== '已取消' ? old : undefined);
     const newUsage = usageMap(order.status !== '已取消' ? order : undefined);
     const partChanges: Array<{ part: Part; nextQty: number; delta: number }> = [];
@@ -84,22 +132,56 @@ function App({ cloud }: { cloud: CloudSession }) {
         const log: InventoryLog = { id: uid(), date: new Date().toISOString(), partId: change.part.id, partNo: change.part.partNo, partName: change.part.name, type: change.delta > 0 ? '工单领用' : '工单退回', change: -change.delta, before: change.part.qty, after: change.nextQty, reference: order.number };
         await persist('inventoryLogs', log);
       }
-      await persist('workOrders', { ...order, inventoryCommitted: order.status !== '已取消' });
+      const savedOrder = discountNeedsApproval || settlementNeedsApproval ? safeOrder : order;
+      await persist('workOrders', { ...savedOrder, inventoryCommitted: savedOrder.status !== '已取消' });
+      await writeChangeLog(savedOrder, old ? '修改工单' : '新建工单', old ? '工单内容已更新并保存到服务器' : '工单已建立并保存到服务器', old, savedOrder);
+      if (discountNeedsApproval) await requestApproval({ workOrderId: order.id, workOrderNumber: order.number, type: '工单折扣', reason: `折扣由 ${money(old?.discount || 0)} 调整为 ${money(order.discount)}`, oldValue: old?.discount || 0, newValue: order.discount, proposedOrder: savedOrder });
+      if (settlementNeedsApproval) await requestApproval({ workOrderId: order.id, workOrderNumber: order.number, type: '实际结账金额', reason: `实际结账金额申请调整为 ${money(order.settlementTotal)}`, oldValue: old?.settlementTotal ?? order.total, newValue: order.settlementTotal, proposedOrder: savedOrder });
       setEditingOrder(null); setPage('workOrders');
+      alert(discountNeedsApproval || settlementNeedsApproval ? `工单 ${order.number} 已保存到服务器；折扣/结账金额将在第二人授权后生效。` : `工单 ${order.number} 已保存到正式服务器，其他账号会自动同步。`);
     } catch { /* persist already explains the error */ }
   };
 
-  const deleteWorkOrder = async (order: WorkOrder) => {
-    if (!confirm(`确定删除工单 ${order.number}？已领用的库存会自动退回。`)) return;
+  const executeWorkOrderArchive = async (order: WorkOrder, reason: string) => {
     if (order.status !== '已取消') {
       for (const [partId, qty] of Object.entries(usageMap(order))) {
         const part = store.parts.find(item => item.id === partId); if (!part) continue;
         const next = part.qty + qty;
         await persist('parts', { ...part, qty: next });
-        await persist('inventoryLogs', { id: uid(), date: new Date().toISOString(), partId, partNo: part.partNo, partName: part.name, type: '删除工单退回', change: qty, before: part.qty, after: next, reference: order.number } as InventoryLog);
+        await persist('inventoryLogs', { id: uid(), date: new Date().toISOString(), partId, partNo: part.partNo, partName: part.name, type: '工单作废退回', change: qty, before: part.qty, after: next, reference: order.number } as InventoryLog);
       }
     }
-    await remove('workOrders', order.id);
+    const archived = recalculateWorkOrder({ ...order, status: '已取消', archivedAt: new Date().toISOString(), archivedBy: actorName, archiveReason: reason, inventoryCommitted: false });
+    await persist('workOrders', archived);
+    await writeChangeLog(archived, '工单作废并归档', `原始工单永久保留。原因：${reason}`, order, archived);
+  };
+
+  const deleteWorkOrder = async (order: WorkOrder) => {
+    const reason = prompt(`作废并归档工单 ${order.number} 需要另一位员工授权。\n原始资料不会删除。请输入原因：`, '重复/错误工单');
+    if (!reason?.trim()) return;
+    if (store.approvalRequests.some(item => item.workOrderId === order.id && item.type === '删除工单' && item.status === '待授权')) return alert('这张工单已有待处理的作废归档授权。');
+    await requestApproval({ workOrderId: order.id, workOrderNumber: order.number, type: '删除工单', reason: reason.trim(), proposedOrder: order });
+    alert('作废归档申请已提交。第二人批准后会标记作废，但原始工单和修改记录永久保留。');
+  };
+
+  const approveRequest = async (request: ApprovalRequest) => {
+    if (request.requestedById === cloud.user.id) return alert('双人授权规则：申请人不能批准自己的申请。请让另一位有审批权限的员工登录处理。');
+    const order = store.workOrders.find(item => item.id === request.workOrderId);
+    if (!order) return alert('关联工单不存在。');
+    if (!confirm(`批准“${request.type}”？\n工单：${request.workOrderNumber}\n申请人：${request.requestedBy}\n原因：${request.reason}`)) return;
+    if (request.type === '删除工单') await executeWorkOrderArchive(order, request.reason);
+    if (request.type === '工单折扣') await persist('workOrders', recalculateWorkOrder({ ...order, discount: Number(request.newValue || 0) }));
+    if (request.type === '实际结账金额') await persist('workOrders', recalculateWorkOrder({ ...order, settlementTotal: Number(request.newValue || 0) }));
+    await persist('approvalRequests', { ...request, status: '已执行', approvedBy: actorName, approvedById: cloud.user.id, approvedAt: new Date().toISOString() });
+    await writeChangeLog(order, '双人授权已执行', `${request.type}由 ${actorName} 批准；申请人 ${request.requestedBy}。`, request.oldValue, request.newValue);
+  };
+
+  const rejectRequest = async (request: ApprovalRequest) => {
+    if (request.requestedById === cloud.user.id) return alert('申请人不能处理自己的授权申请。');
+    const note = prompt('请输入拒绝原因：', '资料不足/不同意调整'); if (!note?.trim()) return;
+    await persist('approvalRequests', { ...request, status: '已拒绝', approvedBy: actorName, approvedById: cloud.user.id, approvedAt: new Date().toISOString(), decisionNote: note.trim() });
+    const order = store.workOrders.find(item => item.id === request.workOrderId);
+    if (order) await writeChangeLog(order, '双人授权被拒绝', `${request.type}由 ${actorName} 拒绝：${note.trim()}`);
   };
 
   const addPayment = async (order: WorkOrder) => {
@@ -146,15 +228,15 @@ function App({ cloud }: { cloud: CloudSession }) {
     closeModal();
   };
 
-  if (editingOrder) return <WorkOrderEditor value={editingOrder === 'new' ? undefined : editingOrder} customers={store.customers} vehicles={store.vehicles} fleets={store.fleets} drivers={store.drivers} parts={store.parts} settings={settings} nextNumber={nextWorkOrderNumber(store.workOrders)} onCreateVehicle={vehicle => persist('vehicles', vehicle)} onPrint={(order, type) => printDocument(recalculateWorkOrder(order), settings, type)} onSave={saveWorkOrder} onCancel={() => setEditingOrder(null)} />;
+  if (editingOrder) return <WorkOrderEditor value={editingOrder === 'new' ? undefined : editingOrder} customers={store.customers} vehicles={store.vehicles} fleets={store.fleets} drivers={store.drivers} parts={store.parts} settings={settings} nextNumber={nextWorkOrderNumber(store.workOrders)} onCreateVehicle={vehicle => persist('vehicles', vehicle)} onPrint={(order, type) => printDocument(recalculateWorkOrder(order), settings, type)} onSave={saveWorkOrder} onCancel={() => setEditingOrder(null)} currentUser={actorName} currentUserId={cloud.user.id} technicians={staffMembers} canApproveReview={can(cloud, 'approve')} canAssignTechnician={can(cloud, 'assignTechnician')} canEditPricing={can(cloud, 'pricing')} canViewFinancials={can(cloud, 'pricing') || can(cloud, 'finance')} />;
 
   return <div className="app-shell">
     <aside className="sidebar"><div className="brand"><div className="brand-mark">Z&G</div><div><b>AUTO ERP</b><small>正式服务器版</small></div></div>
-      <nav>{nav.map(item => <button key={item.id} className={page === item.id ? 'active' : ''} onClick={() => { setPage(item.id); setSearch(''); }}><span>{item.icon}</span>{item.label}</button>)}</nav>
+      <nav>{nav.filter(item => canOpenPage(cloud, item.id)).map(item => <button key={item.id} className={page === item.id ? 'active' : ''} onClick={() => { setPage(item.id); setSearch(''); }}><span>{item.icon}</span>{item.label}</button>)}</nav>
       <div className="side-foot"><small>{cloud.organizationName}</small><span>{cloud.user.email}</span><button onClick={() => cloud.signOut()}>退出登录</button></div>
     </aside>
-    <main className="main"><header className="topbar"><div className="global-search">⌕<input value={search} onChange={e => setSearch(e.target.value)} placeholder="搜索客户、电话、VIN、车牌、工单、司机…" /></div><div className="top-status"><span className={syncing ? 'syncing' : ''}>{syncing ? '正在同步…' : '● 云端已同步'}</span><b>v0.75.1</b></div></header>
-      {loading ? <div className="loading">正在读取正式服务器数据…</div> : <PageContent page={page} search={search} store={store} settings={settings} cloud={cloud} setPage={setPage} openModal={openModal} setEditingOrder={setEditingOrder} persist={persist} remove={remove} receiveStock={receiveStock} addPayment={addPayment} deleteWorkOrder={deleteWorkOrder} />}
+    <main className="main"><header className="topbar"><div className="global-search">⌕<input value={search} onChange={e => setSearch(e.target.value)} placeholder="搜索客户、电话、VIN、车牌、工单、司机…" /></div><div className="top-status"><span className={syncing ? 'syncing' : ''}>{syncing ? '正在同步…' : '● 云端已同步'}</span><b>v0.76.0</b></div></header>
+      {loading ? <div className="loading">正在读取正式服务器数据…</div> : <PageContent page={page} search={search} store={store} settings={settings} cloud={cloud} setPage={setPage} openModal={openModal} setEditingOrder={setEditingOrder} persist={persist} remove={remove} receiveStock={receiveStock} addPayment={addPayment} deleteWorkOrder={deleteWorkOrder} approveRequest={approveRequest} rejectRequest={rejectRequest} />}
     </main>
     {modal && <EntityModal state={modal} store={store} settings={settings} onClose={closeModal} onSave={saveModal} />}
   </div>;
@@ -167,6 +249,7 @@ type ContentProps = {
   persist: <T extends { id: string }>(module: keyof AppStore, row: T) => Promise<void>;
   remove: (module: keyof AppStore, id: string) => Promise<void>; receiveStock: (part: Part) => Promise<void>;
   addPayment: (order: WorkOrder) => Promise<void>; deleteWorkOrder: (order: WorkOrder) => Promise<void>;
+  approveRequest: (request: ApprovalRequest) => Promise<void>; rejectRequest: (request: ApprovalRequest) => Promise<void>;
 };
 
 function PageContent(props: ContentProps) {
@@ -184,14 +267,17 @@ function PageContent(props: ContentProps) {
   return <SettingsPage settings={settings} openModal={props.openModal} />;
 }
 
-function Dashboard({ store, setPage, setEditingOrder }: ContentProps) {
+function Dashboard({ store, setPage, setEditingOrder, cloud }: ContentProps) {
   const metrics = useMemo(() => dashboardMetrics(store), [store]);
-  const recent = [...store.workOrders].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 7);
-  return <div className="page"><div className="hero"><div><p className="eyebrow">老板经营驾驶舱</p><h1>早上好，Z&G AUTO REPAIR</h1><p>营业、工单、库存和欠款都来自正式服务器实时数据。</p></div><div className="toolbar"><button onClick={() => setPage('customers')}>＋ 新客户</button><button className="primary" onClick={() => setEditingOrder('new')}>＋ 新建工单</button></div></div>
-    <div className="kpi-grid"><Kpi label="今日开单营业额" value={money(metrics.todaySales)} tone="blue" /><Kpi label="今日实收" value={money(metrics.todayReceived)} tone="green" /><Kpi label="今日毛利润" value={money(metrics.todayGross)} tone="purple" /><Kpi label="未收款总额" value={money(metrics.receivables)} tone="orange" /><Kpi label="本月营业额" value={money(metrics.monthSales)} /><Kpi label="本月实收" value={money(metrics.monthReceived)} /><Kpi label="本月支出" value={money(metrics.monthExpenses)} /><Kpi label="本月净经营收益" value={money(metrics.monthNet)} /></div>
-    <div className="dashboard-grid"><section className="panel wide"><div className="section-title"><h3>最近工单</h3><button onClick={() => setPage('workOrders')}>查看全部</button></div><table><thead><tr><th>工单</th><th>客户/车辆</th><th>状态</th><th>总价</th><th>欠款</th></tr></thead><tbody>{recent.map(order => <tr key={order.id}><td><b>{order.number}</b><small>{order.date}</small></td><td>{order.customer}<small>{order.plate} · {order.vehicle}</small></td><td><Status value={order.status} /></td><td>{money(order.total)}</td><td className={order.balance > 0 ? 'warning-text' : ''}>{money(order.balance)}</td></tr>)}</tbody></table>{!recent.length && <Empty text="还没有工单，点击右上角建立第一张工单。" />}</section>
-      <section className="panel"><h3>今日车间</h3><div className="count-list"><div><span>等待批准</span><b>{store.workOrders.filter(item => item.status === '等待批准').length}</b></div><div><span>等待配件</span><b>{store.workOrders.filter(item => item.status === '等待配件').length}</b></div><div><span>维修中</span><b>{store.workOrders.filter(item => item.status === '维修中').length}</b></div><div><span>今日完成</span><b>{store.workOrders.filter(item => item.date === today() && item.status === '已完成').length}</b></div></div></section>
-      <section className="panel"><h3>库存提醒</h3><div className="count-list"><div><span>低库存配件</span><b className="warning-text">{store.parts.filter(item => item.qty <= item.minimum).length}</b></div><div><span>库存品种</span><b>{store.parts.length}</b></div><div><span>库存成本</span><b>{money(store.parts.reduce((sum, item) => sum + item.qty * item.cost, 0))}</b></div></div><button className="full" onClick={() => setPage('parts')}>打开库存中心</button></section>
+  const isTechnician = cloud.role === 'technician' && !can(cloud, 'workOrders');
+  const visibleOrders = isTechnician ? store.workOrders.filter(order => order.technicianUserId === cloud.user.id || order.technician === cloud.user.name || order.technician === cloud.user.email) : store.workOrders;
+  const recent = [...visibleOrders].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 7);
+  const showFinance = can(cloud, 'pricing') || can(cloud, 'finance');
+  return <div className="page"><div className="hero"><div><p className="eyebrow">{isTechnician ? '技师工作台' : '老板经营驾驶舱'}</p><h1>早上好，{cloud.user.name || 'Z&G AUTO REPAIR'}</h1><p>{isTechnician ? '这里只显示分配给您的维修任务、检查流程和证据资料。' : '营业、工单、库存和欠款都来自正式服务器实时数据。'}</p></div><div className="toolbar">{can(cloud, 'customers') && <button onClick={() => setPage('customers')}>＋ 新客户</button>}{can(cloud, 'createWorkOrders') && <button className="primary" onClick={() => setEditingOrder('new')}>＋ 新建工单</button>}</div></div>
+    {showFinance ? <div className="kpi-grid"><Kpi label="今日开单营业额" value={money(metrics.todaySales)} tone="blue" /><Kpi label="今日实收" value={money(metrics.todayReceived)} tone="green" /><Kpi label="今日毛利润" value={money(metrics.todayGross)} tone="purple" /><Kpi label="未收款总额" value={money(metrics.receivables)} tone="orange" /><Kpi label="本月营业额" value={money(metrics.monthSales)} /><Kpi label="本月实收" value={money(metrics.monthReceived)} /><Kpi label="本月支出" value={money(metrics.monthExpenses)} /><Kpi label="本月净经营收益" value={money(metrics.monthNet)} /></div> : <div className="kpi-grid technician-kpis"><Kpi label="分配给我的工单" value={String(visibleOrders.length)} tone="blue" /><Kpi label="等待检查" value={String(visibleOrders.filter(item => item.status === '等待检查').length)} /><Kpi label="维修中" value={String(visibleOrders.filter(item => item.status === '维修中').length)} tone="purple" /><Kpi label="今日完成" value={String(visibleOrders.filter(item => item.date === today() && item.status === '已完成').length)} tone="green" /></div>}
+    <div className="dashboard-grid"><section className="panel wide"><div className="section-title"><h3>最近工单</h3><button onClick={() => setPage('workOrders')}>查看全部</button></div><table><thead><tr><th>工单</th><th>客户/车辆</th><th>状态</th>{showFinance && <><th>总价</th><th>欠款</th></>}</tr></thead><tbody>{recent.map(order => <tr key={order.id}><td><b>{order.number}</b><small>{order.date}</small></td><td>{order.customer}<small>{order.plate} · {order.vehicle}</small></td><td><Status value={order.status} /></td>{showFinance && <><td>{money(order.total)}</td><td className={order.balance > 0 ? 'warning-text' : ''}>{money(order.balance)}</td></>}</tr>)}</tbody></table>{!recent.length && <Empty text="还没有分配给您的工单。" />}</section>
+      <section className="panel"><h3>今日车间</h3><div className="count-list"><div><span>等待批准</span><b>{visibleOrders.filter(item => item.status === '等待批准').length}</b></div><div><span>等待配件</span><b>{visibleOrders.filter(item => item.status === '等待配件').length}</b></div><div><span>维修中</span><b>{visibleOrders.filter(item => item.status === '维修中').length}</b></div><div><span>今日完成</span><b>{visibleOrders.filter(item => item.date === today() && item.status === '已完成').length}</b></div></div></section>
+      {can(cloud, 'inventory') && <section className="panel"><h3>库存提醒</h3><div className="count-list"><div><span>低库存配件</span><b className="warning-text">{store.parts.filter(item => item.qty <= item.minimum).length}</b></div><div><span>库存品种</span><b>{store.parts.length}</b></div><div><span>库存成本</span><b>{money(store.parts.reduce((sum, item) => sum + item.qty * item.cost, 0))}</b></div></div><button className="full" onClick={() => setPage('parts')}>打开库存中心</button></section>}
     </div>
   </div>;
 }
@@ -210,12 +296,28 @@ function Fleets({ store, search, openModal, remove }: ContentProps) {
 
 function Vehicles({ store, search, openModal, remove, setEditingOrder }: ContentProps) {
   const rows = filterRows(store.vehicles, search);
-  return <ListPage title="车辆管理" subtitle="支持按车牌、VIN、Unit Number、客户和司机搜索" action="＋ 添加车辆" onAction={() => openModal('vehicle')}><div className="card-table">{rows.map(item => <article className="vehicle-card" key={item.id}><div className="vehicle-avatar">{item.make?.slice(0, 1) || '🚗'}</div><div className="vehicle-main"><div><b>{item.year} {item.make} {item.model}</b><Status value={item.ownerType} /></div><p>{item.plate || '无车牌'} · Unit {item.unit || '—'}</p><small>VIN {item.vin || '—'}</small><small>{item.ownerName} {item.driverName ? `· 司机 ${item.driverName} ${item.driverPhone || ''}` : ''}</small></div><div className="vehicle-actions"><button onClick={() => openModal('vehicle', item)}>编辑</button><button onClick={() => setEditingOrder('new')}>开工单</button><button className="danger-link" onClick={() => confirm('确定删除车辆？') && remove('vehicles', item.id)}>删除</button></div></article>)}</div>{!rows.length && <Empty text="没有找到车辆。" />}</ListPage>;
+  const [historyVehicle, setHistoryVehicle] = useState<Vehicle | null>(null);
+  const history = historyVehicle ? store.workOrders.filter(order => order.vehicleId === historyVehicle.id || (!!historyVehicle.vin && order.vin === historyVehicle.vin) || (!!historyVehicle.plate && order.plate === historyVehicle.plate)).sort((a,b) => `${b.date}${b.number}`.localeCompare(`${a.date}${a.number}`)) : [];
+  return <><ListPage title="车辆管理" subtitle="每辆车建立永久维修档案，支持按车牌、VIN、Unit Number、客户和司机搜索" action="＋ 添加车辆" onAction={() => openModal('vehicle')}><div className="card-table">{rows.map(item => { const count = store.workOrders.filter(order => order.vehicleId === item.id || (!!item.vin && order.vin === item.vin) || (!!item.plate && order.plate === item.plate)).length; return <article className="vehicle-card" key={item.id}><div className="vehicle-avatar">{item.make?.slice(0, 1) || '🚗'}</div><div className="vehicle-main"><div><b>{item.year} {item.make} {item.model}</b><Status value={item.ownerType} /></div><p>{item.plate || '无车牌'} · Unit {item.unit || '—'}</p><small>VIN {item.vin || '—'}</small><small>{item.ownerName} {item.driverName ? `· 司机 ${item.driverName} ${item.driverPhone || ''}` : ''}</small><small className="history-count">维修记录 {count} 次</small></div><div className="vehicle-actions"><button className="primary-soft" onClick={() => setHistoryVehicle(item)}>维修档案</button><button onClick={() => openModal('vehicle', item)}>编辑</button><button onClick={() => setEditingOrder('new')}>开工单</button><button className="danger-link" onClick={() => confirm('确定删除车辆？') && remove('vehicles', item.id)}>删除</button></div></article>})}</div>{!rows.length && <Empty text="没有找到车辆。" />}</ListPage>
+    {historyVehicle && <div className="modal-backdrop"><div className="modal vehicle-history-modal"><div className="modal-head"><div><p className="eyebrow">Vehicle Health Record / 车辆永久档案</p><h2>{historyVehicle.year} {historyVehicle.make} {historyVehicle.model}</h2><span>{historyVehicle.plate} · VIN {historyVehicle.vin || '—'} · {historyVehicle.ownerName}</span></div><button onClick={() => setHistoryVehicle(null)}>×</button></div><div className="vehicle-history-summary"><div><span>维修次数</span><b>{history.length}</b></div><div><span>累计金额</span><b>{money(history.reduce((sum,item) => sum + item.total,0))}</b></div><div><span>最后里程</span><b>{history[0]?.mileage?.toLocaleString() || historyVehicle.mileage?.toLocaleString() || '—'}</b></div><div><span>有效保修</span><b>{store.warranties.filter(item => item.vehicleId === historyVehicle.id && item.status === '有效').length}</b></div></div><div className="vehicle-timeline">{history.map(order => <article key={order.id}><div className="timeline-date"><b>{order.date}</b><span>{order.mileage?.toLocaleString() || '—'} mi</span></div><div className="timeline-card"><div><b>{order.number}</b><Status value={order.status} /><span className={`review-badge review-${order.reviewStatus || '未提交'}`}>{order.reviewStatus || '未提交'}</span></div><p><strong>客户描述：</strong>{order.complaint || '—'}</p><p><strong>诊断：</strong>{order.diagnosis || '—'}</p><p><strong>完成维修：</strong>{order.workPerformed || '—'}</p><small>人工：{order.laborItems.map(item => item.description).filter(Boolean).join('、') || '—'}</small><small>配件：{order.partItems.map(item => `${item.name} ×${item.qty}`).filter(Boolean).join('、') || '—'}</small><div className="timeline-total"><b>{money(order.total)}</b><button onClick={() => { setHistoryVehicle(null); setEditingOrder(order); }}>打开工单</button></div></div></article>)}{!history.length && <Empty text="这辆车还没有维修记录。" />}</div></div></div>}
+  </>;
 }
 
-function WorkOrders({ store, search, settings, setEditingOrder, addPayment, deleteWorkOrder }: ContentProps) {
-  const rows = filterRows(store.workOrders, search).sort((a, b) => b.date.localeCompare(a.date));
-  return <ListPage title="维修工单" subtitle="人工、配件、库存、收款和打印自动联动" action="＋ 新建工单" onAction={() => setEditingOrder('new')}><table><thead><tr><th>工单/日期</th><th>客户与车辆</th><th>技师/状态</th><th>总价</th><th>已付/欠款</th><th /></tr></thead><tbody>{rows.map(order => <tr key={order.id}><td><b>{order.number}</b><small>{order.date} {order.po ? `· PO ${order.po}` : ''}</small></td><td>{order.customer}<small>{order.plate} · {order.vehicle}{order.driver ? ` · 司机 ${order.driver}` : ''}</small></td><td>{order.technician || '未分配'}<small><Status value={order.status} /></small></td><td><b>{money(order.total)}</b><small>毛利 {money(order.grossProfit)}</small></td><td>{money(order.paid)}<small className={order.balance > 0 ? 'warning-text' : ''}>欠 {money(order.balance)}</small></td><td className="actions"><button onClick={() => setEditingOrder(order)}>编辑</button><button onClick={() => addPayment(order)} disabled={order.balance <= 0}>收款</button><PrintMenu order={order} settings={settings} /><button className="danger-link" onClick={() => deleteWorkOrder(order)}>删除</button></td></tr>)}</tbody></table>{!rows.length && <Empty text="没有找到工单。" />}</ListPage>;
+function WorkOrders({ store, search, settings, cloud, setEditingOrder, addPayment, deleteWorkOrder, approveRequest, rejectRequest }: ContentProps) {
+  const assignedOnly = cloud.role === 'technician' && !can(cloud, 'workOrders');
+  const visible = assignedOnly ? store.workOrders.filter(order => order.technicianUserId === cloud.user.id || order.technician === cloud.user.name || order.technician === cloud.user.email) : store.workOrders;
+  const rows = filterRows(visible, search).sort((a, b) => b.date.localeCompare(a.date));
+  const pending = store.approvalRequests.filter(item => item.status === '待授权' && (can(cloud, 'approve') || item.requestedById === cloud.user.id));
+  const canApprove = can(cloud, 'approve');
+  const showFinance = can(cloud, 'pricing') || can(cloud, 'finance');
+  const canEdit = can(cloud, 'workOrders') || can(cloud, 'diagnosis');
+  const canPrint = can(cloud, 'workOrders');
+  const visibleLogs = store.changeLogs.filter(log => visible.some(order => order.id === log.workOrderId));
+  return <div className="page"><div className="page-title"><div><p className="eyebrow">Z&G AUTO ERP</p><h2>{assignedOnly ? '我的维修任务' : '维修工单'}</h2><p>检查审查、双人授权、证据留存、收款、打印和修改记录自动联动</p></div>{can(cloud, 'createWorkOrders') && <button className="primary" onClick={() => setEditingOrder('new')}>＋ 新建工单</button>}</div>
+    {!!pending.length && <section className="panel approval-panel"><div className="section-title"><div><h3>待双人授权</h3><span>申请人与批准人必须是两个不同账号；所有决定永久记入日志</span></div><b>{pending.length} 项</b></div>{pending.map(item => <article className="approval-row" key={item.id}><div><b>{item.type === '删除工单' ? '作废/归档工单' : item.type} · {item.workOrderNumber}</b><small>申请人 {item.requestedBy} · {new Date(item.requestedAt).toLocaleString()}</small><p>{item.reason}</p></div><div className="actions">{canApprove && item.requestedById !== cloud.user.id ? <><button className="primary" onClick={() => void approveRequest(item)}>批准并执行</button><button onClick={() => void rejectRequest(item)}>拒绝</button></> : <span className="muted">{item.requestedById === cloud.user.id ? '等待另一账号批准' : '需要审批权限'}</span>}</div></article>)}</section>}
+    <section className="panel work-order-table"><table><thead><tr><th>工单/日期</th><th>客户与车辆</th><th>技师/状态</th><th>检查/审查</th>{showFinance && <><th>总价</th><th>已付/欠款</th></>}<th /></tr></thead><tbody>{rows.map(order => { const checks = Object.values(order.inspectionChecklist || {}).filter(Boolean).length; const evidenceCount = (order.evidencePhotos || []).filter(item => !item.archivedAt).length; return <tr key={order.id} className={order.archivedAt ? 'archived-row' : ''}><td><b>{order.number}</b><small>{order.date} {order.po ? `· PO ${order.po}` : ''}</small>{order.archivedAt && <small className="archive-badge">已作废并归档</small>}</td><td>{order.customer}<small>{order.plate} · {order.vehicle}{order.driver ? ` · 司机 ${order.driver}` : ''}</small><small>证据 {evidenceCount} 张</small></td><td>{order.technician || '未分配'}<small><Status value={order.status} /></small></td><td><b>{checks}/5</b><small><span className={`review-badge review-${order.reviewStatus || '未提交'}`}>{order.reviewStatus || '未提交'}</span></small></td>{showFinance && <><td><b>{money(order.total)}</b><small>毛利 {money(order.grossProfit)}</small></td><td>{money(order.paid)}<small className={order.balance > 0 ? 'warning-text' : ''}>欠 {money(order.balance)}</small></td></>}<td className="actions">{canEdit && <button className={order.reviewStatus === '待审查' && canApprove ? 'primary' : ''} onClick={() => setEditingOrder(order)}>{order.reviewStatus === '待审查' && canApprove ? '审查' : '查看/编辑'}</button>}{can(cloud, 'collectPayment') && !order.archivedAt && <button onClick={() => addPayment(order)} disabled={order.balance <= 0}>收款</button>}{canPrint && <PrintMenu order={order} settings={settings} />}{can(cloud, 'archive') && !order.archivedAt && <button className="danger-link" onClick={() => deleteWorkOrder(order)}>申请作废</button>}{order.archivedAt && <small title={order.archiveReason}>原因：{order.archiveReason || '未填写'}</small>}</td></tr>})}</tbody></table>{!rows.length && <Empty text={assignedOnly ? '目前没有分配给您的工单。' : '没有找到工单。'} />}</section>
+    {(canApprove || cloud.role === 'owner' || cloud.role === 'manager') && <section className="panel"><div className="section-title"><h3>最近修改记录</h3><span>保留修改人、时间、内容以及授权结果，不允许清除</span></div><div className="change-log-list">{[...visibleLogs].sort((a,b) => b.at.localeCompare(a.at)).slice(0,50).map(log => <div key={log.id}><b>{log.workOrderNumber} · {log.action}</b><span>{log.actor} · {new Date(log.at).toLocaleString()}</span><small>{log.detail}</small></div>)}</div>{!visibleLogs.length && <Empty text="尚无工单修改记录。" />}</section>}
+  </div>;
 }
 
 function Inventory({ store, search, openModal, remove, receiveStock }: ContentProps) {
@@ -302,7 +404,7 @@ function legacyLabor(item: Partial<WorkOrder>) { const hours = Number((item as u
 function legacyParts(item: Partial<WorkOrder>) { const record = item as unknown as Record<string, unknown>, total = Number(record.partsTotal || 0), cost = Number(record.partsCost || 0); return total ? [{ id: uid(), partNo: '', name: '配件（旧版导入）', qty: 1, price: total, cost, total, costTotal: cost }] : []; }
 function usageMap(order?: WorkOrder) { const map: Record<string, number> = {}; if (!order) return map; for (const item of order.partItems || []) if (item.partId) map[item.partId] = (map[item.partId] || 0) + Number(item.qty || 0); return map; }
 function upsertLocal<T extends { id: string }>(rows: T[], row: T) { const index = rows.findIndex(item => item.id === row.id); return index < 0 ? [...rows, row] : rows.map(item => item.id === row.id ? row : item); }
-function filterRows<T extends object>(rows: T[], search: string) { const query = search.trim().toLowerCase(); return query ? rows.filter(row => Object.values(row).some(value => typeof value !== 'object' && String(value ?? '').toLowerCase().includes(query))) : rows; }
+function filterRows<T extends object>(rows: T[], search: string) { const active = rows.filter(row => !(row as Record<string, unknown>).archived); const query = search.trim().toLowerCase(); return query ? active.filter(row => Object.values(row).some(value => typeof value !== 'object' && String(value ?? '').toLowerCase().includes(query))) : active; }
 function nextWorkOrderNumber(rows: WorkOrder[]) { const year = new Date().getFullYear(); const max = rows.map(item => Number(item.number.match(/(\d+)$/)?.[1] || 0)).reduce((a, b) => Math.max(a, b), 0); return `RO-${year}-${String(max + 1).padStart(4, '0')}`; }
 function dashboardMetrics(store: AppStore) { const date = today(), month = date.slice(0, 7), valid = store.workOrders.filter(item => item.status !== '已取消'); const todayOrders = valid.filter(item => item.date === date), monthOrders = valid.filter(item => item.date.startsWith(month)); const todayPayments = store.payments.filter(item => item.date.startsWith(date)), monthPayments = store.payments.filter(item => item.date.startsWith(month)), monthExpensesRows = store.expenses.filter(item => item.date.startsWith(month)); return { todaySales: sum(todayOrders, 'total'), monthSales: sum(monthOrders, 'total'), todayReceived: sum(todayPayments, 'amount'), monthReceived: sum(monthPayments, 'amount'), todayGross: sum(todayOrders, 'grossProfit'), monthGross: sum(monthOrders, 'grossProfit'), monthExpenses: sum(monthExpensesRows, 'amount'), monthNet: sum(monthOrders, 'grossProfit') - sum(monthExpensesRows, 'amount'), receivables: sum(valid, 'balance') }; }
 function sum<T extends object>(rows: T[], key: keyof T) { return rows.reduce((total, row) => total + Number(row[key] || 0), 0); }

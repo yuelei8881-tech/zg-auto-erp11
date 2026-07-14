@@ -5,7 +5,7 @@ export type JsonValue = string | number | boolean | null | JsonValue[] | { [key:
 export type CloudRow = { id: string; [key: string]: JsonValue };
 export type CloudStore = Record<string, CloudRow[]>;
 
-export type CloudUser = { email: string; name?: string };
+export type CloudUser = { id: string; email: string; name?: string };
 export type StaffMember = { userId: string; displayName: string; phone: string; role: string; status: string; permissions: Record<string, boolean> };
 export type StaffInvite = { id: string; email: string; role: string; status: string; expiresAt?: string };
 
@@ -14,6 +14,7 @@ export type CloudSession = {
   organizationId: string;
   organizationName: string;
   role: string;
+  permissions: Record<string, boolean>;
   loadStore: () => Promise<CloudStore>;
   upsertRecord: (module: string, row: CloudRow) => Promise<void>;
   deleteRecord: (module: string, id: string) => Promise<void>;
@@ -37,7 +38,7 @@ export async function openCloudSession(user: User): Promise<CloudSession> {
   const findMembership = async () => {
     const { data, error } = await client
       .from('zg_organization_members')
-      .select('organization_id, role, display_name')
+      .select('organization_id, role, display_name, permissions')
       .eq('user_id', user.id)
       .eq('status', 'active')
       .maybeSingle();
@@ -150,10 +151,11 @@ export async function openCloudSession(user: User): Promise<CloudSession> {
   };
 
   return {
-    user: { email: user.email || 'unknown', name: membership.display_name || undefined },
+    user: { id: user.id, email: user.email || 'unknown', name: membership.display_name || undefined },
     organizationId,
     organizationName: organization?.name || 'Z&G AUTO REPAIR',
     role: String(membership.role),
+    permissions: (membership.permissions || {}) as Record<string, boolean>,
     loadStore, upsertRecord, deleteRecord, subscribe, invokeFunction, listStaff, createStaffInvite, updateStaff, cancelStaffInvite,
     signOut: async () => { await client.auth.signOut(); },
   };

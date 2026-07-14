@@ -24,7 +24,8 @@ export function recalculateWorkOrder(order: Partial<WorkOrder>): WorkOrder {
   const taxRate = num(order.taxRate);
   const taxable = Math.max(0, partsTotal - discount);
   const tax = taxable * taxRate / 100;
-  const total = Math.max(0, laborTotal + partsTotal + outsource + tax - discount);
+  const calculatedTotal = Math.max(0, laborTotal + partsTotal + outsource + tax - discount);
+  const total = order.settlementTotal === undefined ? calculatedTotal : Math.max(0, num(order.settlementTotal));
   const paid = num(order.paid);
   return {
     id: order.id || uid(), number: order.number || '', date: order.date || today(),
