@@ -1,0 +1,13 @@
+{
+  "name": "Z&G AUTO ERP",
+  "short_name": "Z&G AUTO",
+  "description": "Z&G AUTO REPAIR 汽修客户、车辆、工单与经营管理系统",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#f4f6fa",
+  "theme_color": "#14213d",
+  "lang": "zh-CN",
+  "icons": [{ "src": "/icons/zg-auto-icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }]
+}

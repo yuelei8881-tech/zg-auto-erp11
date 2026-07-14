@@ -9,6 +9,8 @@ import { SmartTools } from './SmartTools';
 import { ActivityCenter } from './ActivityCenter';
 import { StaffPage } from './StaffPage';
 import { BRAND_LOGO_SVG } from './brandLogo';
+import { PwaInstall } from './PwaInstall';
+import { registerPwa } from './pwa';
 import './styles.css';
 import './extra.css';
 
@@ -417,4 +419,5 @@ function nextWorkOrderNumber(rows: WorkOrder[]) { const year = new Date().getFul
 function dashboardMetrics(store: AppStore) { const date = today(), month = date.slice(0, 7), valid = store.workOrders.filter(item => item.status !== '已取消'); const todayOrders = valid.filter(item => item.date === date), monthOrders = valid.filter(item => item.date.startsWith(month)); const todayPayments = store.payments.filter(item => item.date.startsWith(date)), monthPayments = store.payments.filter(item => item.date.startsWith(month)), monthExpensesRows = store.expenses.filter(item => item.date.startsWith(month)); return { todaySales: sum(todayOrders, 'total'), monthSales: sum(monthOrders, 'total'), todayReceived: sum(todayPayments, 'amount'), monthReceived: sum(monthPayments, 'amount'), todayGross: sum(todayOrders, 'grossProfit'), monthGross: sum(monthOrders, 'grossProfit'), monthExpenses: sum(monthExpensesRows, 'amount'), monthNet: sum(monthOrders, 'grossProfit') - sum(monthExpensesRows, 'amount'), receivables: sum(valid, 'balance') }; }
 function sum<T extends object>(rows: T[], key: keyof T) { return rows.reduce((total, row) => total + Number(row[key] || 0), 0); }
 
-createRoot(document.getElementById('root')!).render(<React.StrictMode><FormalGate>{cloud => <App cloud={cloud} />}</FormalGate></React.StrictMode>);
+registerPwa();
+createRoot(document.getElementById('root')!).render(<React.StrictMode><PwaInstall /><FormalGate>{cloud => <App cloud={cloud} />}</FormalGate></React.StrictMode>);
