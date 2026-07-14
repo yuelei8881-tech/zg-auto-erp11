@@ -98,6 +98,7 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, p
 
   return <div className="editor-screen">
     <div className="editor-head"><div><p className="eyebrow">维修工单 / Repair Order</p><h2>{value ? `编辑 ${order.number}` : '新建维修工单'}</h2></div><div className="toolbar"><button type="button" onClick={() => onPrint(calculated, 'Repair Order')}>打印工单</button><button type="button" onClick={onCancel}>取消</button><button type="button" className="primary" onClick={submit} disabled={saving}>{saving ? '保存中…' : '保存工单'}</button></div></div>
+    <div className="work-order-shop-head"><div><b>{settings.shopName || 'Z&G AUTO REPAIR'}</b><span>{settings.address || '319 Agostino Rd, San Gabriel, CA 91776'}</span><span>Tel / 电话：{settings.phone || '626-508-0888'}</span></div><div><small>Repair Order No. / 工单编号</small><strong>{order.number}</strong></div></div>
 
     <section className="form-section"><h3>客户与车辆</h3><div className="form-grid four">
       <label>工单号<input value={order.number} onChange={e => patch({ number: e.target.value })} /></label>
