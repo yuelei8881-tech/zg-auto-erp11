@@ -6,6 +6,8 @@ export type CloudRow = { id: string; [key: string]: JsonValue };
 export type CloudStore = Record<string, CloudRow[]>;
 
 export type CloudUser = { email: string; name?: string };
+export type StaffMember = { userId: string; displayName: string; phone: string; role: string; status: string; permissions: Record<string, boolean> };
+export type StaffInvite = { id: string; email: string; role: string; status: string; expiresAt?: string };
 
 export type CloudSession = {
   user: CloudUser;
@@ -17,6 +19,10 @@ export type CloudSession = {
   deleteRecord: (module: string, id: string) => Promise<void>;
   subscribe: (refresh: () => void) => () => void;
   invokeFunction: <T = unknown>(name: string, body: Record<string, unknown>) => Promise<T>;
+  listStaff: () => Promise<{ members: StaffMember[]; invites: StaffInvite[] }>;
+  createStaffInvite: (email: string, role: string) => Promise<void>;
+  updateStaff: (userId: string, changes: Partial<Pick<StaffMember, 'displayName' | 'phone' | 'role' | 'status' | 'permissions'>>) => Promise<void>;
+  cancelStaffInvite: (id: string) => Promise<void>;
   signOut: () => Promise<void>;
 };
 
@@ -40,6 +46,11 @@ export async function openCloudSession(user: User): Promise<CloudSession> {
   };
 
   let membership = await findMembership();
+  if (!membership) {
+    const { error: inviteError } = await client.rpc('zg_accept_staff_invite');
+    if (inviteError && !String(inviteError.message || '').includes('Could not find the function')) throw inviteError;
+    membership = await findMembership();
+  }
   if (!membership) {
     const { error } = await client.rpc('zg_bootstrap_organization', { p_name: 'Z&G AUTO REPAIR' });
     if (error) throw error;
@@ -104,12 +115,46 @@ export async function openCloudSession(user: User): Promise<CloudSession> {
     return data as T;
   };
 
+  const listStaff = async () => {
+    const [memberResult, inviteResult] = await Promise.all([
+      client.from('zg_organization_members').select('user_id,display_name,phone,role,status,permissions').eq('organization_id', organizationId).order('created_at'),
+      client.from('zg_staff_invites').select('id,email,role,status,expires_at').eq('organization_id', organizationId).order('created_at', { ascending: false }),
+    ]);
+    if (memberResult.error) throw memberResult.error;
+    if (inviteResult.error) throw inviteResult.error;
+    return {
+      members: (memberResult.data || []).map(item => ({ userId: String(item.user_id), displayName: String(item.display_name || ''), phone: String(item.phone || ''), role: String(item.role), status: String(item.status), permissions: (item.permissions || {}) as Record<string, boolean> })),
+      invites: (inviteResult.data || []).map(item => ({ id: String(item.id), email: String(item.email), role: String(item.role), status: String(item.status), expiresAt: item.expires_at ? String(item.expires_at) : undefined })),
+    };
+  };
+
+  const createStaffInvite = async (email: string, role: string) => {
+    const { error } = await client.from('zg_staff_invites').insert({ organization_id: organizationId, email: email.trim().toLowerCase(), role, invited_by: user.id, status: 'pending' });
+    if (error) throw error;
+  };
+
+  const updateStaff = async (userId: string, changes: Partial<Pick<StaffMember, 'displayName' | 'phone' | 'role' | 'status' | 'permissions'>>) => {
+    const payload: Record<string, unknown> = {};
+    if (changes.displayName !== undefined) payload.display_name = changes.displayName;
+    if (changes.phone !== undefined) payload.phone = changes.phone;
+    if (changes.role !== undefined) payload.role = changes.role;
+    if (changes.status !== undefined) payload.status = changes.status;
+    if (changes.permissions !== undefined) payload.permissions = changes.permissions;
+    const { error } = await client.from('zg_organization_members').update(payload).eq('organization_id', organizationId).eq('user_id', userId);
+    if (error) throw error;
+  };
+
+  const cancelStaffInvite = async (id: string) => {
+    const { error } = await client.from('zg_staff_invites').update({ status: 'cancelled' }).eq('organization_id', organizationId).eq('id', id);
+    if (error) throw error;
+  };
+
   return {
     user: { email: user.email || 'unknown', name: membership.display_name || undefined },
     organizationId,
     organizationName: organization?.name || 'Z&G AUTO REPAIR',
     role: String(membership.role),
-    loadStore, upsertRecord, deleteRecord, subscribe, invokeFunction,
+    loadStore, upsertRecord, deleteRecord, subscribe, invokeFunction, listStaff, createStaffInvite, updateStaff, cancelStaffInvite,
     signOut: async () => { await client.auth.signOut(); },
   };
 }

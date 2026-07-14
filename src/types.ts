@@ -59,6 +59,18 @@ export type Payment = {
 
 export type Expense = { id: string; date: string; category: string; vendor?: string; amount: number; method?: string; note?: string };
 
+export type Campaign = {
+  id: string; name: string; start: string; end: string; benefit: string;
+  warrantyMonths: number; warrantyMiles: number; partsFree: boolean; laborFree: boolean;
+  terms?: string; status: '启用' | '停用';
+};
+
+export type Warranty = {
+  id: string; vehicleId?: string; vehicle: string; plate?: string; item: string;
+  originalRO?: string; start: string; end: string; mileageLimit: number;
+  coverage: '仅配件' | '仅人工' | '配件和人工'; status: '有效' | '已使用' | '已到期' | '作废'; notes?: string;
+};
+
 export type ShopSettings = {
   id: string; shopName: string; address: string; phone: string; email?: string;
   defaultLaborRate: number; defaultTaxRate: number; invoiceTerms?: string;
@@ -68,5 +80,6 @@ export type AppStore = {
   customers: Customer[]; fleets: Fleet[]; drivers: Driver[]; vehicles: Vehicle[];
   workOrders: WorkOrder[]; parts: Part[]; inventoryLogs: InventoryLog[];
   payments: Payment[]; expenses: Expense[]; settings: ShopSettings[];
+  campaigns: Campaign[]; warranties: Warranty[];
   [key: string]: unknown[];
 };

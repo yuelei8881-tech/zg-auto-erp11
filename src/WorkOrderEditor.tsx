@@ -6,16 +6,21 @@ type Props = {
   value?: WorkOrder; customers: Customer[]; vehicles: Vehicle[]; fleets: Fleet[]; drivers: Driver[];
   parts: Part[]; settings: ShopSettings; nextNumber: string;
   onSave: (order: WorkOrder) => Promise<void>; onCancel: () => void;
+  onCreateVehicle: (vehicle: Vehicle) => Promise<void>;
+  onPrint: (order: WorkOrder, documentType: string) => void;
 };
 
 const statuses: WorkOrderStatus[] = ['等待检查', '等待批准', '等待配件', '维修中', '已完成', '已交车', '已取消'];
 
-export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, parts, settings, nextNumber, onSave, onCancel }: Props) {
+export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, parts, settings, nextNumber, onSave, onCancel, onCreateVehicle, onPrint }: Props) {
   const [order, setOrder] = useState<WorkOrder>(() => recalculateWorkOrder(value || {
     id: uid(), number: nextNumber, date: today(), customer: '', vehicle: '', status: '等待检查',
     laborItems: [], partItems: [], outsource: 0, discount: 0, taxRate: settings.defaultTaxRate,
   }));
   const [saving, setSaving] = useState(false);
+  const [addingVehicle, setAddingVehicle] = useState(false);
+  const [vehicleSaving, setVehicleSaving] = useState(false);
+  const [vehicleDraft, setVehicleDraft] = useState({ plate: '', vin: '', year: String(new Date().getFullYear()), make: '', model: '', mileage: 0 });
   const calculated = useMemo(() => recalculateWorkOrder(order), [order]);
   const selectedVehicle = vehicles.find(v => v.id === order.vehicleId);
 
@@ -23,7 +28,27 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, p
 
   const selectCustomer = (id: string) => {
     const customer = customers.find(item => item.id === id);
-    patch({ customerId: id, customer: customer?.name || '', phone: customer?.phone || '' });
+    patch({ customerId: id, customer: customer?.name || '', phone: customer?.phone || '', vehicleId: '', vehicle: '', plate: '', vin: '', mileage: 0 });
+  };
+
+  const createVehicle = async () => {
+    const customer = customers.find(item => item.id === order.customerId);
+    if (!customer) return alert('请先选择客户。');
+    if (!vehicleDraft.plate.trim() || !vehicleDraft.year.trim() || !vehicleDraft.make.trim() || !vehicleDraft.model.trim()) return alert('请填写车牌、年份、品牌和车型。');
+    const duplicate = vehicles.find(item => item.plate.trim().toUpperCase() === vehicleDraft.plate.trim().toUpperCase());
+    if (duplicate) { selectVehicle(duplicate.id); setAddingVehicle(false); return alert('该车牌已存在，已经为您自动选中。'); }
+    const vehicle: Vehicle = {
+      id: uid(), ownerType: customer.type, ownerId: customer.id, ownerName: customer.name,
+      plate: vehicleDraft.plate.trim().toUpperCase(), vin: vehicleDraft.vin.trim().toUpperCase(),
+      year: vehicleDraft.year.trim(), make: vehicleDraft.make.trim(), model: vehicleDraft.model.trim(), mileage: Number(vehicleDraft.mileage || 0),
+    };
+    setVehicleSaving(true);
+    try {
+      await onCreateVehicle(vehicle);
+      patch({ vehicleId: vehicle.id, vehicle: `${vehicle.year} ${vehicle.make} ${vehicle.model}`, plate: vehicle.plate, vin: vehicle.vin, mileage: vehicle.mileage });
+      setAddingVehicle(false);
+      setVehicleDraft({ plate: '', vin: '', year: String(new Date().getFullYear()), make: '', model: '', mileage: 0 });
+    } finally { setVehicleSaving(false); }
   };
 
   const selectVehicle = (id: string) => {
@@ -72,7 +97,7 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, p
   };
 
   return <div className="editor-screen">
-    <div className="editor-head"><div><p className="eyebrow">维修工单 / Repair Order</p><h2>{value ? `编辑 ${order.number}` : '新建维修工单'}</h2></div><div className="toolbar"><button onClick={onCancel}>取消</button><button className="primary" onClick={submit} disabled={saving}>{saving ? '保存中…' : '保存工单'}</button></div></div>
+    <div className="editor-head"><div><p className="eyebrow">维修工单 / Repair Order</p><h2>{value ? `编辑 ${order.number}` : '新建维修工单'}</h2></div><div className="toolbar"><button type="button" onClick={() => onPrint(calculated, 'Repair Order')}>打印工单</button><button type="button" onClick={onCancel}>取消</button><button type="button" className="primary" onClick={submit} disabled={saving}>{saving ? '保存中…' : '保存工单'}</button></div></div>
 
     <section className="form-section"><h3>客户与车辆</h3><div className="form-grid four">
       <label>工单号<input value={order.number} onChange={e => patch({ number: e.target.value })} /></label>
@@ -81,9 +106,9 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, p
       <label>负责技师<input value={order.technician || ''} onChange={e => patch({ technician: e.target.value })} /></label>
       <label>客户<select value={order.customerId || ''} onChange={e => selectCustomer(e.target.value)}><option value="">选择客户</option>{customers.map(item => <option key={item.id} value={item.id}>{item.name} · {item.phone}</option>)}</select></label>
       <label>联系电话<input value={order.phone || ''} onChange={e => patch({ phone: e.target.value })} /></label>
-      <label>车辆<select value={order.vehicleId || ''} onChange={e => selectVehicle(e.target.value)}><option value="">选择车辆</option>{vehicles.map(item => <option key={item.id} value={item.id}>{item.plate || item.vin} · {item.year} {item.make} {item.model}</option>)}</select></label>
+      <label>车辆<div className="input-action"><select value={order.vehicleId || ''} onChange={e => selectVehicle(e.target.value)}><option value="">{vehicles.length ? '选择车辆' : '暂无车辆，请快速添加'}</option>{vehicles.map(item => <option key={item.id} value={item.id}>{item.plate || item.vin} · {item.year} {item.make} {item.model}{item.ownerName ? ` · ${item.ownerName}` : ''}</option>)}</select><button type="button" onClick={() => setAddingVehicle(current => !current)}>＋ 添加</button></div></label>
       <label>当前里程<input type="number" value={order.mileage || ''} onChange={e => patch({ mileage: Number(e.target.value) })} /></label>
-    </div>{selectedVehicle && <div className="vehicle-strip"><b>{selectedVehicle.plate || '无车牌'}</b><span>VIN {selectedVehicle.vin || '—'}</span><span>Unit {selectedVehicle.unit || '—'}</span><span>{selectedVehicle.ownerName}</span></div>}</section>
+    </div>{addingVehicle && <div className="quick-vehicle"><div><b>快速添加当前客户车辆</b><span>保存后会自动选中，不会离开工单。</span></div><div className="quick-vehicle-grid"><label>车牌<input value={vehicleDraft.plate} onChange={e => setVehicleDraft(current => ({ ...current, plate: e.target.value.toUpperCase() }))} /></label><label>VIN<input value={vehicleDraft.vin} onChange={e => setVehicleDraft(current => ({ ...current, vin: e.target.value.toUpperCase() }))} /></label><label>年份<input value={vehicleDraft.year} onChange={e => setVehicleDraft(current => ({ ...current, year: e.target.value }))} /></label><label>品牌<input value={vehicleDraft.make} onChange={e => setVehicleDraft(current => ({ ...current, make: e.target.value }))} /></label><label>车型<input value={vehicleDraft.model} onChange={e => setVehicleDraft(current => ({ ...current, model: e.target.value }))} /></label><label>里程<input type="number" value={vehicleDraft.mileage || ''} onChange={e => setVehicleDraft(current => ({ ...current, mileage: Number(e.target.value) }))} /></label></div><div className="toolbar"><button type="button" onClick={() => setAddingVehicle(false)}>取消</button><button type="button" className="primary" onClick={createVehicle} disabled={vehicleSaving}>{vehicleSaving ? '保存中…' : '保存并选择车辆'}</button></div></div>}{selectedVehicle && <div className="vehicle-strip"><b>{selectedVehicle.plate || '无车牌'}</b><span>VIN {selectedVehicle.vin || '—'}</span><span>Unit {selectedVehicle.unit || '—'}</span><span>{selectedVehicle.ownerName}</span></div>}</section>
 
     {(order.company || selectedVehicle?.ownerType === '车队') && <section className="form-section"><h3>车队送修信息</h3><div className="form-grid four">
       <label>公司名称<input value={order.company || ''} onChange={e => patch({ company: e.target.value })} /></label>

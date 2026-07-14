@@ -3,15 +3,18 @@ import { createRoot } from 'react-dom/client';
 import { FormalGate } from './FormalGate';
 import type { CloudRow, CloudSession, CloudStore } from './lib/cloud';
 import { decodeVin, escapeHtml, money, recalculateWorkOrder, today, uid } from './lib/erp';
-import type { AppStore, Customer, Driver, Expense, Fleet, InventoryLog, Part, Payment, ShopSettings, Vehicle, WorkOrder } from './types';
+import type { AppStore, Campaign, Customer, Driver, Expense, Fleet, InventoryLog, Part, Payment, ShopSettings, Vehicle, Warranty, WorkOrder } from './types';
 import { WorkOrderEditor } from './WorkOrderEditor';
 import { SmartTools } from './SmartTools';
+import { ActivityCenter } from './ActivityCenter';
+import { StaffPage } from './StaffPage';
 import './styles.css';
+import './extra.css';
 
-type Page = 'dashboard' | 'customers' | 'fleets' | 'vehicles' | 'workOrders' | 'parts' | 'finance' | 'smart' | 'settings';
-type ModalState = { type: 'customer' | 'fleet' | 'driver' | 'vehicle' | 'part' | 'expense' | 'settings'; value?: Record<string, unknown> } | null;
+type Page = 'dashboard' | 'customers' | 'fleets' | 'vehicles' | 'workOrders' | 'parts' | 'finance' | 'campaigns' | 'staff' | 'smart' | 'settings';
+type ModalState = { type: 'customer' | 'fleet' | 'driver' | 'vehicle' | 'part' | 'expense' | 'campaign' | 'warranty' | 'settings'; value?: Record<string, unknown> } | null;
 
-const emptyStore: AppStore = { customers: [], fleets: [], drivers: [], vehicles: [], workOrders: [], parts: [], inventoryLogs: [], payments: [], expenses: [], settings: [] };
+const emptyStore: AppStore = { customers: [], fleets: [], drivers: [], vehicles: [], workOrders: [], parts: [], inventoryLogs: [], payments: [], expenses: [], settings: [], campaigns: [], warranties: [] };
 const defaultSettings: ShopSettings = { id: '00000000-0000-4000-8000-000000000075', shopName: 'Z&G AUTO REPAIR', address: '', phone: '', email: '', defaultLaborRate: 165, defaultTaxRate: 9.5, invoiceTerms: 'Thank you for your business.' };
 
 const nav: Array<{ id: Page; icon: string; label: string }> = [
@@ -19,6 +22,7 @@ const nav: Array<{ id: Page; icon: string; label: string }> = [
   { id: 'fleets', icon: '🚛', label: '车队与司机' }, { id: 'vehicles', icon: '🚗', label: '车辆管理' },
   { id: 'workOrders', icon: '▤', label: '维修工单' }, { id: 'parts', icon: '▦', label: '库存管理' },
   { id: 'finance', icon: '$', label: '财务与收款' }, { id: 'smart', icon: '✦', label: '智能工具' },
+  { id: 'campaigns', icon: '★', label: '活动与保修' }, { id: 'staff', icon: '♙', label: '员工与权限' },
   { id: 'settings', icon: '⚙', label: '系统设置' },
 ];
 
@@ -133,19 +137,23 @@ function App({ cloud }: { cloud: CloudSession }) {
       const driver = store.drivers.find(item => item.id === row.driverId);
       if (driver) { row.driverName = driver.name; row.driverPhone = driver.phone; }
     }
+    if (type === 'warranty' && row.vehicleId) {
+      const vehicle = store.vehicles.find(item => item.id === row.vehicleId);
+      if (vehicle) { row.vehicle = `${vehicle.year} ${vehicle.make} ${vehicle.model}`; row.plate = vehicle.plate; }
+    }
     if (type === 'settings') await persist('settings', row as unknown as ShopSettings);
     else await persist(`${type}s` as keyof AppStore, row as { id: string });
     closeModal();
   };
 
-  if (editingOrder) return <WorkOrderEditor value={editingOrder === 'new' ? undefined : editingOrder} customers={store.customers} vehicles={store.vehicles} fleets={store.fleets} drivers={store.drivers} parts={store.parts} settings={settings} nextNumber={nextWorkOrderNumber(store.workOrders)} onSave={saveWorkOrder} onCancel={() => setEditingOrder(null)} />;
+  if (editingOrder) return <WorkOrderEditor value={editingOrder === 'new' ? undefined : editingOrder} customers={store.customers} vehicles={store.vehicles} fleets={store.fleets} drivers={store.drivers} parts={store.parts} settings={settings} nextNumber={nextWorkOrderNumber(store.workOrders)} onCreateVehicle={vehicle => persist('vehicles', vehicle)} onPrint={(order, type) => printDocument(recalculateWorkOrder(order), settings, type)} onSave={saveWorkOrder} onCancel={() => setEditingOrder(null)} />;
 
   return <div className="app-shell">
     <aside className="sidebar"><div className="brand"><div className="brand-mark">Z&G</div><div><b>AUTO ERP</b><small>正式服务器版</small></div></div>
       <nav>{nav.map(item => <button key={item.id} className={page === item.id ? 'active' : ''} onClick={() => { setPage(item.id); setSearch(''); }}><span>{item.icon}</span>{item.label}</button>)}</nav>
       <div className="side-foot"><small>{cloud.organizationName}</small><span>{cloud.user.email}</span><button onClick={() => cloud.signOut()}>退出登录</button></div>
     </aside>
-    <main className="main"><header className="topbar"><div className="global-search">⌕<input value={search} onChange={e => setSearch(e.target.value)} placeholder="搜索客户、电话、VIN、车牌、工单、司机…" /></div><div className="top-status"><span className={syncing ? 'syncing' : ''}>{syncing ? '正在同步…' : '● 云端已同步'}</span><b>v0.75.0</b></div></header>
+    <main className="main"><header className="topbar"><div className="global-search">⌕<input value={search} onChange={e => setSearch(e.target.value)} placeholder="搜索客户、电话、VIN、车牌、工单、司机…" /></div><div className="top-status"><span className={syncing ? 'syncing' : ''}>{syncing ? '正在同步…' : '● 云端已同步'}</span><b>v0.75.1</b></div></header>
       {loading ? <div className="loading">正在读取正式服务器数据…</div> : <PageContent page={page} search={search} store={store} settings={settings} cloud={cloud} setPage={setPage} openModal={openModal} setEditingOrder={setEditingOrder} persist={persist} remove={remove} receiveStock={receiveStock} addPayment={addPayment} deleteWorkOrder={deleteWorkOrder} />}
     </main>
     {modal && <EntityModal state={modal} store={store} settings={settings} onClose={closeModal} onSave={saveModal} />}
@@ -170,6 +178,8 @@ function PageContent(props: ContentProps) {
   if (page === 'workOrders') return <WorkOrders {...props} />;
   if (page === 'parts') return <Inventory {...props} />;
   if (page === 'finance') return <Finance {...props} />;
+  if (page === 'campaigns') return <ActivityCenter campaigns={store.campaigns} warranties={store.warranties} vehicles={store.vehicles} onAddCampaign={() => props.openModal('campaign')} onEditCampaign={item => props.openModal('campaign', item)} onAddWarranty={() => props.openModal('warranty')} onEditWarranty={item => props.openModal('warranty', item)} onRemoveCampaign={id => props.remove('campaigns', id)} onRemoveWarranty={id => props.remove('warranties', id)} />;
+  if (page === 'staff') return <StaffPage cloud={cloud} />;
   if (page === 'smart') return <SmartTools cloud={cloud} workOrders={store.workOrders} />;
   return <SettingsPage settings={settings} openModal={props.openModal} />;
 }
@@ -243,6 +253,8 @@ function formFields(type: NonNullable<ModalState>['type'], store: AppStore): Fie
   if (type === 'vehicle') return [{ key: 'ownerType', label: '客户类型', type: 'select', required: true, options: ['个人','公司','车队'].map(v => ({ value: v, label: v })) }, { key: 'ownerId', label: '所属客户/公司', type: 'select', options: ownerOptions }, { key: 'ownerName', label: '客户/公司名称', required: true }, { key: 'unit', label: 'Unit Number' }, { key: 'plate', label: '车牌', required: true }, { key: 'state', label: '州' }, { key: 'vin', label: 'VIN（17位）' }, { key: 'year', label: '年份', required: true }, { key: 'make', label: '品牌', required: true }, { key: 'model', label: '车型', required: true }, { key: 'engine', label: '发动机' }, { key: 'color', label: '颜色' }, { key: 'mileage', label: '当前里程', type: 'number' }, { key: 'driverId', label: '常用司机', type: 'select', options: driverOptions }, { key: 'driverName', label: '司机姓名' }, { key: 'driverPhone', label: '司机电话' }, { key: 'notes', label: '车辆备注', type: 'textarea', wide: true }];
   if (type === 'part') return [{ key: 'partNo', label: '配件编号/SKU', required: true }, { key: 'oemNo', label: 'OEM 编号' }, { key: 'name', label: '配件名称', required: true }, { key: 'brand', label: '品牌' }, { key: 'supplier', label: '供应商' }, { key: 'location', label: '货架位置' }, { key: 'cost', label: '进货单价', type: 'number', step: '0.01', required: true }, { key: 'price', label: '销售单价', type: 'number', step: '0.01', required: true }, { key: 'qty', label: '当前库存', type: 'number', required: true }, { key: 'minimum', label: '最低库存', type: 'number', required: true }, { key: 'notes', label: '备注', type: 'textarea', wide: true }];
   if (type === 'expense') return [{ key: 'date', label: '日期', type: 'date', required: true }, { key: 'category', label: '支出类别', type: 'select', required: true, options: ['配件采购','房租','水电','工资','工具设备','外包加工','拖车','保险','广告','退款','其他'].map(v => ({ value: v, label: v })) }, { key: 'vendor', label: '收款方' }, { key: 'amount', label: '金额', type: 'number', step: '0.01', required: true }, { key: 'method', label: '付款方式', type: 'select', options: ['现金','银行卡','Zelle','支票','ACH'].map(v => ({ value: v, label: v })) }, { key: 'note', label: '备注/收据号', type: 'textarea', wide: true }];
+  if (type === 'campaign') return [{ key: 'name', label: '活动名称', required: true }, { key: 'status', label: '状态', type: 'select', required: true, options: ['启用','停用'].map(v => ({ value: v, label: v })) }, { key: 'start', label: '开始日期', type: 'date', required: true }, { key: 'end', label: '结束日期', type: 'date', required: true }, { key: 'benefit', label: '活动权益', type: 'textarea', wide: true, required: true }, { key: 'warrantyMonths', label: '保修月数', type: 'number' }, { key: 'warrantyMiles', label: '保修里程', type: 'number' }, { key: 'partsFree', label: '配件免费', type: 'checkbox' }, { key: 'laborFree', label: '人工免费', type: 'checkbox' }, { key: 'terms', label: '活动与保修条款', type: 'textarea', wide: true }];
+  if (type === 'warranty') return [{ key: 'vehicleId', label: '车辆', type: 'select', required: true, options: store.vehicles.map(item => ({ value: item.id, label: `${item.plate || '无车牌'} · ${item.year} ${item.make} ${item.model}` })) }, { key: 'item', label: '保修项目', required: true }, { key: 'originalRO', label: '原始工单号' }, { key: 'start', label: '开始日期', type: 'date', required: true }, { key: 'end', label: '到期日期', type: 'date', required: true }, { key: 'mileageLimit', label: '里程上限', type: 'number' }, { key: 'coverage', label: '保障范围', type: 'select', required: true, options: ['仅配件','仅人工','配件和人工'].map(v => ({ value: v, label: v })) }, { key: 'status', label: '状态', type: 'select', required: true, options: ['有效','已使用','已到期','作废'].map(v => ({ value: v, label: v })) }, { key: 'notes', label: '保修说明', type: 'textarea', wide: true }];
   return [{ key: 'shopName', label: '修理厂名称', required: true }, { key: 'phone', label: '电话' }, { key: 'email', label: 'Email' }, { key: 'address', label: '地址', wide: true }, { key: 'defaultLaborRate', label: '默认工时费率', type: 'number', step: '0.01' }, { key: 'defaultTaxRate', label: '默认配件税率 %', type: 'number', step: '0.01' }, { key: 'invoiceTerms', label: '发票条款', type: 'textarea', wide: true }];
 }
 
@@ -254,10 +266,12 @@ function initialForm(type: NonNullable<ModalState>['type'], value: Record<string
   if (type === 'vehicle') return { ownerType: '个人', mileage: 0 };
   if (type === 'part') return { cost: 0, price: 0, qty: 0, minimum: 1 };
   if (type === 'expense') return { date: today(), category: '配件采购', amount: 0, method: '银行卡' };
+  if (type === 'campaign') return { start: today(), end: today(), warrantyMonths: 12, warrantyMiles: 12000, partsFree: true, laborFree: false, status: '启用' };
+  if (type === 'warranty') return { start: today(), end: today(), mileageLimit: 12000, coverage: '仅配件', status: '有效' };
   return settings as unknown as Record<string, unknown>;
 }
 
-function modalTitle(type: NonNullable<ModalState>['type'], editing: boolean) { const names = { customer: '客户', fleet: '车队公司', driver: '司机', vehicle: '车辆', part: '配件', expense: '支出', settings: '系统设置' }; return `${editing ? '编辑' : '添加'}${names[type]}`; }
+function modalTitle(type: NonNullable<ModalState>['type'], editing: boolean) { const names = { customer: '客户', fleet: '车队公司', driver: '司机', vehicle: '车辆', part: '配件', expense: '支出', campaign: '优惠活动', warranty: '车辆保修', settings: '系统设置' }; return `${editing ? '编辑' : '添加'}${names[type]}`; }
 
 function ListPage({ title, subtitle, action, onAction, children }: { title: string; subtitle: string; action: string; onAction: () => void; children: React.ReactNode }) { return <div className="page"><div className="page-title"><div><p className="eyebrow">Z&G AUTO ERP</p><h2>{title}</h2><p>{subtitle}</p></div><button className="primary" onClick={onAction}>{action}</button></div><section className="panel">{children}</section></div>; }
 function Kpi({ label, value, tone = '' }: { label: string; value: string; tone?: string }) { return <div className={`kpi ${tone}`}><span>{label}</span><b>{value}</b></div>; }
@@ -268,6 +282,7 @@ function PrintMenu({ order, settings }: { order: WorkOrder; settings: ShopSettin
 
 function printDocument(order: WorkOrder, settings: ShopSettings, documentType: string) {
   const isReceipt = documentType === 'Receipt'; const paid = isReceipt ? order.paid : order.total;
+  documentType = ({ Estimate: 'ESTIMATE / 报价单', 'Repair Order': 'REPAIR ORDER / 维修工单', Invoice: 'INVOICE / 发票', Receipt: 'RECEIPT / 收据' } as Record<string, string>)[documentType] || documentType;
   const laborRows = order.laborItems.map(item => `<tr><td>${escapeHtml(item.description)}</td><td class="num">${item.hours.toFixed(1)}</td><td class="num">${money(item.rate)}</td><td class="num">${money(item.total)}</td></tr>`).join('');
   const partRows = order.partItems.map(item => `<tr><td>${escapeHtml(item.partNo)}</td><td>${escapeHtml(item.name)}</td><td class="num">${item.qty}</td><td class="num">${money(item.price)}</td><td class="num">${money(item.total)}</td></tr>`).join('');
   const html = `<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(documentType)} ${escapeHtml(order.number)}</title><style>@page{size:Letter;margin:.35in}*{box-sizing:border-box}body{font:8pt Arial;color:#111;margin:0}.header{text-align:center;border-bottom:2px solid #111;padding-bottom:8px}.logo{font:bold 18pt Arial;letter-spacing:2px}.header h1{font-size:12pt;margin:3px}.header p{margin:2px}.doc-title{display:flex;justify-content:space-between;align-items:end;margin:10px 0 5px}.doc-title h2{font-size:13pt;margin:0}.box-grid{display:grid;grid-template-columns:1fr 1fr;gap:5px}.box{border:1px solid #999;padding:5px;min-height:52px}.box b{display:inline-block;min-width:55px}.section{margin-top:7px}.section h3{font-size:8pt;background:#222;color:#fff;margin:0;padding:4px}table{border-collapse:collapse;width:100%}th,td{border:1px solid #aaa;padding:3px;vertical-align:top}th{background:#eee;text-align:left}.num{text-align:right}.totals{width:46%;margin:7px 0 0 auto}.totals td:first-child{text-align:right}.grand td{font-size:10pt;font-weight:bold;border-top:2px solid #111}.notes{border:1px solid #aaa;padding:5px;min-height:36px}.sign{display:grid;grid-template-columns:1fr 1fr;gap:30px;margin-top:24px}.line{border-top:1px solid #222;padding-top:3px}.footer{text-align:center;margin-top:10px;font-size:7pt;color:#555}</style></head><body><div class="header"><div class="logo">Z&G</div><h1>${escapeHtml(settings.shopName)}</h1><p>${escapeHtml(settings.address)} · ${escapeHtml(settings.phone)} · ${escapeHtml(settings.email || '')}</p></div><div class="doc-title"><h2>${escapeHtml(documentType)}</h2><div><b>${escapeHtml(order.number)}</b><br>${escapeHtml(order.date)}</div></div><div class="box-grid"><div class="box"><b>Customer</b>${escapeHtml(order.customer)}<br><b>Phone</b>${escapeHtml(order.phone)}<br><b>Company</b>${escapeHtml(order.company || '')}<br><b>Driver</b>${escapeHtml(order.driver || '')} ${escapeHtml(order.driverPhone || '')}</div><div class="box"><b>Vehicle</b>${escapeHtml(order.vehicle)}<br><b>Plate</b>${escapeHtml(order.plate)}<br><b>VIN</b>${escapeHtml(order.vin)}<br><b>Mileage</b>${escapeHtml(order.mileage)} &nbsp; <b>PO</b>${escapeHtml(order.po || '')}</div></div><div class="section"><h3>Customer Concern / 客户描述</h3><div class="notes">${escapeHtml(order.complaint)}</div></div><div class="section"><h3>Diagnosis & Work Performed / 诊断与维修</h3><div class="notes">${escapeHtml(order.diagnosis)}<br>${escapeHtml(order.workPerformed)}</div></div>${laborRows ? `<div class="section"><h3>Labor / 人工</h3><table><thead><tr><th>Description</th><th class="num">Hours</th><th class="num">Rate</th><th class="num">Amount</th></tr></thead><tbody>${laborRows}</tbody></table></div>` : ''}${partRows ? `<div class="section"><h3>Parts / 配件</h3><table><thead><tr><th>Part #</th><th>Description</th><th class="num">Qty</th><th class="num">Price</th><th class="num">Amount</th></tr></thead><tbody>${partRows}</tbody></table></div>` : ''}<table class="totals"><tr><td>Labor</td><td class="num">${money(order.laborTotal)}</td></tr><tr><td>Parts</td><td class="num">${money(order.partsTotal)}</td></tr><tr><td>Outsource</td><td class="num">${money(order.outsource)}</td></tr><tr><td>Tax</td><td class="num">${money(order.tax)}</td></tr><tr><td>Discount</td><td class="num">-${money(order.discount)}</td></tr><tr class="grand"><td>${isReceipt ? 'Amount Paid' : 'Total'}</td><td class="num">${money(paid)}</td></tr>${!isReceipt ? `<tr><td>Paid</td><td class="num">${money(order.paid)}</td></tr><tr><td>Balance Due</td><td class="num">${money(order.balance)}</td></tr>` : ''}</table><div class="sign"><div class="line">Customer Signature / Date</div><div class="line">Authorized By / Date</div></div><div class="footer">${escapeHtml(settings.invoiceTerms || 'Thank you for your business.')}</div><script>window.onload=()=>window.print()</script></body></html>`;
