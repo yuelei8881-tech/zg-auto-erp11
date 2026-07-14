@@ -47,20 +47,24 @@ export function FormalGate({ children }: { children: (cloud: CloudSession) => Re
 
   const register = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault(); if (!supabase) return;
-    const form = new FormData(event.currentTarget); const email = String(form.get('email') || '').trim(); const password = String(form.get('password') || '');
+    const form = new FormData(event.currentTarget); const email = String(form.get('email') || '').trim(); const password = String(form.get('password') || ''); const activationCode = String(form.get('activationCode') || '').trim().toUpperCase();
+    if (activationCode.length < 6) { setError('请输入老板提供的员工激活码。'); return; }
     setSubmitting(true); setError(''); setNotice('');
-    const { error: signupError } = await supabase.auth.signUp({ email, password });
+    sessionStorage.setItem('zg_staff_activation_code', activationCode);
+    const { data, error: signupError } = await supabase.auth.signUp({ email, password });
     if (signupError) setError(signupError.message);
-    else setNotice('员工账号已建立。请查看邮箱完成确认，然后返回登录。');
+    else if (data.session) setNotice('账号已激活，正在进入系统…');
+    else setNotice('账号已建立，但服务器仍要求邮箱确认。请联系老板检查邮件设置。');
     setSubmitting(false);
   };
 
   if (!cloudConfigured) return <AuthCard title="服务器尚未配置" error="请在 Vercel 添加 Supabase 项目地址和 Publishable Key。" />;
   if (loading) return <AuthCard title="正在连接正式服务器" subtitle="正在安全读取登录状态…" />;
   if (!session) return <div className="auth-screen"><form className="auth-card" onSubmit={registering ? register : login}>
-    <div className="auth-logo">Z&G</div><h1>Z&G AUTO ERP</h1><p>员工账号登录 · v0.75.1</p>
+    <div className="auth-logo">Z&G</div><h1>Z&G AUTO ERP</h1><p>员工账号登录 · v0.76.1</p>
     <label><span>邮箱</span><input name="email" type="email" autoComplete="email" required /></label>
     <label><span>密码</span><input name="password" type="password" autoComplete="current-password" required /></label>
+    {registering && <label><span>员工激活码</span><input name="activationCode" autoComplete="one-time-code" placeholder="由老板提供的 8 位激活码" required /></label>}
     {error && <p className="auth-error">{error}</p>}
     {notice && <p className="result-box">{notice}</p>}
     <button className="primary" disabled={submitting}>{submitting ? '请稍候…' : registering ? '建立员工账号' : '登录系统'}</button>

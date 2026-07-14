@@ -7,7 +7,7 @@ export type CloudStore = Record<string, CloudRow[]>;
 
 export type CloudUser = { id: string; email: string; name?: string };
 export type StaffMember = { userId: string; displayName: string; phone: string; role: string; status: string; permissions: Record<string, boolean> };
-export type StaffInvite = { id: string; email: string; role: string; status: string; expiresAt?: string };
+export type StaffInvite = { id: string; email: string; role: string; status: string; expiresAt?: string; activationCode?: string };
 
 export type CloudSession = {
   user: CloudUser;
@@ -21,7 +21,7 @@ export type CloudSession = {
   subscribe: (refresh: () => void) => () => void;
   invokeFunction: <T = unknown>(name: string, body: Record<string, unknown>) => Promise<T>;
   listStaff: () => Promise<{ members: StaffMember[]; invites: StaffInvite[] }>;
-  createStaffInvite: (email: string, role: string) => Promise<void>;
+  createStaffInvite: (email: string, role: string) => Promise<{ activationCode: string }>;
   updateStaff: (userId: string, changes: Partial<Pick<StaffMember, 'displayName' | 'phone' | 'role' | 'status' | 'permissions'>>) => Promise<void>;
   cancelStaffInvite: (id: string) => Promise<void>;
   signOut: () => Promise<void>;
@@ -48,9 +48,11 @@ export async function openCloudSession(user: User): Promise<CloudSession> {
 
   let membership = await findMembership();
   if (!membership) {
-    const { error: inviteError } = await client.rpc('zg_accept_staff_invite');
+    const activationCode = sessionStorage.getItem('zg_staff_activation_code') || '';
+    const { error: inviteError } = await client.rpc('zg_accept_staff_invite', { p_code: activationCode });
     if (inviteError && !String(inviteError.message || '').includes('Could not find the function')) throw inviteError;
     membership = await findMembership();
+    if (membership) sessionStorage.removeItem('zg_staff_activation_code');
   }
   if (!membership) {
     const { error } = await client.rpc('zg_bootstrap_organization', { p_name: 'Z&G AUTO REPAIR' });
@@ -119,19 +121,22 @@ export async function openCloudSession(user: User): Promise<CloudSession> {
   const listStaff = async () => {
     const [memberResult, inviteResult] = await Promise.all([
       client.from('zg_organization_members').select('user_id,display_name,phone,role,status,permissions').eq('organization_id', organizationId).order('created_at'),
-      client.from('zg_staff_invites').select('id,email,role,status,expires_at').eq('organization_id', organizationId).order('created_at', { ascending: false }),
+      client.from('zg_staff_invites').select('id,email,role,status,expires_at,activation_code').eq('organization_id', organizationId).order('created_at', { ascending: false }),
     ]);
     if (memberResult.error) throw memberResult.error;
     if (inviteResult.error) throw inviteResult.error;
     return {
       members: (memberResult.data || []).map(item => ({ userId: String(item.user_id), displayName: String(item.display_name || ''), phone: String(item.phone || ''), role: String(item.role), status: String(item.status), permissions: (item.permissions || {}) as Record<string, boolean> })),
-      invites: (inviteResult.data || []).map(item => ({ id: String(item.id), email: String(item.email), role: String(item.role), status: String(item.status), expiresAt: item.expires_at ? String(item.expires_at) : undefined })),
+      invites: (inviteResult.data || []).map(item => ({ id: String(item.id), email: String(item.email), role: String(item.role), status: String(item.status), expiresAt: item.expires_at ? String(item.expires_at) : undefined, activationCode: item.activation_code ? String(item.activation_code) : undefined })),
     };
   };
 
   const createStaffInvite = async (email: string, role: string) => {
-    const { error } = await client.from('zg_staff_invites').insert({ organization_id: organizationId, email: email.trim().toLowerCase(), role, invited_by: user.id, status: 'pending' });
+    const bytes = crypto.getRandomValues(new Uint8Array(5));
+    const activationCode = Array.from(bytes, value => value.toString(16).padStart(2, '0')).join('').slice(0, 8).toUpperCase();
+    const { error } = await client.from('zg_staff_invites').insert({ organization_id: organizationId, email: email.trim().toLowerCase(), role, invited_by: user.id, status: 'pending', activation_code: activationCode });
     if (error) throw error;
+    return { activationCode };
   };
 
   const updateStaff = async (userId: string, changes: Partial<Pick<StaffMember, 'displayName' | 'phone' | 'role' | 'status' | 'permissions'>>) => {
