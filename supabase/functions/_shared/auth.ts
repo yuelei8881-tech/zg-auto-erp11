@@ -1,8 +1,10 @@
 export async function requireOrganizationMember(request: Request, organizationId: string) {
-  const authorization = request.headers.get('Authorization');
-  const url = Deno.env.get('SUPABASE_URL');
-  const anonKey = Deno.env.get('SUPABASE_ANON_KEY');
-  if (!authorization || !url || !anonKey || !organizationId) {
+  const authorization = request.headers.get('Authorization')?.trim();
+  const url = Deno.env.get('SUPABASE_URL')?.trim().replace(/\/$/, '');
+  const anonKey = Deno.env.get('SUPABASE_ANON_KEY')?.trim();
+  const normalizedOrganizationId = organizationId.trim();
+
+  if (!authorization || !url || !anonKey || !normalizedOrganizationId) {
     throw new Error('未登录或缺少修理厂信息');
   }
 
@@ -13,13 +15,15 @@ export async function requireOrganizationMember(request: Request, organizationId
 
   const query = new URL(`${url}/rest/v1/zg_organization_members`);
   query.searchParams.set('select', 'role');
-  query.searchParams.set('organization_id', `eq.${organizationId}`);
+  query.searchParams.set('organization_id', `eq.${normalizedOrganizationId}`);
   query.searchParams.set('user_id', `eq.${user.id}`);
   query.searchParams.set('status', 'eq.active');
+
   const memberResponse = await fetch(query, { headers: authHeaders });
   const rows = await memberResponse.json();
   if (!memberResponse.ok || !Array.isArray(rows) || !rows.length) {
     throw new Error('没有使用此修理厂服务的权限');
   }
+
   return { userId: user.id as string, role: String(rows[0].role) };
 }
