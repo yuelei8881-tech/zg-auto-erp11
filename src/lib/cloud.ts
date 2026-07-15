@@ -162,8 +162,12 @@ export async function openCloudSession(user: User): Promise<CloudSession> {
   };
 
   const updateOwnProfile = async (displayName: string, phone = '') => {
-    const { error } = await client.rpc('zg_update_own_profile', { p_display_name: displayName.trim(), p_phone: phone.trim() || null });
-    if (error) throw error;
+    const cleanName = displayName.trim();
+    const cleanPhone = phone.trim();
+    const { error: authError } = await client.auth.updateUser({ data: { display_name: cleanName, full_name: cleanName, phone: cleanPhone || undefined } });
+    if (authError) throw authError;
+    const { error } = await client.rpc('zg_update_own_profile', { p_display_name: cleanName, p_phone: cleanPhone || null });
+    if (error && !/zg_update_own_profile|schema cache|function/i.test(error.message)) throw error;
   };
 
   const cancelStaffInvite = async (id: string) => {
@@ -178,7 +182,7 @@ export async function openCloudSession(user: User): Promise<CloudSession> {
   };
 
   return {
-    user: { id: user.id, email: user.email || 'unknown', name: membership.display_name || undefined },
+    user: { id: user.id, email: user.email || 'unknown', name: membership.display_name || String(user.user_metadata?.display_name || user.user_metadata?.full_name || '') || undefined },
     organizationId,
     organizationName: organization?.name || 'Z&G AUTO REPAIR',
     role: String(membership.role),
