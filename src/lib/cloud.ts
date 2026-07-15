@@ -1,5 +1,5 @@
 import type { User } from '@supabase/supabase-js';
-import { supabase } from './supabase';
+import { supabase, supabasePublishableKey, supabaseUrl } from './supabase';
 
 export type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
 export type CloudRow = { id: string; [key: string]: JsonValue };
@@ -124,26 +124,40 @@ export async function openCloudSession(user: User): Promise<CloudSession> {
   };
 
   const invokeFunction = async <T,>(name: string, body: Record<string, unknown>) => {
-    const { data, error } = await client.functions.invoke(name, { body: { ...body, organizationId } });
-    if (error) {
-      let message = error.message || `Cloud function ${name} failed`;
-      const response = (error as { context?: Response }).context;
-      if (response) {
-        try {
-          const payload = await response.clone().json() as { error?: string; message?: string };
-          message = payload.error || payload.message || message;
-        } catch {
-          try {
-            const text = await response.clone().text();
-            if (text.trim()) message = text.trim();
-          } catch {
-            // Keep the original Supabase error when the response body is unavailable.
-          }
-        }
+    const { data: sessionData, error: sessionError } = await client.auth.getSession();
+    if (sessionError) throw sessionError;
+    const accessToken = String(sessionData.session?.access_token || '')
+      .trim()
+      .replace(/[^\x20-\x7E]/g, '');
+    if (!accessToken) throw new Error('登录已过期，请退出后重新登录。');
+
+    const response = await fetch(`${supabaseUrl.replace(/\/+$/, '')}/functions/v1/${encodeURIComponent(name)}`, {
+      method: 'POST',
+      headers: {
+        apikey: supabasePublishableKey,
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ ...body, organizationId }),
+    });
+
+    const responseText = await response.text();
+    let payload: unknown = null;
+    if (responseText.trim()) {
+      try {
+        payload = JSON.parse(responseText);
+      } catch {
+        payload = responseText;
       }
-      throw new Error(message);
     }
-    return data as T;
+    if (!response.ok) {
+      const details = payload as { error?: string; message?: string } | null;
+      const message = details && typeof details === 'object'
+        ? details.error || details.message
+        : typeof payload === 'string' ? payload : '';
+      throw new Error(message || `Cloud function ${name} failed (${response.status})`);
+    }
+    return payload as T;
   };
 
   const createCustomerApproval = async (workOrderId: string, customerEmail: string, customerName: string, snapshot: Record<string, unknown>) => {
