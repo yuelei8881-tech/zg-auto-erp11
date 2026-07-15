@@ -18,6 +18,7 @@ import './styles.css';
 import './v0763.css';
 import './extra.css';
 import './v0770.css';
+import './v0780.css';
 
 type Page = 'dashboard' | 'customers' | 'fleets' | 'vehicles' | 'workOrders' | 'parts' | 'finance' | 'campaigns' | 'staff' | 'smart' | 'settings';
 type ModalState = { type: 'customer' | 'fleet' | 'driver' | 'vehicle' | 'part' | 'expense' | 'campaign' | 'warranty' | 'settings'; value?: Record<string, unknown> } | null;
@@ -117,7 +118,7 @@ function App({ cloud }: { cloud: CloudSession }) {
       setStaffMembers(data.members.filter(item => item.status === 'active'));
       alert('姓名已保存。以后领取和完成工单都会记录这个姓名。');
     } catch (error) {
-      alert(`姓名保存失败：${error instanceof Error ? error.message : error}\n请确认服务器已安装 v0.77.0 数据库升级。`);
+      alert(`姓名保存失败：${error instanceof Error ? error.message : error}\n请确认员工账号已经启用。`);
     }
   };
 
@@ -158,11 +159,15 @@ function App({ cloud }: { cloud: CloudSession }) {
   };
 
   const saveWorkOrder = async (rawOrder: WorkOrder) => {
+    const computedOrder = recalculateWorkOrder({ ...rawOrder, settlementTotal: undefined });
     const order = recalculateWorkOrder(rawOrder);
     const old = store.workOrders.find(item => item.id === order.id);
+    const oldComputed = old ? recalculateWorkOrder({ ...old, settlementTotal: undefined }) : undefined;
     const discountNeedsApproval = Number(order.discount || 0) !== Number(old?.discount || 0);
-    const settlementNeedsApproval = order.settlementTotal !== old?.settlementTotal;
-    const safeOrder = recalculateWorkOrder({ ...order, discount: old?.discount || 0, settlementTotal: old?.settlementTotal });
+    const newHasOverride = rawOrder.settlementTotal !== undefined && Math.abs(Number(rawOrder.settlementTotal) - computedOrder.total) > 0.009;
+    const oldHasOverride = !!old && old.settlementTotal !== undefined && Math.abs(Number(old.settlementTotal) - Number(oldComputed?.total || 0)) > 0.009;
+    const settlementNeedsApproval = newHasOverride && (!oldHasOverride || Number(rawOrder.settlementTotal) !== Number(old?.settlementTotal));
+    const safeOrder = recalculateWorkOrder({ ...order, discount: old?.discount || 0, settlementTotal: oldHasOverride ? old?.settlementTotal : undefined });
     const oldUsage = usageMap(old && old.status !== '已取消' ? old : undefined);
     const newUsage = usageMap(order.status !== '已取消' ? order : undefined);
     const partChanges: Array<{ part: Part; nextQty: number; delta: number }> = [];
@@ -299,9 +304,9 @@ function App({ cloud }: { cloud: CloudSession }) {
   return <div className="app-shell">
     <aside className="sidebar"><div className="brand"><div className="brand-mark">Z&G</div><div><b>AUTO ERP</b><small>正式服务器版</small></div></div>
       <nav>{nav.filter(item => canOpenPage(cloud, item.id)).map(item => <button key={item.id} className={page === item.id ? 'active' : ''} onClick={() => { setPage(item.id); setSearch(''); setSearchDraft(''); }}><span>{item.icon}</span>{item.label}</button>)}</nav>
-      <div className="side-foot"><small>{cloud.organizationName}</small><b>{actorName}</b><span>{cloud.user.email}</span><button onClick={() => void editOwnProfile()}>编辑我的姓名</button><button onClick={() => confirm('确定退出当前账号？') && void cloud.signOut()}>退出登录</button></div>
+      <div className="side-foot"><small>{cloud.organizationName}</small><b>{actorName}</b><span>{cloud.user.email}</span><button onClick={() => confirm('确定退出当前账号？') && void cloud.signOut()}>退出登录</button></div>
     </aside>
-    <main className="main"><header className="topbar"><div className="global-search">⌕<input value={searchDraft} onChange={e => setSearchDraft(e.target.value)} onKeyDown={e => e.key === 'Enter' && runGlobalSearch()} placeholder="搜索客户、电话、VIN、车牌、工单、司机…" /><button type="button" onClick={runGlobalSearch}>搜索</button>{searchSuggestions.length > 0 && <div className="search-suggestions">{searchSuggestions.map((item, index) => <button type="button" key={`${item.page}-${item.label}-${index}`} onClick={() => { setSearchDraft(item.query); setSearch(item.query); setPage(item.page); }}><b>{item.label}</b><small>{item.meta}</small></button>)}</div>}</div><div className="top-status"><span className={syncing ? 'syncing' : ''}>{syncing ? '正在同步…' : '● 云端已同步'}</span><button type="button" onClick={() => void editOwnProfile()}>{actorName}</button><b>v0.77.1</b><button type="button" className="topbar-logout" onClick={() => confirm('确定退出当前账号？') && void cloud.signOut()}>退出</button></div></header>
+    <main className="main"><header className="topbar"><div className="global-search">⌕<input value={searchDraft} onChange={e => setSearchDraft(e.target.value)} onKeyDown={e => e.key === 'Enter' && runGlobalSearch()} placeholder="搜索客户、电话、VIN、车牌、工单、司机…" /><button type="button" onClick={runGlobalSearch}>搜索</button>{searchSuggestions.length > 0 && <div className="search-suggestions">{searchSuggestions.map((item, index) => <button type="button" key={`${item.page}-${item.label}-${index}`} onClick={() => { setSearchDraft(item.query); setSearch(item.query); setPage(item.page); }}><b>{item.label}</b><small>{item.meta}</small></button>)}</div>}</div><div className="top-status"><span className={syncing ? 'syncing' : ''}>{syncing ? '正在同步…' : '● 云端已同步'}</span><span>{actorName}</span><b>v0.78.0</b><button type="button" className="topbar-logout" onClick={() => confirm('确定退出当前账号？') && void cloud.signOut()}>退出</button></div></header>
       {loading ? <div className="loading">正在读取正式服务器数据…</div> : <PageContent page={page} search={search} store={store} settings={settings} cloud={cloud} setPage={setPage} openModal={openModal} setEditingOrder={setEditingOrder} persist={persist} remove={remove} receiveStock={receiveStock} addPayment={addPayment} deleteWorkOrder={deleteWorkOrder} approveRequest={approveRequest} rejectRequest={rejectRequest} claimWorkOrder={claimWorkOrder} completeWorkOrder={completeWorkOrder} actorName={actorName} editOwnProfile={editOwnProfile} />}
     </main>
     {modal && <EntityModal state={modal} store={store} settings={settings} onClose={closeModal} onSave={saveModal} />}
@@ -332,7 +337,15 @@ function PageContent(props: ContentProps) {
   if (page === 'campaigns') return <ActivityCenter campaigns={store.campaigns} warranties={store.warranties} vehicles={store.vehicles} onAddCampaign={() => props.openModal('campaign')} onEditCampaign={item => props.openModal('campaign', item)} onAddWarranty={() => props.openModal('warranty')} onEditWarranty={item => props.openModal('warranty', item)} onRemoveCampaign={id => props.remove('campaigns', id)} onRemoveWarranty={id => props.remove('warranties', id)} />;
   if (page === 'staff') return <StaffPage cloud={cloud} />;
   if (page === 'smart') return <SmartTools cloud={cloud} workOrders={store.workOrders} />;
-  return <SettingsPage settings={settings} openModal={props.openModal} />;
+  return <SettingsPage {...props} />;
+}
+
+function greetingForNow() {
+  const hour = new Date().getHours();
+  if (hour < 6) return '夜深了';
+  if (hour < 12) return '早上好';
+  if (hour < 18) return '下午好';
+  return '晚上好';
 }
 
 function Dashboard({ store, setPage, setEditingOrder, cloud, actorName, editOwnProfile }: ContentProps) {
@@ -341,7 +354,8 @@ function Dashboard({ store, setPage, setEditingOrder, cloud, actorName, editOwnP
   const visibleOrders = isTechnician ? store.workOrders.filter(order => !order.technicianUserId && !order.technician || order.technicianUserId === cloud.user.id || order.technician === actorName || order.technician === cloud.user.email) : store.workOrders;
   const recent = [...visibleOrders].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 7);
   const showFinance = can(cloud, 'pricing') || can(cloud, 'finance');
-  return <div className="page"><div className="hero"><div><p className="eyebrow">{isTechnician ? '技师工作台' : '老板经营驾驶舱'}</p><h1>早上好，{actorName || 'Z&G AUTO REPAIR'}</h1><p>{isTechnician ? '这里显示分配给您的任务和可自行领取的未分配工单。领取、完成和修改都会留下员工姓名与时间。' : '营业、工单、库存和欠款都来自正式服务器实时数据。'}</p></div><div className="toolbar"><button onClick={() => void editOwnProfile()}>编辑我的姓名</button>{can(cloud, 'customers') && <button onClick={() => setPage('customers')}>＋ 新客户</button>}{can(cloud, 'createWorkOrders') && <button className="primary" onClick={() => setEditingOrder('new')}>＋ 新建工单</button>}</div></div>
+  return <div className="page"><div className="hero"><div><p className="eyebrow">{isTechnician ? '技师工作台' : '老板经营驾驶舱'}</p><button type="button" className="greeting-name" onClick={() => void editOwnProfile()} title="点击修改我的名字"><h1>{greetingForNow()}，{actorName || 'Z&G AUTO REPAIR'}</h1><small>点击姓名可修改</small></button><p>{isTechnician ? '这里显示分配给您的任务和可自行领取的未分配工单。领取、完成和修改都会留下员工姓名与时间。' : '营业、工单、库存和欠款都来自正式服务器实时数据。'}</p></div><div className="toolbar">{can(cloud, 'customers') && <button onClick={() => setPage('customers')}>＋ 新客户</button>}{can(cloud, 'createWorkOrders') && <button className="primary" onClick={() => setEditingOrder('new')}>＋ 新建工单</button>}</div></div>
+    <div className="dashboard-actions">{can(cloud, 'workOrders') && <button onClick={() => setPage('workOrders')}><b>维修工单</b><span>接车、检查、施工与结账</span></button>}{can(cloud, 'parts') && <button onClick={() => setPage('parts')}><b>库存查询</b><span>配件编号、名称与库存</span></button>}{can(cloud, 'finance') && <button onClick={() => setPage('finance')}><b>财务收款</b><span>收入、支出与欠款</span></button>}{can(cloud, 'campaigns') && <button onClick={() => setPage('campaigns')}><b>活动与保修</b><span>优惠活动和车辆保修</span></button>}</div>
     {showFinance ? <div className="kpi-grid"><Kpi label="今日开单营业额" value={money(metrics.todaySales)} tone="blue" /><Kpi label="今日实收" value={money(metrics.todayReceived)} tone="green" /><Kpi label="今日毛利润" value={money(metrics.todayGross)} tone="purple" /><Kpi label="未收款总额" value={money(metrics.receivables)} tone="orange" /><Kpi label="本月营业额" value={money(metrics.monthSales)} /><Kpi label="本月实收" value={money(metrics.monthReceived)} /><Kpi label="本月支出" value={money(metrics.monthExpenses)} /><Kpi label="本月净经营收益" value={money(metrics.monthNet)} /></div> : <div className="kpi-grid technician-kpis"><Kpi label="分配给我的工单" value={String(visibleOrders.length)} tone="blue" /><Kpi label="等待检查" value={String(visibleOrders.filter(item => item.status === '等待检查').length)} /><Kpi label="维修中" value={String(visibleOrders.filter(item => item.status === '维修中').length)} tone="purple" /><Kpi label="今日完成" value={String(visibleOrders.filter(item => item.date === today() && item.status === '已完成').length)} tone="green" /></div>}
     <div className="dashboard-grid"><section className="panel wide"><div className="section-title"><h3>最近工单</h3><button onClick={() => setPage('workOrders')}>查看全部</button></div><table><thead><tr><th>工单</th><th>客户/车辆</th><th>状态</th>{showFinance && <><th>总价</th><th>欠款</th></>}</tr></thead><tbody>{recent.map(order => <tr key={order.id}><td><b>{order.number}</b><small>{order.date}</small></td><td>{order.customer}<small>{order.plate} · {order.vehicle}</small></td><td><Status value={order.status} /></td>{showFinance && <><td>{money(order.total)}</td><td className={order.balance > 0 ? 'warning-text' : ''}>{money(order.balance)}</td></>}</tr>)}</tbody></table>{!recent.length && <Empty text="还没有分配给您的工单。" />}</section>
       <section className="panel"><h3>今日车间</h3><div className="count-list"><div><span>等待批准</span><b>{visibleOrders.filter(item => item.status === '等待批准').length}</b></div><div><span>等待配件</span><b>{visibleOrders.filter(item => item.status === '等待配件').length}</b></div><div><span>维修中</span><b>{visibleOrders.filter(item => item.status === '维修中').length}</b></div><div><span>今日完成</span><b>{visibleOrders.filter(item => item.date === today() && item.status === '已完成').length}</b></div></div></section>
@@ -390,17 +404,39 @@ function WorkOrders({ store, search, settings, cloud, setEditingOrder, addPaymen
 }
 
 function Inventory({ store, search, openModal, remove, receiveStock }: ContentProps) {
-  const rows = filterRows(store.parts, search); const low = rows.filter(item => item.qty <= item.minimum).length;
-  return <div className="page"><div className="page-title"><div><p className="eyebrow">Parts & Inventory</p><h2>库存管理</h2><p>{rows.length} 种配件 · {low} 项低库存 · 成本 {money(rows.reduce((sum, item) => sum + item.qty * item.cost, 0))}</p></div><button className="primary" onClick={() => openModal('part')}>＋ 添加配件</button></div><section className="panel"><table><thead><tr><th>配件编号/名称</th><th>品牌/供应商</th><th>进货价</th><th>销售价</th><th>库存</th><th>位置</th><th /></tr></thead><tbody>{rows.map(item => <tr className={item.qty <= item.minimum ? 'low-stock' : ''} key={item.id}><td><b>{item.partNo}</b><small>{item.oemNo ? `OEM ${item.oemNo} · ` : ''}{item.name}</small></td><td>{item.brand || '—'}<small>{item.supplier}</small></td><td>{money(item.cost)}</td><td>{money(item.price)}</td><td><b>{item.qty}</b><small>最低 {item.minimum}</small></td><td>{item.location || '—'}</td><td className="actions"><button className="primary-soft" onClick={() => receiveStock(item)}>入库</button><button onClick={() => openModal('part', item)}>编辑</button><button className="danger-link" onClick={() => confirm('确定删除配件？') && remove('parts', item.id)}>删除</button></td></tr>)}</tbody></table>{!rows.length && <Empty text="尚未添加库存配件。" />}</section><section className="panel"><h3>最近库存流水</h3><table><thead><tr><th>时间</th><th>配件</th><th>类型</th><th>变化</th><th>结存</th><th>关联</th></tr></thead><tbody>{[...store.inventoryLogs].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 30).map(log => <tr key={log.id}><td>{new Date(log.date).toLocaleString()}</td><td>{log.partNo}<small>{log.partName}</small></td><td>{log.type}</td><td className={log.change >= 0 ? 'success-text' : 'warning-text'}>{log.change > 0 ? '+' : ''}{log.change}</td><td>{log.after}</td><td>{log.reference || '—'}</td></tr>)}</tbody></table></section></div>;
+  const [draft, setDraft] = useState('');
+  const [partQuery, setPartQuery] = useState('');
+  const combinedQuery = [search, partQuery].filter(Boolean).join(' ');
+  const rows = filterRows(store.parts, combinedQuery);
+  const low = rows.filter(item => item.qty <= item.minimum).length;
+  const runQuery = () => setPartQuery(draft.trim());
+  return <div className="page"><div className="page-title"><div><p className="eyebrow">Parts & Inventory</p><h2>库存管理</h2><p>{rows.length} 种配件 · {low} 项低库存 · 成本 {money(rows.reduce((sum, item) => sum + item.qty * item.cost, 0))}</p></div><button className="primary" onClick={() => openModal('part')}>＋ 添加配件</button></div><section className="panel"><div className="inventory-query-bar"><input value={draft} onChange={event => setDraft(event.target.value)} onKeyDown={event => event.key === 'Enter' && runQuery()} placeholder="输入配件编号、OEM、名称、品牌、供应商或库位" /><button className="primary" onClick={runQuery}>查询配件</button>{(draft || partQuery) && <button onClick={() => { setDraft(''); setPartQuery(''); }}>清除</button>}</div><table><thead><tr><th>配件编号/名称</th><th>品牌/供应商</th><th>进货价</th><th>销售价</th><th>库存</th><th>位置</th><th /></tr></thead><tbody>{rows.map(item => <tr className={item.qty <= item.minimum ? 'low-stock' : ''} key={item.id}><td><b>{item.partNo}</b><small>{item.oemNo ? `OEM ${item.oemNo} · ` : ''}{item.name}</small></td><td>{item.brand || '—'}<small>{item.supplier}</small></td><td>{money(item.cost)}</td><td>{money(item.price)}</td><td><b>{item.qty}</b><small>最低 {item.minimum}</small></td><td>{item.location || '—'}</td><td className="actions"><button className="primary-soft" onClick={() => receiveStock(item)}>入库</button><button onClick={() => openModal('part', item)}>编辑</button><button className="danger-link" onClick={() => confirm('确定删除配件？') && remove('parts', item.id)}>删除</button></td></tr>)}</tbody></table>{!rows.length && <Empty text="没有找到匹配的库存配件。" />}</section><section className="panel"><h3>最近库存流水</h3><table><thead><tr><th>时间</th><th>配件</th><th>类型</th><th>变化</th><th>结存</th><th>关联</th></tr></thead><tbody>{[...store.inventoryLogs].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 30).map(log => <tr key={log.id}><td>{new Date(log.date).toLocaleString()}</td><td>{log.partNo}<small>{log.partName}</small></td><td>{log.type}</td><td className={log.change >= 0 ? 'success-text' : 'warning-text'}>{log.change > 0 ? '+' : ''}{log.change}</td><td>{log.after}</td><td>{log.reference || '—'}</td></tr>)}</tbody></table></section></div>;
 }
 
-function Finance({ store, openModal }: ContentProps) {
+function Finance({ store, openModal, persist }: ContentProps) {
   const metrics = dashboardMetrics(store);
-  return <div className="page"><div className="page-title"><div><p className="eyebrow">Finance Center</p><h2>财务、收款与支出</h2></div><button className="primary" onClick={() => openModal('expense')}>＋ 记录支出</button></div><div className="kpi-grid"><Kpi label="今日实收" value={money(metrics.todayReceived)} tone="green" /><Kpi label="本月实收" value={money(metrics.monthReceived)} /><Kpi label="本月支出" value={money(metrics.monthExpenses)} tone="orange" /><Kpi label="本月净经营收益" value={money(metrics.monthNet)} tone="purple" /></div><div className="split-panels"><section className="panel"><h3>最近收款</h3><table><thead><tr><th>日期/工单</th><th>客户</th><th>方式</th><th>金额</th></tr></thead><tbody>{[...store.payments].sort((a, b) => b.date.localeCompare(a.date)).map(item => <tr key={item.id}><td>{new Date(item.date).toLocaleDateString()}<small>{item.workOrderNumber}</small></td><td>{item.customer}</td><td>{item.method}</td><td className="success-text"><b>{money(item.amount)}</b></td></tr>)}</tbody></table></section><section className="panel"><h3>最近支出</h3><table><thead><tr><th>日期</th><th>类别/收款方</th><th>方式</th><th>金额</th></tr></thead><tbody>{[...store.expenses].sort((a, b) => b.date.localeCompare(a.date)).map(item => <tr key={item.id}><td>{item.date}</td><td>{item.category}<small>{item.vendor}</small></td><td>{item.method || '—'}</td><td className="warning-text"><b>{money(item.amount)}</b></td></tr>)}</tbody></table></section></div></div>;
+  const recordIncome = async () => {
+    const customer = prompt('收入来源或客户名称：', '其他收入');
+    if (customer === null) return;
+    const amount = Number(prompt('收入金额：', '0'));
+    if (!Number.isFinite(amount) || amount <= 0) return alert('请输入大于 0 的收入金额。');
+    const method = prompt('收款方式：', '现金') || '现金';
+    const note = prompt('备注（可留空）：', '') || '';
+    await persist('payments', { id: uid(), date: new Date().toISOString(), workOrderId: '', workOrderNumber: '手工收入', customer: customer.trim() || '其他收入', amount, method, note });
+    alert('收入记录已保存到服务器。');
+  };
+  return <div className="page"><div className="page-title"><div><p className="eyebrow">Finance Center</p><h2>财务、收款与支出</h2></div><div className="title-actions"><button className="primary-soft" onClick={recordIncome}>＋ 记录收入</button><button className="primary" onClick={() => openModal('expense')}>＋ 记录支出</button></div></div><div className="kpi-grid"><Kpi label="今日实收" value={money(metrics.todayReceived)} tone="green" /><Kpi label="本月实收" value={money(metrics.monthReceived)} /><Kpi label="本月支出" value={money(metrics.monthExpenses)} tone="orange" /><Kpi label="本月净经营收益" value={money(metrics.monthNet)} tone="purple" /></div><div className="split-panels"><section className="panel"><h3>最近收款</h3><table><thead><tr><th>日期/工单</th><th>客户</th><th>方式</th><th>金额</th></tr></thead><tbody>{[...store.payments].sort((a, b) => b.date.localeCompare(a.date)).map(item => <tr key={item.id}><td>{new Date(item.date).toLocaleDateString()}<small>{item.workOrderNumber}</small></td><td>{item.customer}</td><td>{item.method}</td><td className="success-text"><b>{money(item.amount)}</b></td></tr>)}</tbody></table></section><section className="panel"><h3>最近支出</h3><table><thead><tr><th>日期</th><th>类别/收款方</th><th>方式</th><th>金额</th></tr></thead><tbody>{[...store.expenses].sort((a, b) => b.date.localeCompare(a.date)).map(item => <tr key={item.id}><td>{item.date}</td><td>{item.category}<small>{item.vendor}</small></td><td>{item.method || '—'}</td><td className="warning-text"><b>{money(item.amount)}</b></td></tr>)}</tbody></table></section></div></div>;
 }
 
-function SettingsPage({ settings, openModal }: { settings: ShopSettings; openModal: ContentProps['openModal'] }) {
-  return <div className="page"><div className="page-title"><div><p className="eyebrow">System Settings</p><h2>修理厂设置</h2></div><button className="primary" onClick={() => openModal('settings', settings)}>编辑设置</button></div><section className="settings-card"><div className="print-logo">Z&G</div><div><h2>{settings.shopName}</h2><p>{settings.address || '尚未填写地址'}</p><p>{settings.phone || '尚未填写电话'} · {settings.email}</p></div><dl><div><dt>默认工时费率</dt><dd>{money(settings.defaultLaborRate)}/小时</dd></div><div><dt>默认配件税率</dt><dd>{settings.defaultTaxRate}%</dd></div></dl></section><section className="panel"><h3>智能服务状态</h3><div className="integration-list"><div><b>VIN 自动识别</b><span className="success-text">已启用（NHTSA vPIC）</span></div><div><b>本地 OCR 车牌识别</b><span className="success-text">已启用（Tesseract）</span></div><div><b>浏览器语音输入</b><span className="success-text">兼容 Edge / Chrome</span></div><div><b>AI 故障诊断与照片分类</b><span>需部署 zg-ai 云函数并配置 OPENAI_API_KEY</span></div><div><b>短信通知</b><span>需部署 zg-notify 云函数并配置 Twilio</span></div><div><b>在线付款</b><span>需部署 zg-payment 云函数并配置 Stripe</span></div></div></section></div>;
+function SettingsPage({ settings, openModal, store }: ContentProps) {
+  const downloadBackup = () => {
+    const payload = JSON.stringify({ product: 'Z&G AUTO ERP', version: '0.78.0', exportedAt: new Date().toISOString(), settings, data: store }, null, 2);
+    const url = URL.createObjectURL(new Blob([payload], { type: 'application/json;charset=utf-8' }));
+    const anchor = document.createElement('a');
+    anchor.href = url; anchor.download = `ZG_AUTO_ERP_backup_${today()}.json`; anchor.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
+  return <div className="page"><div className="page-title"><div><p className="eyebrow">System Settings</p><h2>修理厂设置</h2></div><div className="title-actions"><button onClick={downloadBackup}>下载全部资料备份</button><button className="primary" onClick={() => openModal('settings', settings)}>编辑设置</button></div></div><section className="settings-card"><div className="print-logo">Z&G</div><div><h2>{settings.shopName}</h2><p>{settings.address || '尚未填写地址'}</p><p>{settings.phone || '尚未填写电话'} · {settings.email}</p></div><dl><div><dt>默认工时费率</dt><dd>{money(settings.defaultLaborRate)}/小时</dd></div><div><dt>默认配件税率</dt><dd>{settings.defaultTaxRate}%（仅配件）</dd></div></dl></section><section className="panel backup-panel"><div><h3>本地资料备份</h3><p>下载客户、车辆、工单、库存、财务、活动、员工权限和修改记录。服务器资料不会被删除。</p></div><button className="primary-soft" onClick={downloadBackup}>下载 JSON 备份</button></section><section className="panel"><h3>智能服务状态</h3><div className="integration-list"><div><b>VIN 自动识别</b><span className="success-text">已启用（NHTSA vPIC）</span></div><div><b>本地 OCR 车牌识别</b><span className="success-text">已启用（Tesseract）</span></div><div><b>浏览器语音输入</b><span className="success-text">兼容 Edge / Chrome</span></div><div><b>AI 故障诊断与照片分类</b><span>需部署 zg-ai 云函数并配置 OPENAI_API_KEY</span></div><div><b>邮件与短信通知</b><span>云端发送失败时自动打开本机邮件程序并保留客户确认链接</span></div><div><b>在线付款</b><span>需部署 zg-payment 云函数并配置 Stripe</span></div></div></section></div>;
 }
 
 function EntityModal({ state, store, settings, onClose, onSave }: { state: NonNullable<ModalState>; store: AppStore; settings: ShopSettings; onClose: () => void; onSave: (type: NonNullable<ModalState>['type'], data: Record<string, unknown>) => Promise<void> }) {
@@ -477,11 +513,21 @@ function SendMenu({ order, settings, store, cloud }: { order: WorkOrder; setting
   const savedEmail = customer?.email || fleet?.billingEmail || '';
   const notify = async (subject: string, html: string, email: string) => cloud.invokeFunction('zg-notify', { channel: 'email', to: email, subject, html });
   const explainSendError = (error: unknown) => {
-    const message = error instanceof Error ? error.message : String(error);
+    let message = '未知发送错误';
+    if (error instanceof Error) message = error.message;
+    else if (typeof error === 'string') message = error;
+    else if (error && typeof error === 'object') {
+      const value = error as Record<string, unknown>;
+      message = String(value.message || value.error || value.context || JSON.stringify(value));
+    }
     if (message.includes('RESEND_API_KEY')) return '邮件服务尚未配置 RESEND_API_KEY。工单资料没有丢失；请先复制客户确认链接，配置邮件服务后即可自动发送。';
     if (message.includes('RESEND_FROM') || message.includes('EMAIL_FROM') || message.toLowerCase().includes('sender')) return `邮件发件地址尚未验证：${message}`;
     if (message.toLowerCase().includes('function') && message.toLowerCase().includes('not found')) return '邮件云函数 zg-notify 尚未部署。';
     return message;
+  };
+  const openMailClient = (email: string, subject: string, body: string) => {
+    const href = `mailto:${encodeURIComponent(email)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+    window.location.href = href;
   };
   const copyText = async (value: string) => {
     try {
@@ -495,10 +541,19 @@ function SendMenu({ order, settings, store, cloud }: { order: WorkOrder; setting
   const regularEmail = async (kind: string) => {
     const email = prompt('客户邮箱：', savedEmail);
     if (!email?.trim()) return;
-    const title = kind === 'invoice' ? 'Invoice / 发票' : kind === 'inspection' ? 'Inspection Result / 检查结果' : 'Repair Order / 维修工单';
-    const detail = kind === 'inspection' ? `<p><b>检查/诊断：</b>${escapeHtml(order.diagnosis || '尚未填写')}</p><p><b>已完成维修：</b>${escapeHtml(order.workPerformed || '尚未填写')}</p>` : `<p><b>客户描述：</b>${escapeHtml(order.complaint || '—')}</p><p><b>诊断与维修：</b>${escapeHtml(`${order.diagnosis || ''} ${order.workPerformed || ''}`)}</p><p><b>总价：</b>${money(order.total)}　<b>已付：</b>${money(order.paid)}　<b>欠款：</b>${money(order.balance)}</p>`;
-    await notify(`${settings.shopName} · ${title} · ${order.number}`, `<h2>${escapeHtml(settings.shopName)}</h2><p>${escapeHtml(settings.address)} · ${escapeHtml(settings.phone)}</p><hr><h3>${title} ${escapeHtml(order.number)}</h3><p>${escapeHtml(order.customer)} · ${escapeHtml(order.vehicle)} · ${escapeHtml(order.plate)}</p>${detail}<p>如有问题请致电 ${escapeHtml(settings.phone)}。</p>`, email.trim());
-    alert('邮件已发送。');
+    const title = kind === 'invoice' ? 'Invoice / 发票' : kind === 'inspection' ? 'Inspection Result / 检查结果' : kind === 'payment' ? 'Payment Reminder / 结账催费' : 'Repair Order / 维修工单';
+    const detail = kind === 'inspection'
+      ? `<p><b>检查/诊断：</b>${escapeHtml(order.diagnosis || '尚未填写')}</p><p><b>已完成维修：</b>${escapeHtml(order.workPerformed || '尚未填写')}</p>`
+      : `<p><b>客户描述：</b>${escapeHtml(order.complaint || '—')}</p><p><b>诊断与维修：</b>${escapeHtml(`${order.diagnosis || ''} ${order.workPerformed || ''}`)}</p><p><b>总价：</b>${money(order.total)}　<b>已付：</b>${money(order.paid)}　<b>欠款：</b>${money(order.balance)}</p>`;
+    const subject = `${settings.shopName} · ${title} · ${order.number}`;
+    const textBody = `${settings.shopName}\n${settings.address}\n${settings.phone}\n\n${title} ${order.number}\n客户：${order.customer}\n车辆：${order.vehicle} ${order.plate}\n总价：${money(order.total)}\n已付：${money(order.paid)}\n欠款：${money(order.balance)}\n\n客户描述：${order.complaint || '—'}\n检查/诊断：${order.diagnosis || '—'}\n完成维修：${order.workPerformed || '—'}\n\n如有问题请致电 ${settings.phone}。`;
+    try {
+      await notify(subject, `<h2>${escapeHtml(settings.shopName)}</h2><p>${escapeHtml(settings.address)} · ${escapeHtml(settings.phone)}</p><hr><h3>${title} ${escapeHtml(order.number)}</h3><p>${escapeHtml(order.customer)} · ${escapeHtml(order.vehicle)} · ${escapeHtml(order.plate)}</p>${detail}<p>如有问题请致电 ${escapeHtml(settings.phone)}。</p>`, email.trim());
+      alert('邮件已发送。');
+    } catch (error) {
+      openMailClient(email.trim(), subject, textBody);
+      alert(`云端邮件暂未发出，已打开本机邮件程序并填好内容。\n原因：${explainSendError(error)}`);
+    }
   };
   const approval = async () => {
     const email = prompt('接收在线确认链接的客户邮箱：', savedEmail);
@@ -512,7 +567,8 @@ function SendMenu({ order, settings, store, cloud }: { order: WorkOrder; setting
       alert('在线确认链接已经发送，客户确认或拒绝后会自动回传系统。');
     } catch (error) {
       const copied = await copyText(url);
-      alert(`客户在线确认链接已经生成${copied ? '并复制' : ''}，但邮件没有自动发出。\n原因：${explainSendError(error)}\n\n可先通过短信或微信把下面链接发给客户：\n${url}`);
+      openMailClient(email.trim(), `${settings.shopName} · 维修项目等待确认 · ${order.number}`, `${order.customer}，您好：\n\n您的车辆 ${order.vehicle}（${order.plate}）维修项目等待确认，预计总价 ${money(order.total)}。\n\n请打开以下链接查看、签字并确认：\n${url}\n\n工单号：${order.number}\n${settings.phone}`);
+      alert(`客户在线确认链接已经生成${copied ? '并复制' : ''}。云端邮件暂未发出，已打开本机邮件程序并填好确认链接。\n原因：${explainSendError(error)}`);
     }
   };
   const choose = async (value: string) => {
@@ -523,7 +579,7 @@ function SendMenu({ order, settings, store, cloud }: { order: WorkOrder; setting
     catch (error) { alert(`发送失败：${explainSendError(error)}`); }
     finally { setSending(false); }
   };
-  return <select className="send-select" value="" disabled={sending} onChange={event => { void choose(event.target.value); event.target.value = ''; }}><option value="">{sending ? '发送中…' : '发送…'}</option><option value="repair">邮件发送工单</option><option value="invoice">邮件发送发票</option><option value="inspection">邮件发送检查结果</option><option value="approval">发送在线维修确认</option>{order.customerApprovalUrl && <option value="copy">复制现有确认链接</option>}</select>;
+  return <select className="send-select" value="" disabled={sending} onChange={event => { void choose(event.target.value); event.target.value = ''; }}><option value="">{sending ? '发送中…' : '发送…'}</option><option value="repair">邮件发送工单</option><option value="invoice">邮件发送发票</option><option value="inspection">邮件发送检查结果</option><option value="payment">邮件催费/结账</option><option value="approval">发送在线维修确认</option>{order.customerApprovalUrl && <option value="copy">复制现有确认链接</option>}</select>;
 }
 
 function printDocument(order: WorkOrder, settings: ShopSettings, documentType: string) {

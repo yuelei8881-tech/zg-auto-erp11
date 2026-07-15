@@ -46,7 +46,7 @@ export type ReviewHistoryItem = {
 
 export type EvidencePhoto = {
   id: string;
-  category: '车牌' | '左前' | '右前' | '左后' | '右后' | '仪表里程' | '已有损伤' | '故障扫描' | '维修中' | '维修完成' | '其他';
+  category: '车牌' | '正前' | '正后' | '左侧' | '右侧' | '左前' | '右前' | '左后' | '右后' | '仪表里程' | '已有损伤' | '故障扫描' | '维修中' | '维修完成' | '其他';
   dataUrl: string;
   fileName: string;
   note?: string;
@@ -84,6 +84,9 @@ export type WorkOrder = {
   customerApprovalBy?: string;
   customerApprovalNote?: string;
   customerApprovalUrl?: string;
+  workflowStage?: '接车登记' | '技师诊断' | '报价待确认' | '维修施工' | '完工待结账' | '已结账';
+  complaintEn?: string; diagnosisEn?: string; workPerformedEn?: string;
+  printTime?: string; workTimeNote?: string;
 };
 
 export type ApprovalRequest = {

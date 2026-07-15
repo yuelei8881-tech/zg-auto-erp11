@@ -25,7 +25,9 @@ const inspectionItems: Array<[keyof InspectionChecklist, string]> = [
   ['estimate', '人工、配件和报价明细已核对'],
 ];
 
-const evidenceCategories: EvidencePhoto['category'][] = ['车牌', '左前', '右前', '左后', '右后', '仪表里程', '已有损伤', '故障扫描', '维修中', '维修完成', '其他'];
+const evidenceCategories: EvidencePhoto['category'][] = ['车牌', '正前', '正后', '左侧', '右侧', '左前', '右前', '左后', '右后', '仪表里程', '已有损伤', '故障扫描', '维修中', '维修完成', '其他'];
+const requiredViews: EvidencePhoto['category'][] = ['正前', '正后', '左侧', '右侧'];
+const workflowStages: NonNullable<WorkOrder['workflowStage']>[] = ['接车登记', '技师诊断', '报价待确认', '维修施工', '完工待结账', '已结账'];
 
 async function compressEvidence(file: File): Promise<string> {
   const source = await new Promise<string>((resolve, reject) => {
@@ -65,8 +67,24 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, p
   const inspectionDone = inspectionItems.filter(([key]) => checklist[key]).length;
   const reviewStatus = order.reviewStatus || (order.status === '等待批准' ? '待审查' : ['维修中', '已完成', '已交车'].includes(order.status) ? '已通过' : '未提交');
   const activeEvidence = (order.evidencePhotos || []).filter(item => !item.archivedAt);
+  const workflowStage = order.workflowStage || '接车登记';
+  const requiredViewCount = requiredViews.filter(category => activeEvidence.some(photo => photo.category === category)).length;
 
   const patch = (changes: Partial<WorkOrder>) => setOrder(current => recalculateWorkOrder({ ...current, ...changes }));
+
+  const dictate = (field: 'complaint' | 'diagnosis' | 'workPerformed') => {
+    const SpeechRecognition = (window as unknown as { SpeechRecognition?: new () => any; webkitSpeechRecognition?: new () => any }).SpeechRecognition
+      || (window as unknown as { webkitSpeechRecognition?: new () => any }).webkitSpeechRecognition;
+    if (!SpeechRecognition) return alert('当前浏览器不支持语音输入，请使用最新版 Chrome、Edge 或 Safari。');
+    const recognition = new SpeechRecognition();
+    recognition.lang = 'zh-CN'; recognition.interimResults = false; recognition.continuous = false;
+    recognition.onresult = (event: any) => {
+      const text = String(event.results?.[0]?.[0]?.transcript || '').trim();
+      if (text) patch({ [field]: `${order[field] ? `${order[field]}\n` : ''}${text}` });
+    };
+    recognition.onerror = () => alert('没有识别到语音，请允许麦克风权限后重试。');
+    recognition.start();
+  };
 
   const selectCustomer = (id: string) => {
     const customer = customers.find(item => item.id === id);
@@ -157,17 +175,18 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, p
     patch({ ...changes, reviewHistory: [...(order.reviewHistory || []), { id: uid(), action, by: currentUser, at: new Date().toISOString(), note: order.reviewNotes || '' }] });
   };
   const submitReview = () => {
-    if (inspectionDone < inspectionItems.length) return alert('请先完成全部接车检查项目。');
+    if (!checklist.intake || !checklist.exterior) return alert('请先完成接车资料和车辆外观两项检查。');
+    if (requiredViewCount < 4) return alert('请完成车辆正前、正后、左侧、右侧四个方向的证据照片。');
     if (!order.diagnosis?.trim()) return alert('请先填写检查/诊断结果。');
-    transitionReview('提交审查', { status: '等待批准', reviewStatus: '待审查', submittedForReviewAt: new Date().toISOString() });
+    transitionReview('提交审查', { status: '等待批准', workflowStage: '报价待确认', reviewStatus: '待审查', submittedForReviewAt: new Date().toISOString() });
   };
-  const approveReview = () => transitionReview('批准维修', { status: '维修中', reviewStatus: '已通过', reviewedBy: currentUser, reviewedAt: new Date().toISOString() });
+  const approveReview = () => transitionReview('批准维修', { status: '维修中', workflowStage: '维修施工', reviewStatus: '已通过', reviewedBy: currentUser, reviewedAt: new Date().toISOString() });
   const returnReview = () => {
     if (!order.reviewNotes?.trim()) return alert('请填写退回补充的原因。');
     transitionReview('退回补充', { status: '等待检查', reviewStatus: '退回补充', reviewedBy: currentUser, reviewedAt: new Date().toISOString() });
   };
 
-  const addEvidence = async (files: FileList | null) => {
+  const addEvidence = async (files: FileList | null, forcedCategory?: EvidencePhoto['category']) => {
     if (!files?.length) return;
     if ((order.evidencePhotos || []).length + files.length > 24) return alert('每张工单最多保留 24 张证据照片。');
     setEvidenceSaving(true);
@@ -175,11 +194,12 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, p
       const additions: EvidencePhoto[] = [];
       for (const file of Array.from(files)) {
         if (!file.type.startsWith('image/')) continue;
-        additions.push({ id: uid(), category: evidenceCategory, dataUrl: await compressEvidence(file), fileName: file.name, capturedAt: new Date().toISOString(), capturedBy: currentUser });
+        additions.push({ id: uid(), category: forcedCategory || evidenceCategory, dataUrl: await compressEvidence(file), fileName: file.name, capturedAt: new Date().toISOString(), capturedBy: currentUser });
       }
       const evidencePhotos = [...(order.evidencePhotos || []), ...additions];
-      const exteriorCategories: EvidencePhoto['category'][] = ['左前', '右前', '左后', '右后', '已有损伤'];
-      patch({ evidencePhotos, inspectionChecklist: exteriorCategories.includes(evidenceCategory) ? { ...checklist, exterior: true } : checklist });
+      const category = forcedCategory || evidenceCategory;
+      const exteriorCategories: EvidencePhoto['category'][] = [...requiredViews, '左前', '右前', '左后', '右后', '已有损伤'];
+      patch({ evidencePhotos, inspectionChecklist: exteriorCategories.includes(category) ? { ...checklist, exterior: true } : checklist });
     } catch (error) { alert(`照片处理失败：${error instanceof Error ? error.message : error}`); }
     finally { setEvidenceSaving(false); }
   };
@@ -192,6 +212,7 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, p
 
   const submit = async () => {
     if (!calculated.customer || !calculated.vehicle) return alert('请选择客户和车辆。');
+    if (!checklist.intake || !checklist.exterior) return alert('接车单至少完成“接车资料”和“车辆外观”两项后才能保存。');
     if (calculated.laborItems.some(item => !item.description)) return alert('请填写所有人工项目名称。');
     if (calculated.partItems.some(item => !item.name || item.qty <= 0)) return alert('请检查配件名称和数量。');
     setSaving(true);
@@ -200,7 +221,7 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, p
 
   return <div className="editor-screen">
     <div className="editor-head"><div><p className="eyebrow">维修工单 / Repair Order</p><h2>{value ? `编辑 ${order.number}` : '新建维修工单'}</h2></div><div className="toolbar"><button type="button" onClick={() => onPrint(calculated, 'Repair Order')}>打印工单</button><button type="button" onClick={onCancel}>取消</button><button type="button" className="primary" onClick={submit} disabled={saving}>{saving ? '保存中…' : '保存工单'}</button></div></div>
-    <div className="work-order-shop-head"><div><b>{settings.shopName || 'Z&G AUTO REPAIR'}</b><span>{settings.address || '319 Agostino Rd, San Gabriel, CA 91776'}</span><span>Tel / 电话：{settings.phone || '626-508-0888'}</span></div><div><small>Repair Order No. / 工单编号</small><strong>{order.number}</strong></div></div>
+    <div className="workflow-strip">{workflowStages.map((stage, index) => <div key={stage} className={`workflow-step ${workflowStages.indexOf(workflowStage) >= index ? 'done' : ''} ${workflowStage === stage ? 'active' : ''}`}><span className="step-number">{index + 1}</span><strong>{stage}</strong><small>{['前两项即可保存','员工领取并诊断','配件工时与确认','施工及证据留存','收款与交车','流程完成'][index]}</small></div>)}</div>
 
     <section className="form-section"><h3>客户与车辆</h3><div className="form-grid four">
       <label>工单号<input value={order.number} onChange={e => patch({ number: e.target.value })} /></label>
@@ -232,15 +253,16 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, p
       <label className="span-2">维修授权人<input value={order.authorizedContact || ''} onChange={e => patch({ authorizedContact: e.target.value })} /></label>
     </div></section>}
 
-    <section className="form-section"><h3>维修内容</h3><div className="form-grid three">
-      <label>客户描述<textarea value={order.complaint || ''} onChange={e => patch({ complaint: e.target.value })} /></label>
-      <label>检查/诊断结果<textarea value={order.diagnosis || ''} onChange={e => patch({ diagnosis: e.target.value })} /></label>
-      <label>完成的维修<textarea value={order.workPerformed || ''} onChange={e => patch({ workPerformed: e.target.value })} /></label>
-    </div></section>
+    <section className="form-section"><h3>维修内容</h3><div className="form-grid three voice-fields">
+      <label><span className="field-title">客户描述 <button type="button" onClick={() => dictate('complaint')}>🎤 语音</button></span><textarea value={order.complaint || ''} onChange={e => patch({ complaint: e.target.value })} /><small>English translation（打印显示）</small><textarea className="translation-input" value={order.complaintEn || ''} onChange={e => patch({ complaintEn: e.target.value })} placeholder="Customer concern in English" /></label>
+      <label><span className="field-title">检查/诊断结果 <button type="button" onClick={() => dictate('diagnosis')}>🎤 语音</button></span><textarea value={order.diagnosis || ''} onChange={e => patch({ diagnosis: e.target.value })} /><small>English translation（打印显示）</small><textarea className="translation-input" value={order.diagnosisEn || ''} onChange={e => patch({ diagnosisEn: e.target.value })} placeholder="Diagnosis in English" /></label>
+      <label><span className="field-title">完成的维修 <button type="button" onClick={() => dictate('workPerformed')}>🎤 语音</button></span><textarea value={order.workPerformed || ''} onChange={e => patch({ workPerformed: e.target.value })} /><small>English translation（打印显示）</small><textarea className="translation-input" value={order.workPerformedEn || ''} onChange={e => patch({ workPerformedEn: e.target.value })} placeholder="Work performed in English" /></label>
+    </div><div className="form-grid two compact time-fields"><label>打印时间（可授权修改）<input type="datetime-local" value={order.printTime || ''} onChange={e => patch({ printTime: e.target.value })} /></label><label>做工时间备注<input value={order.workTimeNote || ''} onChange={e => patch({ workTimeNote: e.target.value })} placeholder="例如：2026/07/15 09:00–14:30" /></label></div></section>
 
     <section className="form-section evidence-section"><div className="section-title"><div><h3>证据留存 / Evidence</h3><span>照片同步保存在工单档案中；打印报价单、工单、发票和收据时不会打印照片。</span></div><b>{activeEvidence.length} 张有效照片</b></div>
+      <div className="direction-capture-grid">{requiredViews.map(category => { const photo = activeEvidence.find(item => item.category === category); return <label key={category} className={`direction-capture ${photo ? 'captured' : ''}`}><span className="car-outline">{category === '正前' ? '🚘' : category === '正后' ? '🚗' : '▱🚙▱'}</span><b>{category}</b><small>{photo ? '已拍摄，可重新补拍' : '必拍照片'}</small><input type="file" accept="image/*" capture="environment" disabled={evidenceSaving} onChange={e => { void addEvidence(e.target.files, category); e.currentTarget.value = ''; }} /></label>; })}</div>
       <div className="evidence-toolbar"><label>照片类别<select value={evidenceCategory} onChange={e => setEvidenceCategory(e.target.value as EvidencePhoto['category'])}>{evidenceCategories.map(item => <option key={item}>{item}</option>)}</select></label><label className="camera-button">{evidenceSaving ? '正在处理照片…' : '＋ 拍照 / 选择照片'}<input type="file" accept="image/*" capture="environment" multiple disabled={evidenceSaving} onChange={e => { void addEvidence(e.target.files); e.currentTarget.value = ''; }} /></label><span>手机打开时会优先调用后置相机，系统自动压缩并记录拍摄人和时间。</span></div>
-      <div className="evidence-grid">{activeEvidence.map(photo => <article key={photo.id}><button type="button" className="evidence-image" onClick={() => window.open(photo.dataUrl, '_blank')}><img src={photo.dataUrl} alt={photo.category} /></button><div><b>{photo.category}</b><small>{photo.capturedBy} · {new Date(photo.capturedAt).toLocaleString()}</small><input value={photo.note || ''} placeholder="照片备注（例如：右前保险杠原有划痕）" onChange={e => patch({ evidencePhotos: (order.evidencePhotos || []).map(item => item.id === photo.id ? { ...item, note: e.target.value } : item) })} /><button type="button" className="danger-link" onClick={() => archiveEvidence(photo)}>作废归档</button></div></article>)}</div>
+      <div className="evidence-grid">{activeEvidence.map(photo => <article key={photo.id} className="evidence-card"><button type="button" className="evidence-image" onClick={() => window.open(photo.dataUrl, '_blank')}><img src={photo.dataUrl} alt={photo.category} /></button><div><b>{photo.category}</b><small>{photo.capturedBy} · {new Date(photo.capturedAt).toLocaleString()}</small><input value={photo.note || ''} placeholder="照片备注（例如：右前保险杠原有划痕）" onChange={e => patch({ evidencePhotos: (order.evidencePhotos || []).map(item => item.id === photo.id ? { ...item, note: e.target.value } : item) })} /><button type="button" className="danger-link" onClick={() => archiveEvidence(photo)}>作废归档</button></div></article>)}</div>
       {!activeEvidence.length && <div className="empty-line">尚未留存证据照片。建议至少拍摄车牌、四角、仪表里程和已有损伤。</div>}
       {!!order.evidencePhotos?.some(item => item.archivedAt) && <details className="archived-evidence"><summary>查看已作废照片（{order.evidencePhotos.filter(item => item.archivedAt).length}）</summary>{order.evidencePhotos.filter(item => item.archivedAt).map(item => <div key={item.id}><span>{item.category} · {item.fileName}</span><small>{item.archivedBy} 作废于 {new Date(item.archivedAt!).toLocaleString()} · {item.archiveReason}</small></div>)}</details>}
     </section>
@@ -261,7 +283,7 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, p
 
     <section className="form-section"><div className="section-title"><h3>人工项目</h3><button onClick={addLabor}>＋ 添加工时</button></div>
       <div className="line-table"><div className="line-head labor-grid"><span>项目</span><span>工时</span><span>费率</span><span>技师</span><span>小计</span><span /></div>
-      {calculated.laborItems.map(item => <div className="line-row labor-grid" key={item.id}><input value={item.description} onChange={e => updateLabor(item.id, { description: e.target.value })} placeholder="例如：更换水泵" /><input type="number" step="0.1" value={item.hours} onChange={e => updateLabor(item.id, { hours: Number(e.target.value) })} /><input type="number" step="0.01" value={item.rate} disabled={!canEditPricing} onChange={e => updateLabor(item.id, { rate: Number(e.target.value) })} /><input value={item.technician || ''} onChange={e => updateLabor(item.id, { technician: e.target.value })} /><b>{canViewFinancials ? money(item.total) : '—'}</b><button className="danger-link" onClick={() => removeLabor(item.id)}>删除</button></div>)}
+      {calculated.laborItems.map(item => <div className="line-row labor-grid" key={item.id}><input value={item.description} onChange={e => updateLabor(item.id, { description: e.target.value })} placeholder="例如：更换水泵" /><input type="number" step="0.1" value={item.hours} onChange={e => updateLabor(item.id, { hours: Number(e.target.value) })} /><input type="number" step="0.01" value={item.rate} onChange={e => updateLabor(item.id, { rate: Number(e.target.value) })} /><input value={item.technician || ''} onChange={e => updateLabor(item.id, { technician: e.target.value })} /><b>{canViewFinancials ? money(item.total) : '—'}</b><button className="danger-link" onClick={() => removeLabor(item.id)}>删除</button></div>)}
       {!calculated.laborItems.length && <div className="empty-line">尚未添加人工项目</div>}</div>
     </section>
 
@@ -276,7 +298,7 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, p
       <label>折扣<input type="number" step="0.01" value={order.discount} onChange={e => patch({ discount: Number(e.target.value) })} /></label>
       <label>配件销售税率 %（人工不计税）<input type="number" step="0.01" value={order.taxRate} onChange={e => patch({ taxRate: Number(e.target.value) })} /></label>
       <label>已付款<input type="number" step="0.01" value={order.paid} onChange={e => patch({ paid: Number(e.target.value) })} /></label>
-      <label>实际结账金额（需双人授权）<input type="number" step="0.01" placeholder={String(calculated.laborTotal + calculated.partsTotal + calculated.outsource + calculated.tax - calculated.discount)} value={order.settlementTotal ?? ''} onChange={e => patch({ settlementTotal: e.target.value === '' ? undefined : Number(e.target.value) })} /></label>
+      <label>实际结账金额（仅手动改价需双人授权）<input type="number" step="0.01" placeholder={`自动计算 ${money(calculated.laborTotal + calculated.partsTotal + calculated.outsource + calculated.tax - calculated.discount)}`} value={order.settlementTotal ?? ''} onChange={e => patch({ settlementTotal: e.target.value === '' ? undefined : Number(e.target.value) })} /></label>
     </div><p className="tax-guidance">加州默认规则：系统仅对配件销售额计算销售税；单独列示的维修/安装人工通常不计销售税。制造加工人工等例外请由会计确认。参考：<a href="https://www.cdtfa.ca.gov/formspubs/pub25.pdf" target="_blank" rel="noreferrer">CDTFA Publication 25</a>、<a href="https://www.cdtfa.ca.gov/lawguides/vol1/sutr/1546.html" target="_blank" rel="noreferrer">Regulation 1546</a>。</p></div><div className="totals-card"><div><span>人工（免销售税）</span><b>{money(calculated.laborTotal)}</b></div><div><span>配件</span><b>{money(calculated.partsTotal)}</b></div><div><span>配件销售税</span><b>{money(calculated.tax)}</b></div><div className="grand"><span>总价</span><b>{money(calculated.total)}</b></div><div className="balance"><span>欠款</span><b>{money(calculated.balance)}</b></div></div></section>}
   </div>;
 }
