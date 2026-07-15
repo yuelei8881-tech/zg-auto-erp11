@@ -24,6 +24,7 @@ export type CloudSession = {
   createStaffInvite: (email: string, role: string) => Promise<{ activationCode: string }>;
   updateStaff: (userId: string, changes: Partial<Pick<StaffMember, 'displayName' | 'phone' | 'role' | 'status' | 'permissions'>>) => Promise<void>;
   cancelStaffInvite: (id: string) => Promise<void>;
+  deleteStaffByEmail: (email: string) => Promise<boolean>;
   signOut: () => Promise<void>;
 };
 
@@ -57,6 +58,10 @@ export async function openCloudSession(user: User): Promise<CloudSession> {
     }
     membership = await findMembership();
     if (membership) sessionStorage.removeItem('zg_staff_activation_code');
+    if (activationCode && !membership) {
+      sessionStorage.removeItem('zg_staff_activation_code');
+      throw new Error('员工激活码无效、已过期或与当前邮箱不匹配。请向老板索取新的激活码。');
+    }
   }
   if (!membership) {
     const { error } = await client.rpc('zg_bootstrap_organization', { p_name: 'Z&G AUTO REPAIR' });
@@ -160,13 +165,19 @@ export async function openCloudSession(user: User): Promise<CloudSession> {
     if (error) throw error;
   };
 
+  const deleteStaffByEmail = async (email: string) => {
+    const { data, error } = await client.rpc('zg_delete_staff_by_email', { p_email: email.trim().toLowerCase() });
+    if (error) throw error;
+    return Boolean(data);
+  };
+
   return {
     user: { id: user.id, email: user.email || 'unknown', name: membership.display_name || undefined },
     organizationId,
     organizationName: organization?.name || 'Z&G AUTO REPAIR',
     role: String(membership.role),
     permissions: (membership.permissions || {}) as Record<string, boolean>,
-    loadStore, upsertRecord, deleteRecord, subscribe, invokeFunction, listStaff, createStaffInvite, updateStaff, cancelStaffInvite,
+    loadStore, upsertRecord, deleteRecord, subscribe, invokeFunction, listStaff, createStaffInvite, updateStaff, cancelStaffInvite, deleteStaffByEmail,
     signOut: async () => { await client.auth.signOut(); },
   };
 }

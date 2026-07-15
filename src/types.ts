@@ -73,6 +73,9 @@ export type WorkOrder = {
   reviewNotes?: string; submittedForReviewAt?: string; reviewedBy?: string; reviewedAt?: string;
   reviewHistory?: ReviewHistoryItem[];
   evidencePhotos?: EvidencePhoto[];
+  customerSignature?: string;
+  customerSignedAt?: string;
+  customerSignedBy?: string;
   settlementTotal?: number;
 };
 

@@ -22,6 +22,7 @@ export function StaffPage({ cloud }: { cloud: CloudSession }) {
   const [email, setEmail] = useState(''); const [role, setRole] = useState('technician');
   const [lastInvite, setLastInvite] = useState<{ email: string; activationCode: string } | null>(null);
   const [loading, setLoading] = useState(true); const [busy, setBusy] = useState(false);
+  const [deleteEmail, setDeleteEmail] = useState(''); const [deleteBusy, setDeleteBusy] = useState(false);
   const canManage = cloud.role === 'owner' || cloud.role === 'manager' || Boolean(cloud.permissions.staff);
   const refresh = async () => { setLoading(true); try { const data = await cloud.listStaff(); setMembers(data.members); setInvites(data.invites); } catch (error) { alert(`读取员工资料失败：${error instanceof Error ? error.message : error}`); } finally { setLoading(false); } };
   useEffect(() => { void refresh(); }, [cloud.organizationId]);
@@ -42,6 +43,7 @@ export function StaffPage({ cloud }: { cloud: CloudSession }) {
         {!loading && !members.length && <div className="empty"><b>暂无员工账号</b><span>先在上方建立员工邀请。</span></div>}
       </section>
       <section className="panel"><div className="section-title"><h3>待处理邀请</h3><span>{invites.filter(item => item.status === 'pending').length} 项</span></div><table><thead><tr><th>邮箱</th><th>角色</th><th>激活码</th><th>状态</th><th>有效期</th><th /></tr></thead><tbody>{invites.map(item => <tr key={item.id}><td>{item.email}</td><td>{roles.find(roleItem => roleItem.value === item.role)?.label || item.role}</td><td><b>{item.activationCode || '—'}</b></td><td>{item.status}</td><td>{item.expiresAt?.slice(0, 10) || '—'}</td><td className="actions">{item.status === 'pending' && <><button onClick={async () => { await navigator.clipboard.writeText(item.activationCode || ''); alert('激活码已复制。'); }}>复制码</button><button className="danger-link" onClick={async () => { await cloud.cancelStaffInvite(item.id); await refresh(); }}>取消</button></>}</td></tr>)}</tbody></table></section>
+      {cloud.role === 'owner' && <section className="panel staff-delete-panel"><div className="section-title"><div><h3>删除员工账号</h3><span>仅老板可执行；会同时删除该员工的组织权限和未处理邀请。</span></div></div><div className="staff-delete-row"><input type="email" value={deleteEmail} onChange={event => setDeleteEmail(event.target.value)} placeholder="输入要删除的员工邮箱" /><button className="danger-button" disabled={deleteBusy || !deleteEmail.includes('@')} onClick={async () => { const target = deleteEmail.trim().toLowerCase(); if (!confirm(`确定删除员工账号 ${target} 吗？`)) return; setDeleteBusy(true); try { const deleted = await cloud.deleteStaffByEmail(target); alert(deleted ? '员工账号已删除。' : '未找到该员工账号，已清理同邮箱的待处理邀请。'); setDeleteEmail(''); await refresh(); } catch (error) { alert(`删除失败：${error instanceof Error ? error.message : error}`); } finally { setDeleteBusy(false); } }}>{deleteBusy ? '正在删除…' : '删除员工'}</button></div></section>}
     </>}
   </div>;
 }

@@ -1,6 +1,8 @@
 import { useMemo, useState } from 'react';
 import type { Customer, Driver, EvidencePhoto, Fleet, InspectionChecklist, LaborItem, Part, PartItem, ShopSettings, Vehicle, WorkOrder, WorkOrderStatus } from './types';
-import { money, recalculateWorkOrder, today, uid } from './lib/erp';
+import { decodeVin, money, recalculateWorkOrder, today, uid } from './lib/erp';
+import { recognizeVinPhoto } from './lib/ocr';
+import { SignaturePad } from './SignaturePad';
 import type { StaffMember } from './lib/cloud';
 
 type Props = {
@@ -52,9 +54,10 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, p
   const [saving, setSaving] = useState(false);
   const [addingVehicle, setAddingVehicle] = useState(false);
   const [vehicleSaving, setVehicleSaving] = useState(false);
+  const [vinScanning, setVinScanning] = useState(false);
   const [evidenceCategory, setEvidenceCategory] = useState<EvidencePhoto['category']>('其他');
   const [evidenceSaving, setEvidenceSaving] = useState(false);
-  const [vehicleDraft, setVehicleDraft] = useState({ plate: '', vin: '', year: String(new Date().getFullYear()), make: '', model: '', mileage: 0 });
+  const [vehicleDraft, setVehicleDraft] = useState({ plate: '', vin: '', year: String(new Date().getFullYear()), make: '', model: '', engine: '', mileage: 0 });
   const calculated = useMemo(() => recalculateWorkOrder(order), [order]);
   const selectedVehicle = vehicles.find(v => v.id === order.vehicleId);
   const checklist: InspectionChecklist = order.inspectionChecklist || { intake: false, exterior: false, scan: false, diagnosis: false, estimate: false };
@@ -78,14 +81,14 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, p
     const vehicle: Vehicle = {
       id: uid(), ownerType: customer.type, ownerId: customer.id, ownerName: customer.name,
       plate: vehicleDraft.plate.trim().toUpperCase(), vin: vehicleDraft.vin.trim().toUpperCase(),
-      year: vehicleDraft.year.trim(), make: vehicleDraft.make.trim(), model: vehicleDraft.model.trim(), mileage: Number(vehicleDraft.mileage || 0),
+      year: vehicleDraft.year.trim(), make: vehicleDraft.make.trim(), model: vehicleDraft.model.trim(), engine: vehicleDraft.engine.trim(), mileage: Number(vehicleDraft.mileage || 0),
     };
     setVehicleSaving(true);
     try {
       await onCreateVehicle(vehicle);
       patch({ vehicleId: vehicle.id, vehicle: `${vehicle.year} ${vehicle.make} ${vehicle.model}`, plate: vehicle.plate, vin: vehicle.vin, mileage: vehicle.mileage });
       setAddingVehicle(false);
-      setVehicleDraft({ plate: '', vin: '', year: String(new Date().getFullYear()), make: '', model: '', mileage: 0 });
+      setVehicleDraft({ plate: '', vin: '', year: String(new Date().getFullYear()), make: '', model: '', engine: '', mileage: 0 });
     } finally { setVehicleSaving(false); }
   };
 
@@ -99,6 +102,18 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, p
       fleetId: fleet?.id || '', company: fleet?.company || '', driverId: driver?.id || vehicle?.driverId || '',
       driver: driver?.name || vehicle?.driverName || '', driverPhone: driver?.phone || vehicle?.driverPhone || '',
     });
+  };
+
+  const scanVehicleVin = async (file?: File) => {
+    if (!file) return;
+    setVinScanning(true);
+    try {
+      const vin = await recognizeVinPhoto(file);
+      const decoded = await decodeVin(vin);
+      setVehicleDraft(current => ({ ...current, vin, year: decoded.year || current.year, make: decoded.make || current.make, model: decoded.model || current.model, engine: decoded.engine || current.engine }));
+      alert(`已识别 VIN：${vin}\n车辆资料已自动填写，请核对后保存。`);
+    } catch (error) { alert(`VIN 识别失败：${error instanceof Error ? error.message : error}`); }
+    finally { setVinScanning(false); }
   };
 
   const selectDriver = (id: string) => {
@@ -184,7 +199,18 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, p
       <label>联系电话<input value={order.phone || ''} onChange={e => patch({ phone: e.target.value })} /></label>
       <label>车辆<div className="input-action"><select value={order.vehicleId || ''} onChange={e => selectVehicle(e.target.value)}><option value="">{vehicles.length ? '选择车辆' : '暂无车辆，请快速添加'}</option>{vehicles.map(item => <option key={item.id} value={item.id}>{item.plate || item.vin} · {item.year} {item.make} {item.model}{item.ownerName ? ` · ${item.ownerName}` : ''}</option>)}</select><button type="button" onClick={() => setAddingVehicle(current => !current)}>＋ 添加</button></div></label>
       <label>当前里程<input type="number" value={order.mileage || ''} onChange={e => patch({ mileage: Number(e.target.value) })} /></label>
-    </div>{addingVehicle && <div className="quick-vehicle"><div><b>快速添加当前客户车辆</b><span>保存后会自动选中，不会离开工单。</span></div><div className="quick-vehicle-grid"><label>车牌<input value={vehicleDraft.plate} onChange={e => setVehicleDraft(current => ({ ...current, plate: e.target.value.toUpperCase() }))} /></label><label>VIN<input value={vehicleDraft.vin} onChange={e => setVehicleDraft(current => ({ ...current, vin: e.target.value.toUpperCase() }))} /></label><label>年份<input value={vehicleDraft.year} onChange={e => setVehicleDraft(current => ({ ...current, year: e.target.value }))} /></label><label>品牌<input value={vehicleDraft.make} onChange={e => setVehicleDraft(current => ({ ...current, make: e.target.value }))} /></label><label>车型<input value={vehicleDraft.model} onChange={e => setVehicleDraft(current => ({ ...current, model: e.target.value }))} /></label><label>里程<input type="number" value={vehicleDraft.mileage || ''} onChange={e => setVehicleDraft(current => ({ ...current, mileage: Number(e.target.value) }))} /></label></div><div className="toolbar"><button type="button" onClick={() => setAddingVehicle(false)}>取消</button><button type="button" className="primary" onClick={createVehicle} disabled={vehicleSaving}>{vehicleSaving ? '保存中…' : '保存并选择车辆'}</button></div></div>}{selectedVehicle && <div className="vehicle-strip"><b>{selectedVehicle.plate || '无车牌'}</b><span>VIN {selectedVehicle.vin || '—'}</span><span>Unit {selectedVehicle.unit || '—'}</span><span>{selectedVehicle.ownerName}</span></div>}</section>
+    </div>{addingVehicle && <div className="quick-vehicle">
+      <div><b>快速添加当前客户车辆</b><span>可拍摄车架号自动识别；保存后会自动选中。</span></div>
+      <div className="quick-vehicle-grid">
+        <label>车牌<input value={vehicleDraft.plate} onChange={e => setVehicleDraft(current => ({ ...current, plate: e.target.value.toUpperCase() }))} /></label>
+        <div className="vin-field"><span>VIN / 车架号</span><input value={vehicleDraft.vin} maxLength={17} onChange={e => setVehicleDraft(current => ({ ...current, vin: e.target.value.toUpperCase() }))} /><label className="vin-scan-button">{vinScanning ? '识别中…' : '📷 扫描 / 拍照识别'}<input type="file" accept="image/*" capture="environment" disabled={vinScanning} onChange={e => { void scanVehicleVin(e.target.files?.[0]); e.currentTarget.value = ''; }} /></label></div>
+        <label>年份<input value={vehicleDraft.year} onChange={e => setVehicleDraft(current => ({ ...current, year: e.target.value }))} /></label>
+        <label>品牌<input value={vehicleDraft.make} onChange={e => setVehicleDraft(current => ({ ...current, make: e.target.value }))} /></label>
+        <label>车型<input value={vehicleDraft.model} onChange={e => setVehicleDraft(current => ({ ...current, model: e.target.value }))} /></label>
+        <label>发动机<input value={vehicleDraft.engine} onChange={e => setVehicleDraft(current => ({ ...current, engine: e.target.value }))} /></label>
+        <label>里程<input type="number" value={vehicleDraft.mileage || ''} onChange={e => setVehicleDraft(current => ({ ...current, mileage: Number(e.target.value) }))} /></label>
+      </div><div className="toolbar"><button type="button" onClick={() => setAddingVehicle(false)}>取消</button><button type="button" className="primary" onClick={createVehicle} disabled={vehicleSaving}>{vehicleSaving ? '保存中…' : '保存并选择车辆'}</button></div>
+    </div>}{selectedVehicle && <div className="vehicle-strip"><b>{selectedVehicle.plate || '无车牌'}</b><span>VIN {selectedVehicle.vin || '—'}</span><span>Unit {selectedVehicle.unit || '—'}</span><span>{selectedVehicle.ownerName}</span></div>}</section>
 
     {(order.company || selectedVehicle?.ownerType === '车队') && <section className="form-section"><h3>车队送修信息</h3><div className="form-grid four">
       <label>公司名称<input value={order.company || ''} onChange={e => patch({ company: e.target.value })} /></label>
@@ -205,6 +231,12 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, p
       <div className="evidence-grid">{activeEvidence.map(photo => <article key={photo.id}><button type="button" className="evidence-image" onClick={() => window.open(photo.dataUrl, '_blank')}><img src={photo.dataUrl} alt={photo.category} /></button><div><b>{photo.category}</b><small>{photo.capturedBy} · {new Date(photo.capturedAt).toLocaleString()}</small><input value={photo.note || ''} placeholder="照片备注（例如：右前保险杠原有划痕）" onChange={e => patch({ evidencePhotos: (order.evidencePhotos || []).map(item => item.id === photo.id ? { ...item, note: e.target.value } : item) })} /><button type="button" className="danger-link" onClick={() => archiveEvidence(photo)}>作废归档</button></div></article>)}</div>
       {!activeEvidence.length && <div className="empty-line">尚未留存证据照片。建议至少拍摄车牌、四角、仪表里程和已有损伤。</div>}
       {!!order.evidencePhotos?.some(item => item.archivedAt) && <details className="archived-evidence"><summary>查看已作废照片（{order.evidencePhotos.filter(item => item.archivedAt).length}）</summary>{order.evidencePhotos.filter(item => item.archivedAt).map(item => <div key={item.id}><span>{item.category} · {item.fileName}</span><small>{item.archivedBy} 作废于 {new Date(item.archivedAt!).toLocaleString()} · {item.archiveReason}</small></div>)}</details>}
+    </section>
+
+    <section className="form-section signature-section"><div className="section-title"><div><h3>客户手写签字 / Customer Signature</h3><span>客户可在手机、平板或电脑触摸屏直接签字；签名随工单同步并显示在打印工单中。</span></div>{order.customerSignedAt && <b>已签字</b>}</div>
+      <label className="signature-name">签字人姓名<input value={order.customerSignedBy || ''} onChange={e => patch({ customerSignedBy: e.target.value })} placeholder={order.customer || '客户姓名'} /></label>
+      <SignaturePad value={order.customerSignature} onChange={(customerSignature, customerSignedAt) => patch({ customerSignature, customerSignedAt, customerSignedBy: customerSignature ? (order.customerSignedBy || order.customer) : order.customerSignedBy })} />
+      {order.customerSignedAt && <small className="signature-time">签署时间：{new Date(order.customerSignedAt).toLocaleString()}</small>}
     </section>
 
     <section className="form-section review-section"><div className="section-title"><div><h3>检查与审查流程</h3><span>Inspection & Review · 已完成 {inspectionDone}/{inspectionItems.length}</span></div><span className={`review-badge review-${reviewStatus}`}>{reviewStatus}</span></div>
@@ -230,9 +262,9 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, p
     {canViewFinancials && <section className="form-section totals-section"><div className="form-grid four compact">
       <label>外包费用<input type="number" step="0.01" value={order.outsource} onChange={e => patch({ outsource: Number(e.target.value) })} /></label>
       <label>折扣<input type="number" step="0.01" value={order.discount} onChange={e => patch({ discount: Number(e.target.value) })} /></label>
-      <label>配件税率 %<input type="number" step="0.01" value={order.taxRate} onChange={e => patch({ taxRate: Number(e.target.value) })} /></label>
+      <label>配件销售税率 %（人工不计税）<input type="number" step="0.01" value={order.taxRate} onChange={e => patch({ taxRate: Number(e.target.value) })} /></label>
       <label>已付款<input type="number" step="0.01" value={order.paid} onChange={e => patch({ paid: Number(e.target.value) })} /></label>
       <label>实际结账金额（需双人授权）<input type="number" step="0.01" placeholder={String(calculated.laborTotal + calculated.partsTotal + calculated.outsource + calculated.tax - calculated.discount)} value={order.settlementTotal ?? ''} onChange={e => patch({ settlementTotal: e.target.value === '' ? undefined : Number(e.target.value) })} /></label>
-    </div><div className="totals-card"><div><span>人工</span><b>{money(calculated.laborTotal)}</b></div><div><span>配件</span><b>{money(calculated.partsTotal)}</b></div><div><span>税费</span><b>{money(calculated.tax)}</b></div><div className="grand"><span>总价</span><b>{money(calculated.total)}</b></div><div className="balance"><span>欠款</span><b>{money(calculated.balance)}</b></div></div></section>}
+    </div><div className="totals-card"><div><span>人工（免销售税）</span><b>{money(calculated.laborTotal)}</b></div><div><span>配件</span><b>{money(calculated.partsTotal)}</b></div><div><span>配件销售税</span><b>{money(calculated.tax)}</b></div><div className="grand"><span>总价</span><b>{money(calculated.total)}</b></div><div className="balance"><span>欠款</span><b>{money(calculated.balance)}</b></div></div></section>}
   </div>;
 }

@@ -22,8 +22,10 @@ export function recalculateWorkOrder(order: Partial<WorkOrder>): WorkOrder {
   const outsource = num(order.outsource);
   const discount = num(order.discount);
   const taxRate = num(order.taxRate);
-  const taxable = Math.max(0, partsTotal - discount);
-  const tax = taxable * taxRate / 100;
+  // California repair orders: labor is not part of the taxable base. This ERP
+  // intentionally applies sales tax to parts only.
+  const taxableParts = Math.max(0, partsTotal);
+  const tax = taxableParts * taxRate / 100;
   const calculatedTotal = Math.max(0, laborTotal + partsTotal + outsource + tax - discount);
   const total = order.settlementTotal === undefined ? calculatedTotal : Math.max(0, num(order.settlementTotal));
   const paid = num(order.paid);

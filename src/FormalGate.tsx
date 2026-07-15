@@ -61,7 +61,7 @@ export function FormalGate({ children }: { children: (cloud: CloudSession) => Re
   if (!cloudConfigured) return <AuthCard title="服务器尚未配置" error="请在 Vercel 添加 Supabase 项目地址和 Publishable Key。" />;
   if (loading) return <AuthCard title="正在连接正式服务器" subtitle="正在安全读取登录状态…" />;
   if (!session) return <div className="auth-screen"><form className="auth-card" onSubmit={registering ? register : login}>
-    <div className="auth-logo">Z&G</div><h1>Z&G AUTO ERP</h1><p>员工账号登录 · v0.76.1</p>
+    <div className="auth-logo">Z&G</div><h1>Z&G AUTO ERP</h1><p>员工账号登录 · v0.76.2</p>
     <label><span>邮箱</span><input name="email" type="email" autoComplete="email" required /></label>
     <label><span>密码</span><input name="password" type="password" autoComplete="current-password" required /></label>
     {registering && <label><span>员工激活码</span><input name="activationCode" autoComplete="one-time-code" placeholder="由老板提供的 8 位激活码" required /></label>}
