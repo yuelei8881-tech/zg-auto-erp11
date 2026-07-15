@@ -12,6 +12,7 @@ import { BRAND_LOGO_SVG } from './brandLogo';
 import { PwaInstall } from './PwaInstall';
 import { registerPwa } from './pwa';
 import './styles.css';
+import './v0763.css';
 import './extra.css';
 
 type Page = 'dashboard' | 'customers' | 'fleets' | 'vehicles' | 'workOrders' | 'parts' | 'finance' | 'campaigns' | 'staff' | 'smart' | 'settings';
@@ -33,7 +34,7 @@ const roleDefaults: Record<string, string[]> = {
   owner: ['*'],
   manager: ['customers', 'customerContact', 'workOrders', 'createWorkOrders', 'diagnosis', 'pricing', 'assignTechnician', 'collectPayment', 'finance', 'inventory', 'campaigns', 'staff', 'archive', 'approve', 'smart', 'settings'],
   frontdesk: ['customers', 'customerContact', 'workOrders', 'createWorkOrders', 'diagnosis', 'pricing', 'assignTechnician', 'collectPayment', 'campaigns', 'smart'],
-  technician: ['assignedWorkOrders', 'diagnosis', 'smart'],
+  technician: ['assignedWorkOrders', 'claimWorkOrders', 'completeWorkOrders', 'diagnosis', 'smart'],
   finance: ['customers', 'customerContact', 'workOrders', 'pricing', 'collectPayment', 'finance', 'approve'],
   warehouse: ['workOrders', 'inventory'],
 };
@@ -56,6 +57,8 @@ function App({ cloud }: { cloud: CloudSession }) {
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [search, setSearch] = useState('');
+  const [searchDraft, setSearchDraft] = useState('');
+  const [displayName, setDisplayName] = useState(cloud.user.name || cloud.user.email.split('@')[0]);
   const [modal, setModal] = useState<ModalState>(null);
   const [editingOrder, setEditingOrder] = useState<WorkOrder | 'new' | null>(null);
   const [staffMembers, setStaffMembers] = useState<StaffMember[]>([]);
@@ -74,7 +77,33 @@ function App({ cloud }: { cloud: CloudSession }) {
   }, [cloud.organizationId]);
 
   const settings = store.settings[0] || defaultSettings;
-  const actorName = cloud.user.name || cloud.user.email;
+  const actorName = displayName || cloud.user.name || cloud.user.email;
+
+  const runGlobalSearch = () => {
+    const query = searchDraft.trim();
+    setSearch(query);
+    if (!query) return;
+    const matches = (rows: object[]) => filterRows(rows, query).length > 0;
+    if (matches(store.workOrders)) setPage('workOrders');
+    else if (matches(store.vehicles)) setPage('vehicles');
+    else if (matches(store.customers)) setPage('customers');
+    else if (matches([...store.fleets, ...store.drivers])) setPage('fleets');
+    else if (matches(store.parts)) setPage('parts');
+  };
+
+  const editOwnProfile = async () => {
+    const nextName = prompt('请输入您希望在首页和维修工单上显示的姓名：', actorName);
+    if (!nextName?.trim() || nextName.trim() === actorName) return;
+    try {
+      await cloud.updateOwnProfile(nextName.trim());
+      setDisplayName(nextName.trim());
+      const data = await cloud.listStaff();
+      setStaffMembers(data.members.filter(item => item.status === 'active'));
+      alert('姓名已保存。以后领取和完成工单都会记录这个姓名。');
+    } catch (error) {
+      alert(`姓名保存失败：${error instanceof Error ? error.message : error}\n请确认服务器已安装 v0.76.3 数据库升级。`);
+    }
+  };
 
   const persist = async <T extends { id: string }>(module: keyof AppStore, row: T) => {
     setSyncing(true);
@@ -205,6 +234,24 @@ function App({ cloud }: { cloud: CloudSession }) {
     await persist('inventoryLogs', { id: uid(), date: new Date().toISOString(), partId: part.id, partNo: part.partNo, partName: part.name, type: '采购入库', change: qty, before: part.qty, after: next, reference: prompt('采购单/收据号码（可选）', '') || '' } as InventoryLog);
   };
 
+  const claimWorkOrder = async (order: WorkOrder) => {
+    if (order.technicianUserId && order.technicianUserId !== cloud.user.id) return alert(`这张工单已由 ${order.technician || '其他员工'} 领取。`);
+    if (!confirm(`确定领取工单 ${order.number}？\n领取后会在工单和永久修改记录中显示您的姓名。`)) return;
+    const updated = recalculateWorkOrder({ ...order, technicianUserId: cloud.user.id, technician: actorName, claimedAt: new Date().toISOString(), claimedBy: actorName, status: order.status === '等待检查' ? '维修中' : order.status });
+    await persist('workOrders', updated);
+    await writeChangeLog(updated, '员工领取工单', `${actorName} 自主领取了工单。`, order, updated);
+  };
+
+  const completeWorkOrder = async (order: WorkOrder) => {
+    const assignedToMe = order.technicianUserId === cloud.user.id || order.technician === actorName || order.technician === cloud.user.email;
+    if (!assignedToMe && !can(cloud, 'assignTechnician')) return alert('请先领取这张工单，或由经理分配后再完成维修。');
+    if (!confirm(`确认工单 ${order.number} 的维修已经完成？\n系统会永久记录完成人和完成时间。`)) return;
+    const now = new Date().toISOString();
+    const updated = recalculateWorkOrder({ ...order, technicianUserId: order.technicianUserId || cloud.user.id, technician: order.technician || actorName, status: '已完成', technicianCompletedAt: now, completedBy: actorName, completedByUserId: cloud.user.id });
+    await persist('workOrders', updated);
+    await writeChangeLog(updated, '维修完成', `${actorName} 标记维修完成。`, order, updated);
+  };
+
   const openModal = (type: NonNullable<ModalState>['type'], value?: object) => setModal({ type, value: value ? { ...value } as Record<string, unknown> : undefined });
   const closeModal = () => setModal(null);
 
@@ -235,11 +282,11 @@ function App({ cloud }: { cloud: CloudSession }) {
 
   return <div className="app-shell">
     <aside className="sidebar"><div className="brand"><div className="brand-mark">Z&G</div><div><b>AUTO ERP</b><small>正式服务器版</small></div></div>
-      <nav>{nav.filter(item => canOpenPage(cloud, item.id)).map(item => <button key={item.id} className={page === item.id ? 'active' : ''} onClick={() => { setPage(item.id); setSearch(''); }}><span>{item.icon}</span>{item.label}</button>)}</nav>
-      <div className="side-foot"><small>{cloud.organizationName}</small><span>{cloud.user.email}</span><button onClick={() => cloud.signOut()}>退出登录</button></div>
+      <nav>{nav.filter(item => canOpenPage(cloud, item.id)).map(item => <button key={item.id} className={page === item.id ? 'active' : ''} onClick={() => { setPage(item.id); setSearch(''); setSearchDraft(''); }}><span>{item.icon}</span>{item.label}</button>)}</nav>
+      <div className="side-foot"><small>{cloud.organizationName}</small><b>{actorName}</b><span>{cloud.user.email}</span><button onClick={() => void editOwnProfile()}>编辑我的姓名</button><button onClick={() => confirm('确定退出当前账号？') && void cloud.signOut()}>退出登录</button></div>
     </aside>
-    <main className="main"><header className="topbar"><div className="global-search">⌕<input value={search} onChange={e => setSearch(e.target.value)} placeholder="搜索客户、电话、VIN、车牌、工单、司机…" /></div><div className="top-status"><span className={syncing ? 'syncing' : ''}>{syncing ? '正在同步…' : '● 云端已同步'}</span><b>v0.76.2</b><button type="button" className="topbar-logout" onClick={() => void cloud.signOut()}>退出</button></div></header>
-      {loading ? <div className="loading">正在读取正式服务器数据…</div> : <PageContent page={page} search={search} store={store} settings={settings} cloud={cloud} setPage={setPage} openModal={openModal} setEditingOrder={setEditingOrder} persist={persist} remove={remove} receiveStock={receiveStock} addPayment={addPayment} deleteWorkOrder={deleteWorkOrder} approveRequest={approveRequest} rejectRequest={rejectRequest} />}
+    <main className="main"><header className="topbar"><div className="global-search">⌕<input value={searchDraft} onChange={e => setSearchDraft(e.target.value)} onKeyDown={e => e.key === 'Enter' && runGlobalSearch()} placeholder="搜索客户、电话、VIN、车牌、工单、司机…" /><button type="button" onClick={runGlobalSearch}>搜索</button></div><div className="top-status"><span className={syncing ? 'syncing' : ''}>{syncing ? '正在同步…' : '● 云端已同步'}</span><button type="button" onClick={() => void editOwnProfile()}>{actorName}</button><b>v0.76.3</b><button type="button" className="topbar-logout" onClick={() => confirm('确定退出当前账号？') && void cloud.signOut()}>退出</button></div></header>
+      {loading ? <div className="loading">正在读取正式服务器数据…</div> : <PageContent page={page} search={search} store={store} settings={settings} cloud={cloud} setPage={setPage} openModal={openModal} setEditingOrder={setEditingOrder} persist={persist} remove={remove} receiveStock={receiveStock} addPayment={addPayment} deleteWorkOrder={deleteWorkOrder} approveRequest={approveRequest} rejectRequest={rejectRequest} claimWorkOrder={claimWorkOrder} completeWorkOrder={completeWorkOrder} actorName={actorName} editOwnProfile={editOwnProfile} />}
     </main>
     {modal && <EntityModal state={modal} store={store} settings={settings} onClose={closeModal} onSave={saveModal} />}
   </div>;
@@ -253,6 +300,8 @@ type ContentProps = {
   remove: (module: keyof AppStore, id: string) => Promise<void>; receiveStock: (part: Part) => Promise<void>;
   addPayment: (order: WorkOrder) => Promise<void>; deleteWorkOrder: (order: WorkOrder) => Promise<void>;
   approveRequest: (request: ApprovalRequest) => Promise<void>; rejectRequest: (request: ApprovalRequest) => Promise<void>;
+  claimWorkOrder: (order: WorkOrder) => Promise<void>; completeWorkOrder: (order: WorkOrder) => Promise<void>;
+  actorName: string; editOwnProfile: () => Promise<void>;
 };
 
 function PageContent(props: ContentProps) {
@@ -270,13 +319,13 @@ function PageContent(props: ContentProps) {
   return <SettingsPage settings={settings} openModal={props.openModal} />;
 }
 
-function Dashboard({ store, setPage, setEditingOrder, cloud }: ContentProps) {
+function Dashboard({ store, setPage, setEditingOrder, cloud, actorName, editOwnProfile }: ContentProps) {
   const metrics = useMemo(() => dashboardMetrics(store), [store]);
   const isTechnician = cloud.role === 'technician' && !can(cloud, 'workOrders');
-  const visibleOrders = isTechnician ? store.workOrders.filter(order => order.technicianUserId === cloud.user.id || order.technician === cloud.user.name || order.technician === cloud.user.email) : store.workOrders;
+  const visibleOrders = isTechnician ? store.workOrders.filter(order => !order.technicianUserId && !order.technician || order.technicianUserId === cloud.user.id || order.technician === actorName || order.technician === cloud.user.email) : store.workOrders;
   const recent = [...visibleOrders].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 7);
   const showFinance = can(cloud, 'pricing') || can(cloud, 'finance');
-  return <div className="page"><div className="hero"><div><p className="eyebrow">{isTechnician ? '技师工作台' : '老板经营驾驶舱'}</p><h1>早上好，{cloud.user.name || 'Z&G AUTO REPAIR'}</h1><p>{isTechnician ? '这里只显示分配给您的维修任务、检查流程和证据资料。' : '营业、工单、库存和欠款都来自正式服务器实时数据。'}</p></div><div className="toolbar">{can(cloud, 'customers') && <button onClick={() => setPage('customers')}>＋ 新客户</button>}{can(cloud, 'createWorkOrders') && <button className="primary" onClick={() => setEditingOrder('new')}>＋ 新建工单</button>}</div></div>
+  return <div className="page"><div className="hero"><div><p className="eyebrow">{isTechnician ? '技师工作台' : '老板经营驾驶舱'}</p><h1>早上好，{actorName || 'Z&G AUTO REPAIR'}</h1><p>{isTechnician ? '这里显示分配给您的任务和可自行领取的未分配工单。领取、完成和修改都会留下员工姓名与时间。' : '营业、工单、库存和欠款都来自正式服务器实时数据。'}</p></div><div className="toolbar"><button onClick={() => void editOwnProfile()}>编辑我的姓名</button>{can(cloud, 'customers') && <button onClick={() => setPage('customers')}>＋ 新客户</button>}{can(cloud, 'createWorkOrders') && <button className="primary" onClick={() => setEditingOrder('new')}>＋ 新建工单</button>}</div></div>
     {showFinance ? <div className="kpi-grid"><Kpi label="今日开单营业额" value={money(metrics.todaySales)} tone="blue" /><Kpi label="今日实收" value={money(metrics.todayReceived)} tone="green" /><Kpi label="今日毛利润" value={money(metrics.todayGross)} tone="purple" /><Kpi label="未收款总额" value={money(metrics.receivables)} tone="orange" /><Kpi label="本月营业额" value={money(metrics.monthSales)} /><Kpi label="本月实收" value={money(metrics.monthReceived)} /><Kpi label="本月支出" value={money(metrics.monthExpenses)} /><Kpi label="本月净经营收益" value={money(metrics.monthNet)} /></div> : <div className="kpi-grid technician-kpis"><Kpi label="分配给我的工单" value={String(visibleOrders.length)} tone="blue" /><Kpi label="等待检查" value={String(visibleOrders.filter(item => item.status === '等待检查').length)} /><Kpi label="维修中" value={String(visibleOrders.filter(item => item.status === '维修中').length)} tone="purple" /><Kpi label="今日完成" value={String(visibleOrders.filter(item => item.date === today() && item.status === '已完成').length)} tone="green" /></div>}
     <div className="dashboard-grid"><section className="panel wide"><div className="section-title"><h3>最近工单</h3><button onClick={() => setPage('workOrders')}>查看全部</button></div><table><thead><tr><th>工单</th><th>客户/车辆</th><th>状态</th>{showFinance && <><th>总价</th><th>欠款</th></>}</tr></thead><tbody>{recent.map(order => <tr key={order.id}><td><b>{order.number}</b><small>{order.date}</small></td><td>{order.customer}<small>{order.plate} · {order.vehicle}</small></td><td><Status value={order.status} /></td>{showFinance && <><td>{money(order.total)}</td><td className={order.balance > 0 ? 'warning-text' : ''}>{money(order.balance)}</td></>}</tr>)}</tbody></table>{!recent.length && <Empty text="还没有分配给您的工单。" />}</section>
       <section className="panel"><h3>今日车间</h3><div className="count-list"><div><span>等待批准</span><b>{visibleOrders.filter(item => item.status === '等待批准').length}</b></div><div><span>等待配件</span><b>{visibleOrders.filter(item => item.status === '等待配件').length}</b></div><div><span>维修中</span><b>{visibleOrders.filter(item => item.status === '维修中').length}</b></div><div><span>今日完成</span><b>{visibleOrders.filter(item => item.date === today() && item.status === '已完成').length}</b></div></div></section>
@@ -306,9 +355,9 @@ function Vehicles({ store, search, openModal, remove, setEditingOrder }: Content
   </>;
 }
 
-function WorkOrders({ store, search, settings, cloud, setEditingOrder, addPayment, deleteWorkOrder, approveRequest, rejectRequest }: ContentProps) {
+function WorkOrders({ store, search, settings, cloud, setEditingOrder, addPayment, deleteWorkOrder, approveRequest, rejectRequest, claimWorkOrder, completeWorkOrder, actorName }: ContentProps) {
   const assignedOnly = cloud.role === 'technician' && !can(cloud, 'workOrders');
-  const visible = assignedOnly ? store.workOrders.filter(order => order.technicianUserId === cloud.user.id || order.technician === cloud.user.name || order.technician === cloud.user.email) : store.workOrders;
+  const visible = assignedOnly ? store.workOrders.filter(order => (!order.technicianUserId && !order.technician) || order.technicianUserId === cloud.user.id || order.technician === actorName || order.technician === cloud.user.email) : store.workOrders;
   const rows = filterRows(visible, search).sort((a, b) => b.date.localeCompare(a.date));
   const pending = store.approvalRequests.filter(item => item.status === '待授权' && (can(cloud, 'approve') || item.requestedById === cloud.user.id));
   const canApprove = can(cloud, 'approve');
@@ -318,7 +367,7 @@ function WorkOrders({ store, search, settings, cloud, setEditingOrder, addPaymen
   const visibleLogs = store.changeLogs.filter(log => visible.some(order => order.id === log.workOrderId));
   return <div className="page"><div className="page-title"><div><p className="eyebrow">Z&G AUTO ERP</p><h2>{assignedOnly ? '我的维修任务' : '维修工单'}</h2><p>检查审查、双人授权、证据留存、收款、打印和修改记录自动联动</p></div>{can(cloud, 'createWorkOrders') && <button className="primary" onClick={() => setEditingOrder('new')}>＋ 新建工单</button>}</div>
     {!!pending.length && <section className="panel approval-panel"><div className="section-title"><div><h3>待双人授权</h3><span>申请人与批准人必须是两个不同账号；所有决定永久记入日志</span></div><b>{pending.length} 项</b></div>{pending.map(item => <article className="approval-row" key={item.id}><div><b>{item.type === '删除工单' ? '作废/归档工单' : item.type} · {item.workOrderNumber}</b><small>申请人 {item.requestedBy} · {new Date(item.requestedAt).toLocaleString()}</small><p>{item.reason}</p></div><div className="actions">{canApprove && item.requestedById !== cloud.user.id ? <><button className="primary" onClick={() => void approveRequest(item)}>批准并执行</button><button onClick={() => void rejectRequest(item)}>拒绝</button></> : <span className="muted">{item.requestedById === cloud.user.id ? '等待另一账号批准' : '需要审批权限'}</span>}</div></article>)}</section>}
-    <section className="panel work-order-table"><table><thead><tr><th>工单/日期</th><th>客户与车辆</th><th>技师/状态</th><th>检查/审查</th>{showFinance && <><th>总价</th><th>已付/欠款</th></>}<th /></tr></thead><tbody>{rows.map(order => { const checks = Object.values(order.inspectionChecklist || {}).filter(Boolean).length; const evidenceCount = (order.evidencePhotos || []).filter(item => !item.archivedAt).length; return <tr key={order.id} className={order.archivedAt ? 'archived-row' : ''}><td><b>{order.number}</b><small>{order.date} {order.po ? `· PO ${order.po}` : ''}</small>{order.archivedAt && <small className="archive-badge">已作废并归档</small>}</td><td>{order.customer}<small>{order.plate} · {order.vehicle}{order.driver ? ` · 司机 ${order.driver}` : ''}</small><small>证据 {evidenceCount} 张</small></td><td>{order.technician || '未分配'}<small><Status value={order.status} /></small></td><td><b>{checks}/5</b><small><span className={`review-badge review-${order.reviewStatus || '未提交'}`}>{order.reviewStatus || '未提交'}</span></small></td>{showFinance && <><td><b>{money(order.total)}</b><small>毛利 {money(order.grossProfit)}</small></td><td>{money(order.paid)}<small className={order.balance > 0 ? 'warning-text' : ''}>欠 {money(order.balance)}</small></td></>}<td className="actions">{canEdit && <button className={order.reviewStatus === '待审查' && canApprove ? 'primary' : ''} onClick={() => setEditingOrder(order)}>{order.reviewStatus === '待审查' && canApprove ? '审查' : '查看/编辑'}</button>}{can(cloud, 'collectPayment') && !order.archivedAt && <button onClick={() => addPayment(order)} disabled={order.balance <= 0}>收款</button>}{canPrint && <PrintMenu order={order} settings={settings} />}{can(cloud, 'archive') && !order.archivedAt && <button className="danger-link" onClick={() => deleteWorkOrder(order)}>申请作废</button>}{order.archivedAt && <small title={order.archiveReason}>原因：{order.archiveReason || '未填写'}</small>}</td></tr>})}</tbody></table>{!rows.length && <Empty text={assignedOnly ? '目前没有分配给您的工单。' : '没有找到工单。'} />}</section>
+    <section className="panel work-order-table"><table><thead><tr><th>工单/日期</th><th>客户与车辆</th><th>技师/状态</th><th>检查/审查</th>{showFinance && <><th>总价</th><th>已付/欠款</th></>}<th /></tr></thead><tbody>{rows.map(order => { const checks = Object.values(order.inspectionChecklist || {}).filter(Boolean).length; const evidenceCount = (order.evidencePhotos || []).filter(item => !item.archivedAt).length; const isMine = order.technicianUserId === cloud.user.id || order.technician === actorName || order.technician === cloud.user.email; const isUnassigned = !order.technicianUserId && !order.technician; const isFinished = order.status === '已完成' || order.status === '已交车'; return <tr key={order.id} className={order.archivedAt ? 'archived-row' : ''}><td><b>{order.number}</b><small>{order.date} {order.po ? `· PO ${order.po}` : ''}</small>{order.archivedAt && <small className="archive-badge">已作废并归档</small>}</td><td>{order.customer}<small>{order.plate} · {order.vehicle}{order.driver ? ` · 司机 ${order.driver}` : ''}</small><small>证据 {evidenceCount} 张</small></td><td>{order.technician || '未分配（可领取）'}<small><Status value={order.status} /></small>{order.completedBy && <small className="success-text">完成：{order.completedBy}{order.technicianCompletedAt ? ` · ${new Date(order.technicianCompletedAt).toLocaleString()}` : ''}</small>}</td><td><b>{checks}/5</b><small><span className={`review-badge review-${order.reviewStatus || '未提交'}`}>{order.reviewStatus || '未提交'}</span></small></td>{showFinance && <><td><b>{money(order.total)}</b><small>毛利 {money(order.grossProfit)}</small></td><td>{money(order.paid)}<small className={order.balance > 0 ? 'warning-text' : ''}>欠 {money(order.balance)}</small></td></>}<td className="actions">{assignedOnly && isUnassigned && !order.archivedAt && <button className="primary" onClick={() => void claimWorkOrder(order)}>领取工单</button>}{assignedOnly && isMine && !isFinished && !order.archivedAt && <button className="primary" onClick={() => void completeWorkOrder(order)}>维修完成</button>}{canEdit && <button className={order.reviewStatus === '待审查' && canApprove ? 'primary' : ''} onClick={() => setEditingOrder(order)}>{order.reviewStatus === '待审查' && canApprove ? '审查' : '查看/编辑'}</button>}{can(cloud, 'collectPayment') && !order.archivedAt && <button onClick={() => addPayment(order)} disabled={order.balance <= 0}>收款</button>}{canPrint && <PrintMenu order={order} settings={settings} />}{can(cloud, 'archive') && !order.archivedAt && <button className="danger-link" onClick={() => deleteWorkOrder(order)}>申请作废</button>}{order.archivedAt && <small title={order.archiveReason}>原因：{order.archiveReason || '未填写'}</small>}</td></tr>})}</tbody></table>{!rows.length && <Empty text={assignedOnly ? '目前没有可领取或已分配给您的工单。' : '没有找到工单。'} />}</section>
     {(canApprove || cloud.role === 'owner' || cloud.role === 'manager') && <section className="panel"><div className="section-title"><h3>最近修改记录</h3><span>保留修改人、时间、内容以及授权结果，不允许清除</span></div><div className="change-log-list">{[...visibleLogs].sort((a,b) => b.at.localeCompare(a.at)).slice(0,50).map(log => <div key={log.id}><b>{log.workOrderNumber} · {log.action}</b><span>{log.actor} · {new Date(log.at).toLocaleString()}</span><small>{log.detail}</small></div>)}</div>{!visibleLogs.length && <Empty text="尚无工单修改记录。" />}</section>}
   </div>;
 }
@@ -422,7 +471,7 @@ function legacyLabor(item: Partial<WorkOrder>) { const hours = Number((item as u
 function legacyParts(item: Partial<WorkOrder>) { const record = item as unknown as Record<string, unknown>, total = Number(record.partsTotal || 0), cost = Number(record.partsCost || 0); return total ? [{ id: uid(), partNo: '', name: '配件（旧版导入）', qty: 1, price: total, cost, total, costTotal: cost }] : []; }
 function usageMap(order?: WorkOrder) { const map: Record<string, number> = {}; if (!order) return map; for (const item of order.partItems || []) if (item.partId) map[item.partId] = (map[item.partId] || 0) + Number(item.qty || 0); return map; }
 function upsertLocal<T extends { id: string }>(rows: T[], row: T) { const index = rows.findIndex(item => item.id === row.id); return index < 0 ? [...rows, row] : rows.map(item => item.id === row.id ? row : item); }
-function filterRows<T extends object>(rows: T[], search: string) { const active = rows.filter(row => !(row as Record<string, unknown>).archived); const query = search.trim().toLowerCase(); return query ? active.filter(row => Object.values(row).some(value => typeof value !== 'object' && String(value ?? '').toLowerCase().includes(query))) : active; }
+function filterRows<T extends object>(rows: T[], search: string) { const active = rows.filter(row => !(row as Record<string, unknown>).archived); const query = search.trim().toLowerCase(); return query ? active.filter(row => JSON.stringify(row).toLowerCase().includes(query)) : active; }
 function nextWorkOrderNumber(rows: WorkOrder[]) { const year = new Date().getFullYear(); const max = rows.map(item => Number(item.number.match(/(\d+)$/)?.[1] || 0)).reduce((a, b) => Math.max(a, b), 0); return `RO-${year}-${String(max + 1).padStart(4, '0')}`; }
 function dashboardMetrics(store: AppStore) { const date = today(), month = date.slice(0, 7), valid = store.workOrders.filter(item => item.status !== '已取消'); const todayOrders = valid.filter(item => item.date === date), monthOrders = valid.filter(item => item.date.startsWith(month)); const todayPayments = store.payments.filter(item => item.date.startsWith(date)), monthPayments = store.payments.filter(item => item.date.startsWith(month)), monthExpensesRows = store.expenses.filter(item => item.date.startsWith(month)); return { todaySales: sum(todayOrders, 'total'), monthSales: sum(monthOrders, 'total'), todayReceived: sum(todayPayments, 'amount'), monthReceived: sum(monthPayments, 'amount'), todayGross: sum(todayOrders, 'grossProfit'), monthGross: sum(monthOrders, 'grossProfit'), monthExpenses: sum(monthExpensesRows, 'amount'), monthNet: sum(monthOrders, 'grossProfit') - sum(monthExpensesRows, 'amount'), receivables: sum(valid, 'balance') }; }
 function sum<T extends object>(rows: T[], key: keyof T) { return rows.reduce((total, row) => total + Number(row[key] || 0), 0); }

@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import type { Customer, Driver, EvidencePhoto, Fleet, InspectionChecklist, LaborItem, Part, PartItem, ShopSettings, Vehicle, WorkOrder, WorkOrderStatus } from './types';
 import { decodeVin, money, recalculateWorkOrder, today, uid } from './lib/erp';
-import { recognizeVinPhoto } from './lib/ocr';
+import { recognizePlatePhoto, recognizeVinPhoto } from './lib/ocr';
 import { SignaturePad } from './SignaturePad';
 import type { StaffMember } from './lib/cloud';
 
@@ -55,6 +55,7 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, p
   const [addingVehicle, setAddingVehicle] = useState(false);
   const [vehicleSaving, setVehicleSaving] = useState(false);
   const [vinScanning, setVinScanning] = useState(false);
+  const [plateScanning, setPlateScanning] = useState(false);
   const [evidenceCategory, setEvidenceCategory] = useState<EvidencePhoto['category']>('其他');
   const [evidenceSaving, setEvidenceSaving] = useState(false);
   const [vehicleDraft, setVehicleDraft] = useState({ plate: '', vin: '', year: String(new Date().getFullYear()), make: '', model: '', engine: '', mileage: 0 });
@@ -114,6 +115,17 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, p
       alert(`已识别 VIN：${vin}\n车辆资料已自动填写，请核对后保存。`);
     } catch (error) { alert(`VIN 识别失败：${error instanceof Error ? error.message : error}`); }
     finally { setVinScanning(false); }
+  };
+
+  const scanVehiclePlate = async (file?: File) => {
+    if (!file) return;
+    setPlateScanning(true);
+    try {
+      const plate = await recognizePlatePhoto(file);
+      setVehicleDraft(current => ({ ...current, plate }));
+      alert(`已识别车牌：${plate}\n请核对后保存车辆。`);
+    } catch (error) { alert(`车牌识别失败：${error instanceof Error ? error.message : error}`); }
+    finally { setPlateScanning(false); }
   };
 
   const selectDriver = (id: string) => {
@@ -200,9 +212,9 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, p
       <label>车辆<div className="input-action"><select value={order.vehicleId || ''} onChange={e => selectVehicle(e.target.value)}><option value="">{vehicles.length ? '选择车辆' : '暂无车辆，请快速添加'}</option>{vehicles.map(item => <option key={item.id} value={item.id}>{item.plate || item.vin} · {item.year} {item.make} {item.model}{item.ownerName ? ` · ${item.ownerName}` : ''}</option>)}</select><button type="button" onClick={() => setAddingVehicle(current => !current)}>＋ 添加</button></div></label>
       <label>当前里程<input type="number" value={order.mileage || ''} onChange={e => patch({ mileage: Number(e.target.value) })} /></label>
     </div>{addingVehicle && <div className="quick-vehicle">
-      <div><b>快速添加当前客户车辆</b><span>可拍摄车架号自动识别；保存后会自动选中。</span></div>
+      <div><b>快速添加当前客户车辆</b><span>可拍摄车牌或车架号自动识别；保存后会自动选中。</span></div>
       <div className="quick-vehicle-grid">
-        <label>车牌<input value={vehicleDraft.plate} onChange={e => setVehicleDraft(current => ({ ...current, plate: e.target.value.toUpperCase() }))} /></label>
+        <div className="vin-field"><span>车牌号码</span><input value={vehicleDraft.plate} onChange={e => setVehicleDraft(current => ({ ...current, plate: e.target.value.toUpperCase() }))} /><label className="vin-scan-button">{plateScanning ? '识别中…' : '📷 拍照识别车牌'}<input type="file" accept="image/*" capture="environment" disabled={plateScanning} onChange={e => { void scanVehiclePlate(e.target.files?.[0]); e.currentTarget.value = ''; }} /></label></div>
         <div className="vin-field"><span>VIN / 车架号</span><input value={vehicleDraft.vin} maxLength={17} onChange={e => setVehicleDraft(current => ({ ...current, vin: e.target.value.toUpperCase() }))} /><label className="vin-scan-button">{vinScanning ? '识别中…' : '📷 扫描 / 拍照识别'}<input type="file" accept="image/*" capture="environment" disabled={vinScanning} onChange={e => { void scanVehicleVin(e.target.files?.[0]); e.currentTarget.value = ''; }} /></label></div>
         <label>年份<input value={vehicleDraft.year} onChange={e => setVehicleDraft(current => ({ ...current, year: e.target.value }))} /></label>
         <label>品牌<input value={vehicleDraft.make} onChange={e => setVehicleDraft(current => ({ ...current, make: e.target.value }))} /></label>
@@ -259,12 +271,12 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, p
       {!calculated.partItems.length && <div className="empty-line">尚未添加配件</div>}</div>
     </section>
 
-    {canViewFinancials && <section className="form-section totals-section"><div className="form-grid four compact">
+    {canViewFinancials && <section className="form-section totals-section"><div><div className="form-grid four compact">
       <label>外包费用<input type="number" step="0.01" value={order.outsource} onChange={e => patch({ outsource: Number(e.target.value) })} /></label>
       <label>折扣<input type="number" step="0.01" value={order.discount} onChange={e => patch({ discount: Number(e.target.value) })} /></label>
       <label>配件销售税率 %（人工不计税）<input type="number" step="0.01" value={order.taxRate} onChange={e => patch({ taxRate: Number(e.target.value) })} /></label>
       <label>已付款<input type="number" step="0.01" value={order.paid} onChange={e => patch({ paid: Number(e.target.value) })} /></label>
       <label>实际结账金额（需双人授权）<input type="number" step="0.01" placeholder={String(calculated.laborTotal + calculated.partsTotal + calculated.outsource + calculated.tax - calculated.discount)} value={order.settlementTotal ?? ''} onChange={e => patch({ settlementTotal: e.target.value === '' ? undefined : Number(e.target.value) })} /></label>
-    </div><div className="totals-card"><div><span>人工（免销售税）</span><b>{money(calculated.laborTotal)}</b></div><div><span>配件</span><b>{money(calculated.partsTotal)}</b></div><div><span>配件销售税</span><b>{money(calculated.tax)}</b></div><div className="grand"><span>总价</span><b>{money(calculated.total)}</b></div><div className="balance"><span>欠款</span><b>{money(calculated.balance)}</b></div></div></section>}
+    </div><p className="tax-guidance">加州默认规则：系统仅对配件销售额计算销售税；单独列示的维修/安装人工通常不计销售税。制造加工人工等例外请由会计确认。参考：<a href="https://www.cdtfa.ca.gov/formspubs/pub25.pdf" target="_blank" rel="noreferrer">CDTFA Publication 25</a>、<a href="https://www.cdtfa.ca.gov/lawguides/vol1/sutr/1546.html" target="_blank" rel="noreferrer">Regulation 1546</a>。</p></div><div className="totals-card"><div><span>人工（免销售税）</span><b>{money(calculated.laborTotal)}</b></div><div><span>配件</span><b>{money(calculated.partsTotal)}</b></div><div><span>配件销售税</span><b>{money(calculated.tax)}</b></div><div className="grand"><span>总价</span><b>{money(calculated.total)}</b></div><div className="balance"><span>欠款</span><b>{money(calculated.balance)}</b></div></div></section>}
   </div>;
 }

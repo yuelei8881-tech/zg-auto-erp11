@@ -67,6 +67,8 @@ export type WorkOrder = {
   partsCost: number; tax: number; total: number; paid: number; balance: number; grossProfit: number;
   paymentMethod?: string; inventoryCommitted?: boolean; notes?: string;
   technicianUserId?: string;
+  claimedAt?: string; claimedBy?: string;
+  technicianCompletedAt?: string; completedBy?: string; completedByUserId?: string;
   archivedAt?: string; archivedBy?: string; archiveReason?: string;
   inspectionChecklist?: InspectionChecklist;
   reviewStatus?: '未提交' | '待审查' | '已通过' | '退回补充';

@@ -1,0 +1,19 @@
+.global-search button {
+  padding: 5px 10px;
+  background: #155eef;
+  color: #fff;
+  border-color: #155eef;
+}
+
+.tax-guidance {
+  font-size: 11px;
+  line-height: 1.55;
+  color: #5f6b7c;
+  background: #fff8e8;
+  border: 1px solid #f6d58a;
+  border-radius: 7px;
+  padding: 9px 10px;
+  margin: 12px 0 0;
+}
+
+.tax-guidance a { color: #175cd3; }

@@ -23,6 +23,7 @@ export type CloudSession = {
   listStaff: () => Promise<{ members: StaffMember[]; invites: StaffInvite[] }>;
   createStaffInvite: (email: string, role: string) => Promise<{ activationCode: string }>;
   updateStaff: (userId: string, changes: Partial<Pick<StaffMember, 'displayName' | 'phone' | 'role' | 'status' | 'permissions'>>) => Promise<void>;
+  updateOwnProfile: (displayName: string, phone?: string) => Promise<void>;
   cancelStaffInvite: (id: string) => Promise<void>;
   deleteStaffByEmail: (email: string) => Promise<boolean>;
   signOut: () => Promise<void>;
@@ -160,6 +161,11 @@ export async function openCloudSession(user: User): Promise<CloudSession> {
     if (error) throw error;
   };
 
+  const updateOwnProfile = async (displayName: string, phone = '') => {
+    const { error } = await client.rpc('zg_update_own_profile', { p_display_name: displayName.trim(), p_phone: phone.trim() || null });
+    if (error) throw error;
+  };
+
   const cancelStaffInvite = async (id: string) => {
     const { error } = await client.from('zg_staff_invites').update({ status: 'cancelled' }).eq('organization_id', organizationId).eq('id', id);
     if (error) throw error;
@@ -177,7 +183,7 @@ export async function openCloudSession(user: User): Promise<CloudSession> {
     organizationName: organization?.name || 'Z&G AUTO REPAIR',
     role: String(membership.role),
     permissions: (membership.permissions || {}) as Record<string, boolean>,
-    loadStore, upsertRecord, deleteRecord, subscribe, invokeFunction, listStaff, createStaffInvite, updateStaff, cancelStaffInvite, deleteStaffByEmail,
+    loadStore, upsertRecord, deleteRecord, subscribe, invokeFunction, listStaff, createStaffInvite, updateStaff, updateOwnProfile, cancelStaffInvite, deleteStaffByEmail,
     signOut: async () => { await client.auth.signOut(); },
   };
 }
