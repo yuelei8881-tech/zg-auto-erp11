@@ -125,7 +125,24 @@ export async function openCloudSession(user: User): Promise<CloudSession> {
 
   const invokeFunction = async <T,>(name: string, body: Record<string, unknown>) => {
     const { data, error } = await client.functions.invoke(name, { body: { ...body, organizationId } });
-    if (error) throw error;
+    if (error) {
+      let message = error.message || `Cloud function ${name} failed`;
+      const response = (error as { context?: Response }).context;
+      if (response) {
+        try {
+          const payload = await response.clone().json() as { error?: string; message?: string };
+          message = payload.error || payload.message || message;
+        } catch {
+          try {
+            const text = await response.clone().text();
+            if (text.trim()) message = text.trim();
+          } catch {
+            // Keep the original Supabase error when the response body is unavailable.
+          }
+        }
+      }
+      throw new Error(message);
+    }
     return data as T;
   };
 

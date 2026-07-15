@@ -301,7 +301,7 @@ function App({ cloud }: { cloud: CloudSession }) {
       <nav>{nav.filter(item => canOpenPage(cloud, item.id)).map(item => <button key={item.id} className={page === item.id ? 'active' : ''} onClick={() => { setPage(item.id); setSearch(''); setSearchDraft(''); }}><span>{item.icon}</span>{item.label}</button>)}</nav>
       <div className="side-foot"><small>{cloud.organizationName}</small><b>{actorName}</b><span>{cloud.user.email}</span><button onClick={() => void editOwnProfile()}>编辑我的姓名</button><button onClick={() => confirm('确定退出当前账号？') && void cloud.signOut()}>退出登录</button></div>
     </aside>
-    <main className="main"><header className="topbar"><div className="global-search">⌕<input value={searchDraft} onChange={e => setSearchDraft(e.target.value)} onKeyDown={e => e.key === 'Enter' && runGlobalSearch()} placeholder="搜索客户、电话、VIN、车牌、工单、司机…" /><button type="button" onClick={runGlobalSearch}>搜索</button>{searchSuggestions.length > 0 && <div className="search-suggestions">{searchSuggestions.map((item, index) => <button type="button" key={`${item.page}-${item.label}-${index}`} onClick={() => { setSearchDraft(item.query); setSearch(item.query); setPage(item.page); }}><b>{item.label}</b><small>{item.meta}</small></button>)}</div>}</div><div className="top-status"><span className={syncing ? 'syncing' : ''}>{syncing ? '正在同步…' : '● 云端已同步'}</span><button type="button" onClick={() => void editOwnProfile()}>{actorName}</button><b>v0.77.0</b><button type="button" className="topbar-logout" onClick={() => confirm('确定退出当前账号？') && void cloud.signOut()}>退出</button></div></header>
+    <main className="main"><header className="topbar"><div className="global-search">⌕<input value={searchDraft} onChange={e => setSearchDraft(e.target.value)} onKeyDown={e => e.key === 'Enter' && runGlobalSearch()} placeholder="搜索客户、电话、VIN、车牌、工单、司机…" /><button type="button" onClick={runGlobalSearch}>搜索</button>{searchSuggestions.length > 0 && <div className="search-suggestions">{searchSuggestions.map((item, index) => <button type="button" key={`${item.page}-${item.label}-${index}`} onClick={() => { setSearchDraft(item.query); setSearch(item.query); setPage(item.page); }}><b>{item.label}</b><small>{item.meta}</small></button>)}</div>}</div><div className="top-status"><span className={syncing ? 'syncing' : ''}>{syncing ? '正在同步…' : '● 云端已同步'}</span><button type="button" onClick={() => void editOwnProfile()}>{actorName}</button><b>v0.77.1</b><button type="button" className="topbar-logout" onClick={() => confirm('确定退出当前账号？') && void cloud.signOut()}>退出</button></div></header>
       {loading ? <div className="loading">正在读取正式服务器数据…</div> : <PageContent page={page} search={search} store={store} settings={settings} cloud={cloud} setPage={setPage} openModal={openModal} setEditingOrder={setEditingOrder} persist={persist} remove={remove} receiveStock={receiveStock} addPayment={addPayment} deleteWorkOrder={deleteWorkOrder} approveRequest={approveRequest} rejectRequest={rejectRequest} claimWorkOrder={claimWorkOrder} completeWorkOrder={completeWorkOrder} actorName={actorName} editOwnProfile={editOwnProfile} />}
     </main>
     {modal && <EntityModal state={modal} store={store} settings={settings} onClose={closeModal} onSave={saveModal} />}
@@ -476,6 +476,22 @@ function SendMenu({ order, settings, store, cloud }: { order: WorkOrder; setting
   const fleet = store.fleets.find(item => item.id === order.customerId || item.company === order.company || item.company === order.customer);
   const savedEmail = customer?.email || fleet?.billingEmail || '';
   const notify = async (subject: string, html: string, email: string) => cloud.invokeFunction('zg-notify', { channel: 'email', to: email, subject, html });
+  const explainSendError = (error: unknown) => {
+    const message = error instanceof Error ? error.message : String(error);
+    if (message.includes('RESEND_API_KEY')) return '邮件服务尚未配置 RESEND_API_KEY。工单资料没有丢失；请先复制客户确认链接，配置邮件服务后即可自动发送。';
+    if (message.includes('RESEND_FROM') || message.includes('EMAIL_FROM') || message.toLowerCase().includes('sender')) return `邮件发件地址尚未验证：${message}`;
+    if (message.toLowerCase().includes('function') && message.toLowerCase().includes('not found')) return '邮件云函数 zg-notify 尚未部署。';
+    return message;
+  };
+  const copyText = async (value: string) => {
+    try {
+      await navigator.clipboard.writeText(value);
+      return true;
+    } catch {
+      window.prompt('请复制下面的客户确认链接：', value);
+      return false;
+    }
+  };
   const regularEmail = async (kind: string) => {
     const email = prompt('客户邮箱：', savedEmail);
     if (!email?.trim()) return;
@@ -494,17 +510,17 @@ function SendMenu({ order, settings, store, cloud }: { order: WorkOrder; setting
     try {
       await notify(`${settings.shopName} · 维修项目等待确认 · ${order.number}`, `<h2>维修项目在线确认</h2><p>${escapeHtml(order.customer)}，您好：</p><p>您的车辆 ${escapeHtml(order.vehicle)}（${escapeHtml(order.plate)}）维修项目等待确认。</p><p><b>预计总价：${money(order.total)}</b></p><p><a href="${escapeHtml(url)}" style="display:inline-block;padding:12px 20px;background:#165dff;color:white;text-decoration:none;border-radius:6px">查看并确认维修</a></p><p>工单号：${escapeHtml(order.number)}</p>`, email.trim());
       alert('在线确认链接已经发送，客户确认或拒绝后会自动回传系统。');
-    } catch {
-      await navigator.clipboard?.writeText(url);
-      alert(`确认链接已生成并复制，但邮件服务尚未配置。可通过短信或微信发送给客户：\n${url}`);
+    } catch (error) {
+      const copied = await copyText(url);
+      alert(`客户在线确认链接已经生成${copied ? '并复制' : ''}，但邮件没有自动发出。\n原因：${explainSendError(error)}\n\n可先通过短信或微信把下面链接发给客户：\n${url}`);
     }
   };
   const choose = async (value: string) => {
     if (!value) return;
-    if (value === 'copy' && order.customerApprovalUrl) { await navigator.clipboard.writeText(order.customerApprovalUrl); alert('确认链接已复制。'); return; }
+    if (value === 'copy' && order.customerApprovalUrl) { const copied = await copyText(order.customerApprovalUrl); if (copied) alert('客户确认链接已复制。'); return; }
     setSending(true);
     try { if (value === 'approval') await approval(); else await regularEmail(value); }
-    catch (error) { alert(`发送失败：${error instanceof Error ? error.message : String(error)}`); }
+    catch (error) { alert(`发送失败：${explainSendError(error)}`); }
     finally { setSending(false); }
   };
   return <select className="send-select" value="" disabled={sending} onChange={event => { void choose(event.target.value); event.target.value = ''; }}><option value="">{sending ? '发送中…' : '发送…'}</option><option value="repair">邮件发送工单</option><option value="invoice">邮件发送发票</option><option value="inspection">邮件发送检查结果</option><option value="approval">发送在线维修确认</option>{order.customerApprovalUrl && <option value="copy">复制现有确认链接</option>}</select>;

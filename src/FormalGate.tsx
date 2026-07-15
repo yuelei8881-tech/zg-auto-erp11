@@ -78,7 +78,7 @@ export function FormalGate({ children }: { children: (cloud: CloudSession) => Re
   if (loading) return <AuthCard title="正在连接正式服务器" subtitle="正在安全读取登录状态…" />;
   if (mode === 'recovery') return <div className="auth-screen"><form className="auth-card" onSubmit={recover}><div className="auth-logo">Z&G</div><h1>设置新密码</h1><p>请输入至少 8 位的新密码</p><label><span>新密码</span><input name="password" type="password" autoComplete="new-password" required minLength={8} /></label>{error && <p className="auth-error">{error}</p>}<button className="primary" disabled={submitting}>{submitting ? '正在保存…' : '保存新密码'}</button></form></div>;
   if (!session) return <div className="auth-screen"><form className="auth-card" onSubmit={mode === 'register' ? register : mode === 'forgot' ? forgot : login}>
-    <div className="auth-logo">Z&G</div><h1>Z&G AUTO ERP</h1><p>{mode === 'forgot' ? '找回密码' : '员工账号登录 · v0.77.0'}</p>
+    <div className="auth-logo">Z&G</div><h1>Z&G AUTO ERP</h1><p>{mode === 'forgot' ? '找回密码' : '员工账号登录 · v0.77.1'}</p>
     <label><span>邮箱</span><input name="email" type="email" autoComplete="email" required /></label>
     {mode !== 'forgot' && <label><span>密码</span><input name="password" type="password" autoComplete={mode === 'register' ? 'new-password' : 'current-password'} required minLength={8} /></label>}
     {mode === 'register' && <label><span>员工激活码</span><input name="activationCode" autoComplete="one-time-code" placeholder="由老板提供的 8 位激活码" required /></label>}
