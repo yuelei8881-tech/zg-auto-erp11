@@ -34,7 +34,7 @@ begin
   update public.zg_customer_approvals set status = 'expired'
     where organization_id = p_organization_id and work_order_id = p_work_order_id and status = 'pending';
   insert into public.zg_customer_approvals(organization_id, work_order_id, token_hash, snapshot, customer_email, customer_name, created_by)
-  values(p_organization_id, p_work_order_id, encode(digest(v_token, 'sha256'), 'hex'), coalesce(p_snapshot, '{}'::jsonb), p_customer_email, p_customer_name, auth.uid());
+  values(p_organization_id, p_work_order_id, encode(extensions.digest(v_token, 'sha256'), 'hex'), coalesce(p_snapshot, '{}'::jsonb), p_customer_email, p_customer_name, auth.uid());
   return v_token;
 end $$;
 
@@ -44,7 +44,7 @@ returns jsonb language sql security definer set search_path = public as $$
     'customer_name', customer_name, 'customer_email', customer_email, 'expires_at', expires_at,
     'decision_note', decision_note, 'decided_at', decided_at, 'snapshot', snapshot)
   from public.zg_customer_approvals
-  where token_hash = encode(digest(trim(p_token), 'sha256'), 'hex') limit 1
+  where token_hash = encode(extensions.digest(trim(p_token), 'sha256'), 'hex') limit 1
 $$;
 
 create or replace function public.zg_submit_customer_approval(p_token text, p_decision text, p_note text, p_signature text)
@@ -53,7 +53,7 @@ declare v_row public.zg_customer_approvals; v_cn text;
 begin
   if p_decision not in ('approved','rejected') then raise exception 'Invalid decision'; end if;
   select * into v_row from public.zg_customer_approvals
-    where token_hash = encode(digest(trim(p_token), 'sha256'), 'hex') and status = 'pending' and expires_at >= now() for update;
+    where token_hash = encode(extensions.digest(trim(p_token), 'sha256'), 'hex') and status = 'pending' and expires_at >= now() for update;
   if v_row.id is null then return false; end if;
   if p_decision = 'approved' and coalesce(p_signature,'') = '' then raise exception 'Signature required'; end if;
   update public.zg_customer_approvals set status=p_decision, decision_note=p_note, signature_data=p_signature, decided_at=now() where id=v_row.id;
