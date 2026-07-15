@@ -306,7 +306,7 @@ function App({ cloud }: { cloud: CloudSession }) {
       <nav>{nav.filter(item => canOpenPage(cloud, item.id)).map(item => <button key={item.id} className={page === item.id ? 'active' : ''} onClick={() => { setPage(item.id); setSearch(''); setSearchDraft(''); }}><span>{item.icon}</span>{item.label}</button>)}</nav>
       <div className="side-foot"><small>{cloud.organizationName}</small><b>{actorName}</b><span>{cloud.user.email}</span><button onClick={() => confirm('确定退出当前账号？') && void cloud.signOut()}>退出登录</button></div>
     </aside>
-    <main className="main"><header className="topbar"><div className="global-search">⌕<input value={searchDraft} onChange={e => setSearchDraft(e.target.value)} onKeyDown={e => e.key === 'Enter' && runGlobalSearch()} placeholder="搜索客户、电话、VIN、车牌、工单、司机…" /><button type="button" onClick={runGlobalSearch}>搜索</button>{searchSuggestions.length > 0 && <div className="search-suggestions">{searchSuggestions.map((item, index) => <button type="button" key={`${item.page}-${item.label}-${index}`} onClick={() => { setSearchDraft(item.query); setSearch(item.query); setPage(item.page); }}><b>{item.label}</b><small>{item.meta}</small></button>)}</div>}</div><div className="top-status"><span className={syncing ? 'syncing' : ''}>{syncing ? '正在同步…' : '● 云端已同步'}</span><span>{actorName}</span><b>v0.78.0</b><button type="button" className="topbar-logout" onClick={() => confirm('确定退出当前账号？') && void cloud.signOut()}>退出</button></div></header>
+    <main className="main"><header className="topbar"><div className="global-search">⌕<input value={searchDraft} onChange={e => setSearchDraft(e.target.value)} onKeyDown={e => e.key === 'Enter' && runGlobalSearch()} placeholder="搜索客户、电话、VIN、车牌、工单、司机…" /><button type="button" onClick={runGlobalSearch}>搜索</button>{searchSuggestions.length > 0 && <div className="search-suggestions">{searchSuggestions.map((item, index) => <button type="button" key={`${item.page}-${item.label}-${index}`} onClick={() => { setSearchDraft(item.query); setSearch(item.query); setPage(item.page); }}><b>{item.label}</b><small>{item.meta}</small></button>)}</div>}</div><div className="top-status"><span className={syncing ? 'syncing' : ''}>{syncing ? '正在同步…' : '● 云端已同步'}</span><span>{actorName}</span><b>v0.78.1</b><button type="button" className="topbar-logout" onClick={() => confirm('确定退出当前账号？') && void cloud.signOut()}>退出</button></div></header>
       {loading ? <div className="loading">正在读取正式服务器数据…</div> : <PageContent page={page} search={search} store={store} settings={settings} cloud={cloud} setPage={setPage} openModal={openModal} setEditingOrder={setEditingOrder} persist={persist} remove={remove} receiveStock={receiveStock} addPayment={addPayment} deleteWorkOrder={deleteWorkOrder} approveRequest={approveRequest} rejectRequest={rejectRequest} claimWorkOrder={claimWorkOrder} completeWorkOrder={completeWorkOrder} actorName={actorName} editOwnProfile={editOwnProfile} />}
     </main>
     {modal && <EntityModal state={modal} store={store} settings={settings} onClose={closeModal} onSave={saveModal} />}
@@ -511,7 +511,7 @@ function SendMenu({ order, settings, store, cloud }: { order: WorkOrder; setting
   const customer = store.customers.find(item => item.id === order.customerId || item.name === order.customer);
   const fleet = store.fleets.find(item => item.id === order.customerId || item.company === order.company || item.company === order.customer);
   const savedEmail = customer?.email || fleet?.billingEmail || '';
-  const notify = async (subject: string, html: string, email: string) => cloud.invokeFunction('zg-notify', { channel: 'email', to: email, subject, html });
+  const notify = async (subject: string, html: string, email: string) => cloud.invokeFunction('zg-notify', { channel: 'email', type: 'email', to: email, subject, html });
   const explainSendError = (error: unknown) => {
     let message = '未知发送错误';
     if (error instanceof Error) message = error.message;
@@ -520,7 +520,9 @@ function SendMenu({ order, settings, store, cloud }: { order: WorkOrder; setting
       const value = error as Record<string, unknown>;
       message = String(value.message || value.error || value.context || JSON.stringify(value));
     }
-    if (message.includes('RESEND_API_KEY')) return '邮件服务尚未配置 RESEND_API_KEY。工单资料没有丢失；请先复制客户确认链接，配置邮件服务后即可自动发送。';
+    if (!message || message === '[object Object]') return '服务器返回了无法识别的旧版错误。工单资料没有丢失，请更新通知函数后重试。';
+    if (message.toLowerCase().includes('twilio')) return '服务器仍在运行旧版通知函数，邮件请求被错误送入短信通道。请更新 zg-notify 通知函数；工单资料没有丢失。';
+    if (message.includes('RESEND_API_KEY') || message.includes('EMAIL_NOT_CONFIGURED')) return '邮件服务尚未配置 RESEND_API_KEY。工单资料没有丢失；配置邮件服务后即可由公司邮箱自动发送。';
     if (message.includes('RESEND_FROM') || message.includes('EMAIL_FROM') || message.toLowerCase().includes('sender')) return `邮件发件地址尚未验证：${message}`;
     if (message.toLowerCase().includes('function') && message.toLowerCase().includes('not found')) return '邮件云函数 zg-notify 尚未部署。';
     return message;
