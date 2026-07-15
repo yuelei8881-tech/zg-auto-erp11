@@ -20,6 +20,7 @@ export type CloudSession = {
   deleteRecord: (module: string, id: string) => Promise<void>;
   subscribe: (refresh: () => void) => () => void;
   invokeFunction: <T = unknown>(name: string, body: Record<string, unknown>) => Promise<T>;
+  createCustomerApproval: (workOrderId: string, customerEmail: string, customerName: string, snapshot: Record<string, unknown>) => Promise<{ token: string }>;
   listStaff: () => Promise<{ members: StaffMember[]; invites: StaffInvite[] }>;
   createStaffInvite: (email: string, role: string) => Promise<{ activationCode: string }>;
   updateStaff: (userId: string, changes: Partial<Pick<StaffMember, 'displayName' | 'phone' | 'role' | 'status' | 'permissions'>>) => Promise<void>;
@@ -128,6 +129,18 @@ export async function openCloudSession(user: User): Promise<CloudSession> {
     return data as T;
   };
 
+  const createCustomerApproval = async (workOrderId: string, customerEmail: string, customerName: string, snapshot: Record<string, unknown>) => {
+    const { data, error } = await client.rpc('zg_create_customer_approval', {
+      p_organization_id: organizationId,
+      p_work_order_id: workOrderId,
+      p_customer_email: customerEmail || null,
+      p_customer_name: customerName || null,
+      p_snapshot: snapshot,
+    });
+    if (error) throw error;
+    return { token: String(data || '') };
+  };
+
   const listStaff = async () => {
     const memberResult = await client.from('zg_organization_members').select('user_id,display_name,phone,role,status,permissions').eq('organization_id', organizationId).order('created_at');
     let inviteResult = await client.from('zg_staff_invites').select('id,email,role,status,expires_at,activation_code').eq('organization_id', organizationId).order('created_at', { ascending: false });
@@ -187,7 +200,7 @@ export async function openCloudSession(user: User): Promise<CloudSession> {
     organizationName: organization?.name || 'Z&G AUTO REPAIR',
     role: String(membership.role),
     permissions: (membership.permissions || {}) as Record<string, boolean>,
-    loadStore, upsertRecord, deleteRecord, subscribe, invokeFunction, listStaff, createStaffInvite, updateStaff, updateOwnProfile, cancelStaffInvite, deleteStaffByEmail,
+    loadStore, upsertRecord, deleteRecord, subscribe, invokeFunction, createCustomerApproval, listStaff, createStaffInvite, updateStaff, updateOwnProfile, cancelStaffInvite, deleteStaffByEmail,
     signOut: async () => { await client.auth.signOut(); },
   };
 }

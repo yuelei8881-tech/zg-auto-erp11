@@ -11,9 +11,13 @@ import { StaffPage } from './StaffPage';
 import { BRAND_LOGO_SVG } from './brandLogo';
 import { PwaInstall } from './PwaInstall';
 import { registerPwa } from './pwa';
+import { recognizePlatePhoto, recognizeVinPhoto } from './lib/ocr';
+import { CustomerApprovalPage } from './CustomerApprovalPage';
+import { printDocumentV077 } from './printDocument';
 import './styles.css';
 import './v0763.css';
 import './extra.css';
+import './v0770.css';
 
 type Page = 'dashboard' | 'customers' | 'fleets' | 'vehicles' | 'workOrders' | 'parts' | 'finance' | 'campaigns' | 'staff' | 'smart' | 'settings';
 type ModalState = { type: 'customer' | 'fleet' | 'driver' | 'vehicle' | 'part' | 'expense' | 'campaign' | 'warranty' | 'settings'; value?: Record<string, unknown> } | null;
@@ -79,6 +83,18 @@ function App({ cloud }: { cloud: CloudSession }) {
   const settings = store.settings[0] || defaultSettings;
   const actorName = displayName || cloud.user.name || cloud.user.email;
 
+  const searchSuggestions = useMemo(() => {
+    const query = normalizeSearch(searchDraft);
+    if (!query) return [] as Array<{ page: Page; label: string; meta: string; query: string }>;
+    const candidates: Array<{ page: Page; label: string; meta: string; query: string; haystack: string }> = [];
+    for (const item of store.customers) candidates.push({ page: 'customers', label: item.name, meta: `客户 · ${item.phone || ''}`, query: item.phone || item.name, haystack: `${item.name} ${item.phone} ${item.email || ''}` });
+    for (const item of store.fleets) candidates.push({ page: 'fleets', label: item.company, meta: `车队 · ${item.phone || ''}`, query: item.company, haystack: `${item.company} ${item.phone} ${item.billingEmail || ''}` });
+    for (const item of store.drivers) candidates.push({ page: 'fleets', label: item.name, meta: `司机 · ${item.phone || ''}`, query: item.phone || item.name, haystack: `${item.name} ${item.phone} ${item.company || ''}` });
+    for (const item of store.vehicles) candidates.push({ page: 'vehicles', label: item.plate || item.vin || `${item.year} ${item.make}`, meta: `${item.year} ${item.make} ${item.model} · ${item.vin || ''}`, query: item.plate || item.vin, haystack: `${item.plate} ${item.vin} ${item.year} ${item.make} ${item.model} ${item.ownerName || ''}` });
+    for (const item of store.workOrders) candidates.push({ page: 'workOrders', label: item.number, meta: `${item.customer} · ${item.plate}`, query: item.number, haystack: `${item.number} ${item.customer} ${item.phone} ${item.plate} ${item.vin} ${item.driver || ''}` });
+    return candidates.filter(item => normalizeSearch(item.haystack).includes(query)).slice(0, 8);
+  }, [searchDraft, store]);
+
   const runGlobalSearch = () => {
     const query = searchDraft.trim();
     setSearch(query);
@@ -101,7 +117,7 @@ function App({ cloud }: { cloud: CloudSession }) {
       setStaffMembers(data.members.filter(item => item.status === 'active'));
       alert('姓名已保存。以后领取和完成工单都会记录这个姓名。');
     } catch (error) {
-      alert(`姓名保存失败：${error instanceof Error ? error.message : error}\n请确认服务器已安装 v0.76.3 数据库升级。`);
+      alert(`姓名保存失败：${error instanceof Error ? error.message : error}\n请确认服务器已安装 v0.77.0 数据库升级。`);
     }
   };
 
@@ -278,14 +294,14 @@ function App({ cloud }: { cloud: CloudSession }) {
     closeModal();
   };
 
-  if (editingOrder) return <WorkOrderEditor value={editingOrder === 'new' ? undefined : editingOrder} customers={store.customers} vehicles={store.vehicles} fleets={store.fleets} drivers={store.drivers} parts={store.parts} settings={settings} nextNumber={nextWorkOrderNumber(store.workOrders)} onCreateVehicle={vehicle => persist('vehicles', vehicle)} onPrint={(order, type) => printDocument(recalculateWorkOrder(order), settings, type)} onSave={saveWorkOrder} onCancel={() => setEditingOrder(null)} currentUser={actorName} currentUserId={cloud.user.id} technicians={staffMembers} canApproveReview={can(cloud, 'approve')} canAssignTechnician={can(cloud, 'assignTechnician')} canEditPricing={can(cloud, 'pricing')} canViewFinancials={can(cloud, 'pricing') || can(cloud, 'finance')} />;
+  if (editingOrder) return <WorkOrderEditor value={editingOrder === 'new' ? undefined : editingOrder} customers={store.customers} vehicles={store.vehicles} fleets={store.fleets} drivers={store.drivers} parts={store.parts} settings={settings} nextNumber={nextWorkOrderNumber(store.workOrders)} onCreateVehicle={vehicle => persist('vehicles', vehicle)} onPrint={(order, type) => printDocumentV077(recalculateWorkOrder(order), settings, type)} onSave={saveWorkOrder} onCancel={() => setEditingOrder(null)} currentUser={actorName} currentUserId={cloud.user.id} technicians={staffMembers} canApproveReview={can(cloud, 'approve')} canAssignTechnician={can(cloud, 'assignTechnician')} canEditPricing={can(cloud, 'pricing')} canViewFinancials={can(cloud, 'pricing') || can(cloud, 'finance')} />;
 
   return <div className="app-shell">
     <aside className="sidebar"><div className="brand"><div className="brand-mark">Z&G</div><div><b>AUTO ERP</b><small>正式服务器版</small></div></div>
       <nav>{nav.filter(item => canOpenPage(cloud, item.id)).map(item => <button key={item.id} className={page === item.id ? 'active' : ''} onClick={() => { setPage(item.id); setSearch(''); setSearchDraft(''); }}><span>{item.icon}</span>{item.label}</button>)}</nav>
       <div className="side-foot"><small>{cloud.organizationName}</small><b>{actorName}</b><span>{cloud.user.email}</span><button onClick={() => void editOwnProfile()}>编辑我的姓名</button><button onClick={() => confirm('确定退出当前账号？') && void cloud.signOut()}>退出登录</button></div>
     </aside>
-    <main className="main"><header className="topbar"><div className="global-search">⌕<input value={searchDraft} onChange={e => setSearchDraft(e.target.value)} onKeyDown={e => e.key === 'Enter' && runGlobalSearch()} placeholder="搜索客户、电话、VIN、车牌、工单、司机…" /><button type="button" onClick={runGlobalSearch}>搜索</button></div><div className="top-status"><span className={syncing ? 'syncing' : ''}>{syncing ? '正在同步…' : '● 云端已同步'}</span><button type="button" onClick={() => void editOwnProfile()}>{actorName}</button><b>v0.76.3</b><button type="button" className="topbar-logout" onClick={() => confirm('确定退出当前账号？') && void cloud.signOut()}>退出</button></div></header>
+    <main className="main"><header className="topbar"><div className="global-search">⌕<input value={searchDraft} onChange={e => setSearchDraft(e.target.value)} onKeyDown={e => e.key === 'Enter' && runGlobalSearch()} placeholder="搜索客户、电话、VIN、车牌、工单、司机…" /><button type="button" onClick={runGlobalSearch}>搜索</button>{searchSuggestions.length > 0 && <div className="search-suggestions">{searchSuggestions.map((item, index) => <button type="button" key={`${item.page}-${item.label}-${index}`} onClick={() => { setSearchDraft(item.query); setSearch(item.query); setPage(item.page); }}><b>{item.label}</b><small>{item.meta}</small></button>)}</div>}</div><div className="top-status"><span className={syncing ? 'syncing' : ''}>{syncing ? '正在同步…' : '● 云端已同步'}</span><button type="button" onClick={() => void editOwnProfile()}>{actorName}</button><b>v0.77.0</b><button type="button" className="topbar-logout" onClick={() => confirm('确定退出当前账号？') && void cloud.signOut()}>退出</button></div></header>
       {loading ? <div className="loading">正在读取正式服务器数据…</div> : <PageContent page={page} search={search} store={store} settings={settings} cloud={cloud} setPage={setPage} openModal={openModal} setEditingOrder={setEditingOrder} persist={persist} remove={remove} receiveStock={receiveStock} addPayment={addPayment} deleteWorkOrder={deleteWorkOrder} approveRequest={approveRequest} rejectRequest={rejectRequest} claimWorkOrder={claimWorkOrder} completeWorkOrder={completeWorkOrder} actorName={actorName} editOwnProfile={editOwnProfile} />}
     </main>
     {modal && <EntityModal state={modal} store={store} settings={settings} onClose={closeModal} onSave={saveModal} />}
@@ -364,10 +380,11 @@ function WorkOrders({ store, search, settings, cloud, setEditingOrder, addPaymen
   const showFinance = can(cloud, 'pricing') || can(cloud, 'finance');
   const canEdit = can(cloud, 'workOrders') || can(cloud, 'diagnosis');
   const canPrint = can(cloud, 'workOrders');
+  const canSend = can(cloud, 'customerContact') || can(cloud, 'workOrders');
   const visibleLogs = store.changeLogs.filter(log => visible.some(order => order.id === log.workOrderId));
-  return <div className="page"><div className="page-title"><div><p className="eyebrow">Z&G AUTO ERP</p><h2>{assignedOnly ? '我的维修任务' : '维修工单'}</h2><p>检查审查、双人授权、证据留存、收款、打印和修改记录自动联动</p></div>{can(cloud, 'createWorkOrders') && <button className="primary" onClick={() => setEditingOrder('new')}>＋ 新建工单</button>}</div>
+  return <div className="page"><div className="page-title"><div><p className="eyebrow">Z&G AUTO ERP</p><h2>{assignedOnly ? '我的维修任务' : '维修工单'}</h2><p>检查审查、客户在线确认、双人授权、证据留存、邮件、收款、打印和修改记录自动联动</p></div>{can(cloud, 'createWorkOrders') && <button className="primary" onClick={() => setEditingOrder('new')}>＋ 新建工单</button>}</div>
     {!!pending.length && <section className="panel approval-panel"><div className="section-title"><div><h3>待双人授权</h3><span>申请人与批准人必须是两个不同账号；所有决定永久记入日志</span></div><b>{pending.length} 项</b></div>{pending.map(item => <article className="approval-row" key={item.id}><div><b>{item.type === '删除工单' ? '作废/归档工单' : item.type} · {item.workOrderNumber}</b><small>申请人 {item.requestedBy} · {new Date(item.requestedAt).toLocaleString()}</small><p>{item.reason}</p></div><div className="actions">{canApprove && item.requestedById !== cloud.user.id ? <><button className="primary" onClick={() => void approveRequest(item)}>批准并执行</button><button onClick={() => void rejectRequest(item)}>拒绝</button></> : <span className="muted">{item.requestedById === cloud.user.id ? '等待另一账号批准' : '需要审批权限'}</span>}</div></article>)}</section>}
-    <section className="panel work-order-table"><table><thead><tr><th>工单/日期</th><th>客户与车辆</th><th>技师/状态</th><th>检查/审查</th>{showFinance && <><th>总价</th><th>已付/欠款</th></>}<th /></tr></thead><tbody>{rows.map(order => { const checks = Object.values(order.inspectionChecklist || {}).filter(Boolean).length; const evidenceCount = (order.evidencePhotos || []).filter(item => !item.archivedAt).length; const isMine = order.technicianUserId === cloud.user.id || order.technician === actorName || order.technician === cloud.user.email; const isUnassigned = !order.technicianUserId && !order.technician; const isFinished = order.status === '已完成' || order.status === '已交车'; return <tr key={order.id} className={order.archivedAt ? 'archived-row' : ''}><td><b>{order.number}</b><small>{order.date} {order.po ? `· PO ${order.po}` : ''}</small>{order.archivedAt && <small className="archive-badge">已作废并归档</small>}</td><td>{order.customer}<small>{order.plate} · {order.vehicle}{order.driver ? ` · 司机 ${order.driver}` : ''}</small><small>证据 {evidenceCount} 张</small></td><td>{order.technician || '未分配（可领取）'}<small><Status value={order.status} /></small>{order.completedBy && <small className="success-text">完成：{order.completedBy}{order.technicianCompletedAt ? ` · ${new Date(order.technicianCompletedAt).toLocaleString()}` : ''}</small>}</td><td><b>{checks}/5</b><small><span className={`review-badge review-${order.reviewStatus || '未提交'}`}>{order.reviewStatus || '未提交'}</span></small></td>{showFinance && <><td><b>{money(order.total)}</b><small>毛利 {money(order.grossProfit)}</small></td><td>{money(order.paid)}<small className={order.balance > 0 ? 'warning-text' : ''}>欠 {money(order.balance)}</small></td></>}<td className="actions">{assignedOnly && isUnassigned && !order.archivedAt && <button className="primary" onClick={() => void claimWorkOrder(order)}>领取工单</button>}{assignedOnly && isMine && !isFinished && !order.archivedAt && <button className="primary" onClick={() => void completeWorkOrder(order)}>维修完成</button>}{canEdit && <button className={order.reviewStatus === '待审查' && canApprove ? 'primary' : ''} onClick={() => setEditingOrder(order)}>{order.reviewStatus === '待审查' && canApprove ? '审查' : '查看/编辑'}</button>}{can(cloud, 'collectPayment') && !order.archivedAt && <button onClick={() => addPayment(order)} disabled={order.balance <= 0}>收款</button>}{canPrint && <PrintMenu order={order} settings={settings} />}{can(cloud, 'archive') && !order.archivedAt && <button className="danger-link" onClick={() => deleteWorkOrder(order)}>申请作废</button>}{order.archivedAt && <small title={order.archiveReason}>原因：{order.archiveReason || '未填写'}</small>}</td></tr>})}</tbody></table>{!rows.length && <Empty text={assignedOnly ? '目前没有可领取或已分配给您的工单。' : '没有找到工单。'} />}</section>
+    <section className="panel work-order-table"><table><thead><tr><th>工单/日期</th><th>客户与车辆</th><th>技师/状态</th><th>检查/审查</th>{showFinance && <><th>总价</th><th>已付/欠款</th></>}<th /></tr></thead><tbody>{rows.map(order => { const checks = Object.values(order.inspectionChecklist || {}).filter(Boolean).length; const evidenceCount = (order.evidencePhotos || []).filter(item => !item.archivedAt).length; const isMine = order.technicianUserId === cloud.user.id || order.technician === actorName || order.technician === cloud.user.email; const isUnassigned = !order.technicianUserId && !order.technician; const isFinished = order.status === '已完成' || order.status === '已交车'; return <tr key={order.id} className={order.archivedAt ? 'archived-row' : ''}><td><b>{order.number}</b><small>{order.date} {order.po ? `· PO ${order.po}` : ''}</small>{order.archivedAt && <small className="archive-badge">已作废并归档</small>}</td><td>{order.customer}<small>{order.plate} · {order.vehicle}{order.driver ? ` · 司机 ${order.driver}` : ''}</small><small>证据 {evidenceCount} 张</small></td><td>{order.technician || '未分配（可领取）'}<small><Status value={order.status} /></small>{order.completedBy && <small className="success-text">完成：{order.completedBy}{order.technicianCompletedAt ? ` · ${new Date(order.technicianCompletedAt).toLocaleString()}` : ''}</small>}</td><td><b>{checks}/5</b><small><span className={`review-badge review-${order.reviewStatus || '未提交'}`}>{order.reviewStatus || '未提交'}</span></small><small className={`approval-state approval-${order.customerApprovalStatus || '未发送'}`}>客户：{order.customerApprovalStatus || '未发送'}</small></td>{showFinance && <><td><b>{money(order.total)}</b><small>毛利 {money(order.grossProfit)}</small></td><td>{money(order.paid)}<small className={order.balance > 0 ? 'warning-text' : ''}>欠 {money(order.balance)}</small></td></>}<td className="actions">{assignedOnly && isUnassigned && !order.archivedAt && <button className="primary" onClick={() => void claimWorkOrder(order)}>领取工单</button>}{assignedOnly && isMine && !isFinished && !order.archivedAt && <button className="primary" onClick={() => void completeWorkOrder(order)}>维修完成</button>}{canEdit && <button className={order.reviewStatus === '待审查' && canApprove ? 'primary' : ''} onClick={() => setEditingOrder(order)}>{order.reviewStatus === '待审查' && canApprove ? '审查' : '查看/编辑'}</button>}{can(cloud, 'collectPayment') && !order.archivedAt && <button onClick={() => addPayment(order)} disabled={order.balance <= 0}>收款</button>}{canPrint && <PrintMenu order={order} settings={settings} />}{canSend && !order.archivedAt && <SendMenu order={order} settings={settings} store={store} cloud={cloud} />}{can(cloud, 'archive') && !order.archivedAt && <button className="danger-link" onClick={() => deleteWorkOrder(order)}>申请作废</button>}{order.archivedAt && <small title={order.archiveReason}>原因：{order.archiveReason || '未填写'}</small>}</td></tr>})}</tbody></table>{!rows.length && <Empty text={assignedOnly ? '目前没有可领取或已分配给您的工单。' : '没有找到工单。'} />}</section>
     {(canApprove || cloud.role === 'owner' || cloud.role === 'manager') && <section className="panel"><div className="section-title"><h3>最近修改记录</h3><span>保留修改人、时间、内容以及授权结果，不允许清除</span></div><div className="change-log-list">{[...visibleLogs].sort((a,b) => b.at.localeCompare(a.at)).slice(0,50).map(log => <div key={log.id}><b>{log.workOrderNumber} · {log.action}</b><span>{log.actor} · {new Date(log.at).toLocaleString()}</span><small>{log.detail}</small></div>)}</div>{!visibleLogs.length && <Empty text="尚无工单修改记录。" />}</section>}
   </div>;
 }
@@ -388,12 +405,31 @@ function SettingsPage({ settings, openModal }: { settings: ShopSettings; openMod
 
 function EntityModal({ state, store, settings, onClose, onSave }: { state: NonNullable<ModalState>; store: AppStore; settings: ShopSettings; onClose: () => void; onSave: (type: NonNullable<ModalState>['type'], data: Record<string, unknown>) => Promise<void> }) {
   const [data, setData] = useState<Record<string, unknown>>(() => initialForm(state.type, state.value, settings));
-  const [saving, setSaving] = useState(false); const [vinBusy, setVinBusy] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [vinBusy, setVinBusy] = useState(false);
+  const [ocrBusy, setOcrBusy] = useState<'plate' | 'vin' | ''>('');
   const fields = formFields(state.type, store);
   const patch = (key: string, value: unknown) => setData(current => ({ ...current, [key]: value }));
   const runVin = async () => { setVinBusy(true); try { const result = await decodeVin(String(data.vin || '')); setData(current => ({ ...current, ...result })); } catch (error) { alert(error instanceof Error ? error.message : error); } finally { setVinBusy(false); } };
+  const recognizePhoto = async (key: 'plate' | 'vin', file?: File) => {
+    if (!file) return;
+    setOcrBusy(key);
+    try {
+      const recognized = key === 'plate' ? await recognizePlatePhoto(file) : await recognizeVinPhoto(file);
+      if (!recognized) throw new Error(key === 'plate' ? '没有识别到车牌，请重新拍摄清晰、正面的车牌照片。' : '没有识别到17位 VIN，请重新拍摄仪表台或车门标签。');
+      patch(key, recognized.toUpperCase());
+      if (key === 'vin') {
+        try { const result = await decodeVin(recognized); setData(current => ({ ...current, ...result, vin: recognized.toUpperCase() })); }
+        catch { /* OCR value is still kept for manual confirmation. */ }
+      }
+    } catch (error) { alert(error instanceof Error ? error.message : String(error)); }
+    finally { setOcrBusy(''); }
+  };
   const submit = async (event: React.FormEvent) => { event.preventDefault(); setSaving(true); try { await onSave(state.type, data); } finally { setSaving(false); } };
-  return <div className="modal-backdrop" onMouseDown={event => event.target === event.currentTarget && onClose()}><form className="modal" onSubmit={submit}><div className="modal-head"><div><p className="eyebrow">Z&G AUTO ERP</p><h2>{modalTitle(state.type, Boolean(state.value))}</h2></div><button type="button" onClick={onClose}>×</button></div><div className="form-grid two">{fields.map(field => <label key={field.key} className={field.wide ? 'span-2' : ''}><span>{field.label}</span>{field.type === 'select' ? <select required={field.required} value={String(data[field.key] ?? '')} onChange={e => patch(field.key, e.target.value)}><option value="">请选择</option>{field.options?.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}</select> : field.type === 'textarea' ? <textarea value={String(data[field.key] ?? '')} onChange={e => patch(field.key, e.target.value)} /> : field.type === 'checkbox' ? <input type="checkbox" checked={Boolean(data[field.key])} onChange={e => patch(field.key, e.target.checked)} /> : <div className={field.key === 'vin' ? 'input-action' : ''}><input required={field.required} type={field.type || 'text'} step={field.step} value={String(data[field.key] ?? '')} onChange={e => patch(field.key, field.type === 'number' ? Number(e.target.value) : e.target.value)} />{field.key === 'vin' && <button type="button" onClick={runVin}>{vinBusy ? '识别中…' : '识别 VIN'}</button>}</div>}</label>)}</div><div className="modal-foot"><button type="button" onClick={onClose}>取消</button><button className="primary" disabled={saving}>{saving ? '保存中…' : '保存'}</button></div></form></div>;
+  return <div className="modal-backdrop" onMouseDown={event => event.target === event.currentTarget && onClose()}><form className="modal" onSubmit={submit}><div className="modal-head"><div><p className="eyebrow">Z&G AUTO ERP</p><h2>{modalTitle(state.type, Boolean(state.value))}</h2></div><button type="button" onClick={onClose}>×</button></div><div className="form-grid two">{fields.map(field => {
+    const photoField = state.type === 'vehicle' && (field.key === 'plate' || field.key === 'vin');
+    return <label key={field.key} className={field.wide ? 'span-2' : ''}><span>{field.label}</span>{field.type === 'select' ? <select required={field.required} value={String(data[field.key] ?? '')} onChange={e => patch(field.key, e.target.value)}><option value="">请选择</option>{field.options?.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}</select> : field.type === 'textarea' ? <textarea value={String(data[field.key] ?? '')} onChange={e => patch(field.key, e.target.value)} /> : field.type === 'checkbox' ? <input type="checkbox" checked={Boolean(data[field.key])} onChange={e => patch(field.key, e.target.checked)} /> : <div className={field.key === 'vin' || photoField ? 'input-action' : ''}><input required={field.required} type={field.type || 'text'} step={field.step} value={String(data[field.key] ?? '')} onChange={e => patch(field.key, field.type === 'number' ? Number(e.target.value) : e.target.value)} />{field.key === 'vin' && <button type="button" onClick={runVin}>{vinBusy ? '解析中…' : '联网解析'}</button>}{photoField && <span className="ocr-upload"><span>{ocrBusy === field.key ? '识别中…' : field.key === 'plate' ? '📷 拍照识别车牌' : '📷 拍照识别 VIN'}</span><input type="file" accept="image/*" capture="environment" disabled={Boolean(ocrBusy)} onChange={event => { void recognizePhoto(field.key as 'plate' | 'vin', event.target.files?.[0]); event.currentTarget.value = ''; }} /></span>}</div>}</label>;
+  })}</div><div className="modal-foot"><button type="button" onClick={onClose}>取消</button><button className="primary" disabled={saving}>{saving ? '保存中…' : '保存'}</button></div></form></div>;
 }
 
 type Field = { key: string; label: string; type?: string; required?: boolean; wide?: boolean; step?: string; options?: Array<{ value: string; label: string }> };
@@ -432,7 +468,47 @@ function Kpi({ label, value, tone = '' }: { label: string; value: string; tone?:
 function Status({ value }: { value: string }) { return <span className={`status status-${value.replace(/\s/g, '')}`}>{value}</span>; }
 function Empty({ text }: { text: string }) { return <div className="empty"><b>暂无数据</b><span>{text}</span></div>; }
 
-function PrintMenu({ order, settings }: { order: WorkOrder; settings: ShopSettings }) { return <select className="print-select" value="" onChange={event => { const type = event.target.value; if (type) printDocument(order, settings, type); event.target.value = ''; }}><option value="">打印…</option><option value="Estimate">Estimate 报价单</option><option value="Repair Order">Repair Order 工单</option><option value="Invoice">Invoice 发票</option><option value="Receipt">Receipt 收据</option></select>; }
+function PrintMenu({ order, settings }: { order: WorkOrder; settings: ShopSettings }) { return <select className="print-select" value="" onChange={event => { const type = event.target.value; if (type) printDocumentV077(order, settings, type); event.target.value = ''; }}><option value="">打印…</option><option value="Estimate">Estimate 报价单</option><option value="Repair Order">Repair Order 工单</option><option value="Invoice">Invoice 发票</option><option value="Receipt">Receipt 收据</option></select>; }
+
+function SendMenu({ order, settings, store, cloud }: { order: WorkOrder; settings: ShopSettings; store: AppStore; cloud: CloudSession }) {
+  const [sending, setSending] = useState(false);
+  const customer = store.customers.find(item => item.id === order.customerId || item.name === order.customer);
+  const fleet = store.fleets.find(item => item.id === order.customerId || item.company === order.company || item.company === order.customer);
+  const savedEmail = customer?.email || fleet?.billingEmail || '';
+  const notify = async (subject: string, html: string, email: string) => cloud.invokeFunction('zg-notify', { channel: 'email', to: email, subject, html });
+  const regularEmail = async (kind: string) => {
+    const email = prompt('客户邮箱：', savedEmail);
+    if (!email?.trim()) return;
+    const title = kind === 'invoice' ? 'Invoice / 发票' : kind === 'inspection' ? 'Inspection Result / 检查结果' : 'Repair Order / 维修工单';
+    const detail = kind === 'inspection' ? `<p><b>检查/诊断：</b>${escapeHtml(order.diagnosis || '尚未填写')}</p><p><b>已完成维修：</b>${escapeHtml(order.workPerformed || '尚未填写')}</p>` : `<p><b>客户描述：</b>${escapeHtml(order.complaint || '—')}</p><p><b>诊断与维修：</b>${escapeHtml(`${order.diagnosis || ''} ${order.workPerformed || ''}`)}</p><p><b>总价：</b>${money(order.total)}　<b>已付：</b>${money(order.paid)}　<b>欠款：</b>${money(order.balance)}</p>`;
+    await notify(`${settings.shopName} · ${title} · ${order.number}`, `<h2>${escapeHtml(settings.shopName)}</h2><p>${escapeHtml(settings.address)} · ${escapeHtml(settings.phone)}</p><hr><h3>${title} ${escapeHtml(order.number)}</h3><p>${escapeHtml(order.customer)} · ${escapeHtml(order.vehicle)} · ${escapeHtml(order.plate)}</p>${detail}<p>如有问题请致电 ${escapeHtml(settings.phone)}。</p>`, email.trim());
+    alert('邮件已发送。');
+  };
+  const approval = async () => {
+    const email = prompt('接收在线确认链接的客户邮箱：', savedEmail);
+    if (!email?.trim()) return;
+    const { token } = await cloud.createCustomerApproval(order.id, email.trim(), order.customer, order as unknown as Record<string, unknown>);
+    const url = `${window.location.origin}${window.location.pathname}?approval=${encodeURIComponent(token)}`;
+    const updated: WorkOrder = { ...order, customerApprovalStatus: '待客户确认', customerApprovalUrl: url };
+    await cloud.upsertRecord('workOrders', updated as unknown as CloudRow);
+    try {
+      await notify(`${settings.shopName} · 维修项目等待确认 · ${order.number}`, `<h2>维修项目在线确认</h2><p>${escapeHtml(order.customer)}，您好：</p><p>您的车辆 ${escapeHtml(order.vehicle)}（${escapeHtml(order.plate)}）维修项目等待确认。</p><p><b>预计总价：${money(order.total)}</b></p><p><a href="${escapeHtml(url)}" style="display:inline-block;padding:12px 20px;background:#165dff;color:white;text-decoration:none;border-radius:6px">查看并确认维修</a></p><p>工单号：${escapeHtml(order.number)}</p>`, email.trim());
+      alert('在线确认链接已经发送，客户确认或拒绝后会自动回传系统。');
+    } catch {
+      await navigator.clipboard?.writeText(url);
+      alert(`确认链接已生成并复制，但邮件服务尚未配置。可通过短信或微信发送给客户：\n${url}`);
+    }
+  };
+  const choose = async (value: string) => {
+    if (!value) return;
+    if (value === 'copy' && order.customerApprovalUrl) { await navigator.clipboard.writeText(order.customerApprovalUrl); alert('确认链接已复制。'); return; }
+    setSending(true);
+    try { if (value === 'approval') await approval(); else await regularEmail(value); }
+    catch (error) { alert(`发送失败：${error instanceof Error ? error.message : String(error)}`); }
+    finally { setSending(false); }
+  };
+  return <select className="send-select" value="" disabled={sending} onChange={event => { void choose(event.target.value); event.target.value = ''; }}><option value="">{sending ? '发送中…' : '发送…'}</option><option value="repair">邮件发送工单</option><option value="invoice">邮件发送发票</option><option value="inspection">邮件发送检查结果</option><option value="approval">发送在线维修确认</option>{order.customerApprovalUrl && <option value="copy">复制现有确认链接</option>}</select>;
+}
 
 function printDocument(order: WorkOrder, settings: ShopSettings, documentType: string) {
   const isReceipt = documentType === 'Receipt'; const paid = isReceipt ? order.paid : order.total;
@@ -471,10 +547,12 @@ function legacyLabor(item: Partial<WorkOrder>) { const hours = Number((item as u
 function legacyParts(item: Partial<WorkOrder>) { const record = item as unknown as Record<string, unknown>, total = Number(record.partsTotal || 0), cost = Number(record.partsCost || 0); return total ? [{ id: uid(), partNo: '', name: '配件（旧版导入）', qty: 1, price: total, cost, total, costTotal: cost }] : []; }
 function usageMap(order?: WorkOrder) { const map: Record<string, number> = {}; if (!order) return map; for (const item of order.partItems || []) if (item.partId) map[item.partId] = (map[item.partId] || 0) + Number(item.qty || 0); return map; }
 function upsertLocal<T extends { id: string }>(rows: T[], row: T) { const index = rows.findIndex(item => item.id === row.id); return index < 0 ? [...rows, row] : rows.map(item => item.id === row.id ? row : item); }
-function filterRows<T extends object>(rows: T[], search: string) { const active = rows.filter(row => !(row as Record<string, unknown>).archived); const query = search.trim().toLowerCase(); return query ? active.filter(row => JSON.stringify(row).toLowerCase().includes(query)) : active; }
+function normalizeSearch(value: unknown) { return String(value ?? '').normalize('NFKC').toLowerCase().replace(/[\s\-()./]/g, ''); }
+function filterRows<T extends object>(rows: T[], search: string) { const active = rows.filter(row => !(row as Record<string, unknown>).archived); const query = normalizeSearch(search); return query ? active.filter(row => normalizeSearch(JSON.stringify(row)).includes(query)) : active; }
 function nextWorkOrderNumber(rows: WorkOrder[]) { const year = new Date().getFullYear(); const max = rows.map(item => Number(item.number.match(/(\d+)$/)?.[1] || 0)).reduce((a, b) => Math.max(a, b), 0); return `RO-${year}-${String(max + 1).padStart(4, '0')}`; }
 function dashboardMetrics(store: AppStore) { const date = today(), month = date.slice(0, 7), valid = store.workOrders.filter(item => item.status !== '已取消'); const todayOrders = valid.filter(item => item.date === date), monthOrders = valid.filter(item => item.date.startsWith(month)); const todayPayments = store.payments.filter(item => item.date.startsWith(date)), monthPayments = store.payments.filter(item => item.date.startsWith(month)), monthExpensesRows = store.expenses.filter(item => item.date.startsWith(month)); return { todaySales: sum(todayOrders, 'total'), monthSales: sum(monthOrders, 'total'), todayReceived: sum(todayPayments, 'amount'), monthReceived: sum(monthPayments, 'amount'), todayGross: sum(todayOrders, 'grossProfit'), monthGross: sum(monthOrders, 'grossProfit'), monthExpenses: sum(monthExpensesRows, 'amount'), monthNet: sum(monthOrders, 'grossProfit') - sum(monthExpensesRows, 'amount'), receivables: sum(valid, 'balance') }; }
 function sum<T extends object>(rows: T[], key: keyof T) { return rows.reduce((total, row) => total + Number(row[key] || 0), 0); }
 
 registerPwa();
-createRoot(document.getElementById('root')!).render(<React.StrictMode><PwaInstall /><FormalGate>{cloud => <App cloud={cloud} />}</FormalGate></React.StrictMode>);
+const approvalToken = new URLSearchParams(window.location.search).get('approval');
+createRoot(document.getElementById('root')!).render(<React.StrictMode>{approvalToken ? <CustomerApprovalPage token={approvalToken} /> : <><PwaInstall /><FormalGate>{cloud => <App cloud={cloud} />}</FormalGate></>}</React.StrictMode>);
