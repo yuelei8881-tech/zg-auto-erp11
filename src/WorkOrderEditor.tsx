@@ -75,6 +75,7 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, p
   const [evidenceSaving, setEvidenceSaving] = useState(false);
   const [vehicleDraft, setVehicleDraft] = useState({ plate: '', vin: '', year: String(new Date().getFullYear()), make: '', model: '', engine: '', mileage: 0 });
   const [translationStatus, setTranslationStatus] = useState<Record<TranslationSource, TranslationStatus>>({ complaint: 'idle', diagnosis: 'idle', workPerformed: 'idle' });
+  const [translationError, setTranslationError] = useState<Record<TranslationSource, string>>({ complaint: '', diagnosis: '', workPerformed: '' });
   const lastAutomaticTranslation = useRef<Record<TranslationSource, { source: string; translation: string }>>({
     complaint: { source: '', translation: '' }, diagnosis: { source: '', translation: '' }, workPerformed: { source: '', translation: '' },
   });
@@ -101,6 +102,7 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, p
     if (!force && currentEnglish && currentEnglish !== previous.translation) return;
     const requestId = ++translationRequestId.current[sourceField];
     setTranslationStatus(current => ({ ...current, [sourceField]: 'translating' }));
+    setTranslationError(current => ({ ...current, [sourceField]: '' }));
     try {
       const result = await cloud.invokeFunction<{ answer?: string }>('zg-ai', {
         type: 'translation', prompt: source, context: definition.context,
@@ -114,8 +116,17 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, p
       lastAutomaticTranslation.current[sourceField] = { source, translation };
       patch({ [definition.target]: translation } as Partial<WorkOrder>);
       setTranslationStatus(current => ({ ...current, [sourceField]: 'done' }));
-    } catch {
-      if (translationRequestId.current[sourceField] === requestId) setTranslationStatus(current => ({ ...current, [sourceField]: 'error' }));
+    } catch (error) {
+      if (translationRequestId.current[sourceField] === requestId) {
+        const rawMessage = error instanceof Error ? error.message : String(error || '翻译服务暂时不可用');
+        const friendlyMessage = rawMessage.includes('OPENAI_API_KEY')
+          ? '服务器尚未配置翻译密钥 OPENAI_API_KEY'
+          : rawMessage.includes('non-2xx')
+            ? '云端翻译服务返回错误，请检查服务器函数日志'
+            : rawMessage;
+        setTranslationError(current => ({ ...current, [sourceField]: friendlyMessage }));
+        setTranslationStatus(current => ({ ...current, [sourceField]: 'error' }));
+      }
     }
   };
 
@@ -133,7 +144,7 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, p
   const translationControls = (field: TranslationSource) => {
     const status = translationStatus[field];
     return <span className={`translation-status ${status}`}>
-      {status === 'translating' ? '正在自动翻译…' : status === 'done' ? '已自动翻译，可手动修改' : status === 'error' ? '自动翻译失败，中文仍可正常保存' : '输入中文后自动翻译'}
+      {status === 'translating' ? '正在自动翻译…' : status === 'done' ? '已自动翻译，可手动修改' : status === 'error' ? `自动翻译失败：${translationError[field] || '中文仍可正常保存'}` : '输入中文后自动翻译'}
       <button type="button" disabled={status === 'translating' || !containsChinese(String(order[field] || ''))} onClick={() => void translateField(field, true)}>重新翻译</button>
     </span>;
   };
