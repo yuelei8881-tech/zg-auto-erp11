@@ -1,9 +1,9 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Customer, Driver, EvidencePhoto, Fleet, InspectionChecklist, LaborItem, Part, PartItem, ShopSettings, Vehicle, WorkOrder, WorkOrderStatus } from './types';
 import { decodeVin, money, recalculateWorkOrder, today, uid } from './lib/erp';
 import { recognizePlatePhoto, recognizeVinPhoto } from './lib/ocr';
 import { SignaturePad } from './SignaturePad';
-import type { StaffMember } from './lib/cloud';
+import type { CloudSession, StaffMember } from './lib/cloud';
 
 type Props = {
   value?: WorkOrder; customers: Customer[]; vehicles: Vehicle[]; fleets: Fleet[]; drivers: Driver[];
@@ -11,10 +11,23 @@ type Props = {
   onSave: (order: WorkOrder) => Promise<void>; onCancel: () => void;
   onCreateVehicle: (vehicle: Vehicle) => Promise<void>;
   onPrint: (order: WorkOrder, documentType: string) => void;
+  cloud: CloudSession;
   currentUser: string;
   currentUserId: string; technicians: StaffMember[];
   canApproveReview: boolean; canAssignTechnician: boolean; canEditPricing: boolean; canViewFinancials: boolean;
 };
+
+type TranslationSource = 'complaint' | 'diagnosis' | 'workPerformed';
+type TranslationTarget = 'complaintEn' | 'diagnosisEn' | 'workPerformedEn';
+type TranslationStatus = 'idle' | 'translating' | 'done' | 'error';
+
+const translationDefinitions: Array<{ source: TranslationSource; target: TranslationTarget; context: string }> = [
+  { source: 'complaint', target: 'complaintEn', context: 'customer concern' },
+  { source: 'diagnosis', target: 'diagnosisEn', context: 'inspection and diagnosis' },
+  { source: 'workPerformed', target: 'workPerformedEn', context: 'completed repair work' },
+];
+
+const containsChinese = (value: string) => /[\u3400-\u9fff]/.test(value);
 
 const statuses: WorkOrderStatus[] = ['等待检查', '等待批准', '等待配件', '维修中', '已完成', '已交车'];
 const inspectionItems: Array<[keyof InspectionChecklist, string]> = [
@@ -47,7 +60,7 @@ async function compressEvidence(file: File): Promise<string> {
   return canvas.toDataURL('image/jpeg', 0.72);
 }
 
-export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, parts, settings, nextNumber, onSave, onCancel, onCreateVehicle, onPrint, currentUser, currentUserId, technicians, canApproveReview, canAssignTechnician, canEditPricing, canViewFinancials }: Props) {
+export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, parts, settings, nextNumber, onSave, onCancel, onCreateVehicle, onPrint, cloud, currentUser, currentUserId, technicians, canApproveReview, canAssignTechnician, canEditPricing, canViewFinancials }: Props) {
   const [order, setOrder] = useState<WorkOrder>(() => recalculateWorkOrder(value || {
     id: uid(), number: nextNumber, date: today(), customer: '', vehicle: '', status: '等待检查',
     technician: canAssignTechnician ? '' : currentUser, technicianUserId: canAssignTechnician ? '' : currentUserId,
@@ -61,6 +74,13 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, p
   const [evidenceCategory, setEvidenceCategory] = useState<EvidencePhoto['category']>('其他');
   const [evidenceSaving, setEvidenceSaving] = useState(false);
   const [vehicleDraft, setVehicleDraft] = useState({ plate: '', vin: '', year: String(new Date().getFullYear()), make: '', model: '', engine: '', mileage: 0 });
+  const [translationStatus, setTranslationStatus] = useState<Record<TranslationSource, TranslationStatus>>({ complaint: 'idle', diagnosis: 'idle', workPerformed: 'idle' });
+  const lastAutomaticTranslation = useRef<Record<TranslationSource, { source: string; translation: string }>>({
+    complaint: { source: '', translation: '' }, diagnosis: { source: '', translation: '' }, workPerformed: { source: '', translation: '' },
+  });
+  const translationRequestId = useRef<Record<TranslationSource, number>>({ complaint: 0, diagnosis: 0, workPerformed: 0 });
+  const latestOrder = useRef(order);
+  latestOrder.current = order;
   const calculated = useMemo(() => recalculateWorkOrder(order), [order]);
   const selectedVehicle = vehicles.find(v => v.id === order.vehicleId);
   const checklist: InspectionChecklist = order.inspectionChecklist || { intake: false, exterior: false, scan: false, diagnosis: false, estimate: false };
@@ -71,6 +91,52 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, p
   const requiredViewCount = requiredViews.filter(category => activeEvidence.some(photo => photo.category === category)).length;
 
   const patch = (changes: Partial<WorkOrder>) => setOrder(current => recalculateWorkOrder({ ...current, ...changes }));
+
+  const translateField = async (sourceField: TranslationSource, force = false) => {
+    const definition = translationDefinitions.find(item => item.source === sourceField)!;
+    const source = String(latestOrder.current[sourceField] || '').trim();
+    const currentEnglish = String(latestOrder.current[definition.target] || '').trim();
+    const previous = lastAutomaticTranslation.current[sourceField];
+    if (!source || !containsChinese(source)) return;
+    if (!force && currentEnglish && currentEnglish !== previous.translation) return;
+    const requestId = ++translationRequestId.current[sourceField];
+    setTranslationStatus(current => ({ ...current, [sourceField]: 'translating' }));
+    try {
+      const result = await cloud.invokeFunction<{ answer?: string }>('zg-ai', {
+        type: 'translation', prompt: source, context: definition.context,
+      });
+      const translation = String(result.answer || '').trim();
+      if (!translation) throw new Error('No translation returned');
+      if (translationRequestId.current[sourceField] !== requestId) return;
+      const newestSource = String(latestOrder.current[sourceField] || '').trim();
+      const newestEnglish = String(latestOrder.current[definition.target] || '').trim();
+      if (newestSource !== source || (!force && newestEnglish && newestEnglish !== previous.translation)) return;
+      lastAutomaticTranslation.current[sourceField] = { source, translation };
+      patch({ [definition.target]: translation } as Partial<WorkOrder>);
+      setTranslationStatus(current => ({ ...current, [sourceField]: 'done' }));
+    } catch {
+      if (translationRequestId.current[sourceField] === requestId) setTranslationStatus(current => ({ ...current, [sourceField]: 'error' }));
+    }
+  };
+
+  useEffect(() => {
+    const timers = translationDefinitions.map(definition => {
+      const source = String(order[definition.source] || '').trim();
+      const english = String(order[definition.target] || '').trim();
+      const previous = lastAutomaticTranslation.current[definition.source];
+      if (!source || !containsChinese(source) || (english && english !== previous.translation) || source === previous.source) return undefined;
+      return window.setTimeout(() => void translateField(definition.source), 1200);
+    });
+    return () => timers.forEach(timer => { if (timer !== undefined) window.clearTimeout(timer); });
+  }, [order.complaint, order.diagnosis, order.workPerformed, order.complaintEn, order.diagnosisEn, order.workPerformedEn]);
+
+  const translationControls = (field: TranslationSource) => {
+    const status = translationStatus[field];
+    return <span className={`translation-status ${status}`}>
+      {status === 'translating' ? '正在自动翻译…' : status === 'done' ? '已自动翻译，可手动修改' : status === 'error' ? '自动翻译失败，中文仍可正常保存' : '输入中文后自动翻译'}
+      <button type="button" disabled={status === 'translating' || !containsChinese(String(order[field] || ''))} onClick={() => void translateField(field, true)}>重新翻译</button>
+    </span>;
+  };
 
   const dictate = (field: 'complaint' | 'diagnosis' | 'workPerformed') => {
     const SpeechRecognition = (window as unknown as { SpeechRecognition?: new () => any; webkitSpeechRecognition?: new () => any }).SpeechRecognition
@@ -254,9 +320,9 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, p
     </div></section>}
 
     <section className="form-section"><h3>维修内容</h3><div className="form-grid three voice-fields">
-      <label><span className="field-title">客户描述 <button type="button" onClick={() => dictate('complaint')}>🎤 语音</button></span><textarea value={order.complaint || ''} onChange={e => patch({ complaint: e.target.value })} /><small>English translation（打印显示）</small><textarea className="translation-input" value={order.complaintEn || ''} onChange={e => patch({ complaintEn: e.target.value })} placeholder="Customer concern in English" /></label>
-      <label><span className="field-title">检查/诊断结果 <button type="button" onClick={() => dictate('diagnosis')}>🎤 语音</button></span><textarea value={order.diagnosis || ''} onChange={e => patch({ diagnosis: e.target.value })} /><small>English translation（打印显示）</small><textarea className="translation-input" value={order.diagnosisEn || ''} onChange={e => patch({ diagnosisEn: e.target.value })} placeholder="Diagnosis in English" /></label>
-      <label><span className="field-title">完成的维修 <button type="button" onClick={() => dictate('workPerformed')}>🎤 语音</button></span><textarea value={order.workPerformed || ''} onChange={e => patch({ workPerformed: e.target.value })} /><small>English translation（打印显示）</small><textarea className="translation-input" value={order.workPerformedEn || ''} onChange={e => patch({ workPerformedEn: e.target.value })} placeholder="Work performed in English" /></label>
+      <label><span className="field-title">客户描述 <button type="button" onClick={() => dictate('complaint')}>🎤 语音</button></span><textarea value={order.complaint || ''} onChange={e => patch({ complaint: e.target.value })} /><small>English translation（打印显示）</small>{translationControls('complaint')}<textarea className="translation-input" value={order.complaintEn || ''} onChange={e => patch({ complaintEn: e.target.value })} placeholder="Customer concern in English" /></label>
+      <label><span className="field-title">检查/诊断结果 <button type="button" onClick={() => dictate('diagnosis')}>🎤 语音</button></span><textarea value={order.diagnosis || ''} onChange={e => patch({ diagnosis: e.target.value })} /><small>English translation（打印显示）</small>{translationControls('diagnosis')}<textarea className="translation-input" value={order.diagnosisEn || ''} onChange={e => patch({ diagnosisEn: e.target.value })} placeholder="Diagnosis in English" /></label>
+      <label><span className="field-title">完成的维修 <button type="button" onClick={() => dictate('workPerformed')}>🎤 语音</button></span><textarea value={order.workPerformed || ''} onChange={e => patch({ workPerformed: e.target.value })} /><small>English translation（打印显示）</small>{translationControls('workPerformed')}<textarea className="translation-input" value={order.workPerformedEn || ''} onChange={e => patch({ workPerformedEn: e.target.value })} placeholder="Work performed in English" /></label>
     </div><div className="form-grid two compact time-fields"><label>打印时间（可授权修改）<input type="datetime-local" value={order.printTime || ''} onChange={e => patch({ printTime: e.target.value })} /></label><label>做工时间备注<input value={order.workTimeNote || ''} onChange={e => patch({ workTimeNote: e.target.value })} placeholder="例如：2026/07/15 09:00–14:30" /></label></div></section>
 
     <section className="form-section evidence-section"><div className="section-title"><div><h3>证据留存 / Evidence</h3><span>照片同步保存在工单档案中；打印报价单、工单、发票和收据时不会打印照片。</span></div><b>{activeEvidence.length} 张有效照片</b></div>
