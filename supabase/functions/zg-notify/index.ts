@@ -40,7 +40,7 @@ async function sendEmail(body: Record<string, unknown>) {
   }
 
   const resendKey = Deno.env.get('RESEND_API_KEY');
-  const emailFrom = Deno.env.get('EMAIL_FROM') || Deno.env.get('RESEND_FROM') || 'Z&G AUTO REPAIR <onboarding@resend.dev>';
+  const emailFrom = Deno.env.get('EMAIL_FROM') || Deno.env.get('RESEND_FROM') || 'Z&G AUTO REPAIR <service@zgautorepair.com>';
   if (!resendKey) {
     throw new NotifyError('邮件服务尚未配置 RESEND_API_KEY。', 503, 'EMAIL_NOT_CONFIGURED', 'email');
   }
