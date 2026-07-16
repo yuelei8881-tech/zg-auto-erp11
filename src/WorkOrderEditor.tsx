@@ -41,6 +41,28 @@ const inspectionItems: Array<[keyof InspectionChecklist, string]> = [
 const evidenceCategories: EvidencePhoto['category'][] = ['车牌', '正前', '正后', '左侧', '右侧', '左前', '右前', '左后', '右后', '仪表里程', '已有损伤', '故障扫描', '维修中', '维修完成', '其他'];
 const requiredViews: EvidencePhoto['category'][] = ['正前', '正后', '左侧', '右侧'];
 const workflowStages: NonNullable<WorkOrder['workflowStage']>[] = ['接车登记', '技师诊断', '报价待确认', '维修施工', '完工待结账', '已结账'];
+const quickRepairItems: Array<{ name: string; hours: number }> = [
+  { name: '更换发动机机油和滤芯', hours: 0.5 },
+  { name: '检查刹车片和刹车盘', hours: 0.5 },
+  { name: '更换前刹车片', hours: 1.5 },
+  { name: '更换后刹车片', hours: 1.5 },
+  { name: '轮胎换位', hours: 0.5 },
+  { name: '轮胎平衡', hours: 1 },
+  { name: '检查轮胎气压和磨损', hours: 0.3 },
+  { name: '四轮定位', hours: 1 },
+  { name: '检查并添加汽车油液', hours: 0.3 },
+  { name: '更换发动机空气滤芯', hours: 0.3 },
+  { name: '更换空调滤芯', hours: 0.5 },
+  { name: '检查电瓶和充电系统', hours: 0.5 },
+  { name: '更换火花塞', hours: 1.5 },
+  { name: '更换变速箱油', hours: 1 },
+  { name: '冷却系统检查', hours: 0.5 },
+  { name: '更换冷却液', hours: 1 },
+  { name: '空调系统检查', hours: 1 },
+  { name: '故障码扫描和诊断', hours: 1 },
+  { name: '全车安全检查', hours: 1 },
+  { name: '路试和故障确认', hours: 0.5 },
+];
 
 async function compressEvidence(file: File): Promise<string> {
   const source = await new Promise<string>((resolve, reject) => {
@@ -237,6 +259,18 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, p
   const addLabor = () => patch({ laborItems: [...calculated.laborItems, {
     id: uid(), description: '', hours: 1, rate: settings.defaultLaborRate, technician: '', total: settings.defaultLaborRate,
   }] });
+  const toggleQuickRepair = (template: { name: string; hours: number }) => {
+    const existing = calculated.laborItems.find(item => item.description === template.name);
+    if (existing) {
+      patch({ laborItems: calculated.laborItems.filter(item => item.id !== existing.id) });
+      return;
+    }
+    patch({ laborItems: [...calculated.laborItems, {
+      id: uid(), description: template.name, hours: template.hours,
+      rate: settings.defaultLaborRate, technician: order.technician || '',
+      total: template.hours * settings.defaultLaborRate,
+    }] });
+  };
   const updateLabor = (id: string, changes: Partial<LaborItem>) => patch({
     laborItems: calculated.laborItems.map(item => item.id === id ? { ...item, ...changes } : item),
   });
@@ -364,7 +398,8 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, p
       {!!order.reviewHistory?.length && <div className="review-history"><b>审查记录</b>{[...order.reviewHistory].reverse().map(item => <div key={item.id}><span>{item.action}</span><small>{item.by} · {new Date(item.at).toLocaleString()}{item.note ? ` · ${item.note}` : ''}</small></div>)}</div>}
     </section>
 
-    <section className="form-section"><div className="section-title"><h3>人工项目</h3><button onClick={addLabor}>＋ 添加工时</button></div>
+    <section className="form-section"><div className="section-title"><div><h3>人工项目</h3><span className="muted">左右滚动选择常用维修项目，再根据实际情况修改工时和费率。</span></div><button onClick={addLabor}>＋ 自定义工时</button></div>
+      <div className="quick-repair-scroll" aria-label="常用维修项目">{quickRepairItems.map(template => { const selected = calculated.laborItems.some(item => item.description === template.name); return <button key={template.name} type="button" className={selected ? 'selected' : ''} onClick={() => toggleQuickRepair(template)}><b>{selected ? '✓ ' : '＋ '}{template.name}</b><small>默认 {template.hours} 工时</small></button>; })}</div>
       <div className="line-table"><div className="line-head labor-grid"><span>项目</span><span>工时</span><span>费率</span><span>技师</span><span>小计</span><span /></div>
       {calculated.laborItems.map(item => <div className="line-row labor-grid" key={item.id}><input value={item.description} onChange={e => updateLabor(item.id, { description: e.target.value })} placeholder="例如：更换水泵" /><input type="number" step="0.1" value={item.hours} onChange={e => updateLabor(item.id, { hours: Number(e.target.value) })} /><input type="number" step="0.01" value={item.rate} onChange={e => updateLabor(item.id, { rate: Number(e.target.value) })} /><input value={item.technician || ''} onChange={e => updateLabor(item.id, { technician: e.target.value })} /><b>{canViewFinancials ? money(item.total) : '—'}</b><button className="danger-link" onClick={() => removeLabor(item.id)}>删除</button></div>)}
       {!calculated.laborItems.length && <div className="empty-line">尚未添加人工项目</div>}</div>
