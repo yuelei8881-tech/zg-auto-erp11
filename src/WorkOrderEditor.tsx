@@ -97,6 +97,7 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, p
     laborItems: [], partItems: [], outsource: 0, discount: 0, taxRate: settings.defaultTaxRate,
   }));
   const [saving, setSaving] = useState(false);
+  const [partSearch, setPartSearch] = useState('');
   const [activePanel, setActivePanel] = useState<'intake' | 'evidence' | 'pricing'>('intake');
   const [addingVehicle, setAddingVehicle] = useState(false);
   const [vehicleSaving, setVehicleSaving] = useState(false);
@@ -297,6 +298,19 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, p
   const addPart = () => patch({ partItems: [...calculated.partItems, {
     id: uid(), partId: '', partNo: '', name: '', qty: 1, cost: 0, price: 0, total: 0, costTotal: 0,
   }] });
+  const inventoryMatches = useMemo(() => {
+    const query = partSearch.trim().toLowerCase();
+    if (!query) return [];
+    return parts.filter(part => [part.partNo, part.oemNo, part.name, part.brand, part.supplier, part.location]
+      .some(value => String(value || '').toLowerCase().includes(query))).slice(0, 12);
+  }, [partSearch, parts]);
+  const addInventoryPart = (part: Part) => {
+    patch({ partItems: [...calculated.partItems, {
+      id: uid(), partId: part.id, partNo: part.partNo, name: part.name, qty: 1,
+      cost: part.cost || 0, price: part.price || 0, total: part.price || 0, costTotal: part.cost || 0,
+    }] });
+    setPartSearch('');
+  };
   const choosePart = (lineId: string, partId: string) => {
     const part = parts.find(item => item.id === partId);
     updatePart(lineId, { partId, partNo: part?.partNo || '', name: part?.name || '', cost: part?.cost || 0, price: part?.price || 0 });
@@ -430,7 +444,9 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, p
       {!calculated.laborItems.length && <div className="empty-line">尚未添加人工项目</div>}</div>
     </section>
 
-    <section className="form-section"><div className="section-title"><h3>配件项目</h3><button onClick={addPart}>＋ 添加配件</button></div>
+    <section className="form-section"><div className="section-title"><h3>配件项目</h3><button onClick={addPart}>＋ 手动配件</button></div>
+      <div className="work-order-part-search"><input value={partSearch} onChange={event => setPartSearch(event.target.value)} placeholder="搜索仓库库存：配件编号、OEM、名称、品牌或供应商" />{partSearch && <button type="button" onClick={() => setPartSearch('')}>清除</button>}</div>
+      {partSearch && <div className="inventory-search-results">{inventoryMatches.map(part => <button type="button" key={part.id} onClick={() => addInventoryPart(part)}><span><b>{part.partNo}</b><small>{part.name}{part.brand ? ` · ${part.brand}` : ''}</small></span><span><b>库存 {part.qty}</b><small>售价 {money(part.price)}</small></span></button>)}{!inventoryMatches.length && <p>没有找到匹配的库存配件，可以点击“手动配件”录入。</p>}</div>}
       <div className="line-table"><div className="line-head parts-grid"><span>库存配件</span><span>编号/名称</span><span>数量</span><span>售价</span><span>小计</span><span /></div>
       {calculated.partItems.map(item => <div className="line-row parts-grid" key={item.id}><select value={item.partId || ''} onChange={e => choosePart(item.id, e.target.value)}><option value="">手动项目</option>{parts.map(part => <option key={part.id} value={part.id}>{part.partNo} · {part.name}（库存 {part.qty}）</option>)}</select><div><input value={item.partNo} onChange={e => updatePart(item.id, { partNo: e.target.value })} placeholder="配件编号" /><input value={item.name} onChange={e => updatePart(item.id, { name: e.target.value })} placeholder="配件名称" /></div><input type="number" inputMode="numeric" step="1" value={editableNumber(item.qty)} onChange={e => updatePart(item.id, { qty: Number(e.target.value) })} /><input type="number" inputMode="decimal" step="0.01" value={editableNumber(item.price)} disabled={!canEditPricing} onChange={e => updatePart(item.id, { price: Number(e.target.value) })} /><b>{canViewFinancials ? money(item.total) : '—'}</b><button className="danger-link" onClick={() => removePart(item.id)}>删除</button></div>)}
       {!calculated.partItems.length && <div className="empty-line">尚未添加配件</div>}</div>
