@@ -56,6 +56,11 @@ function canOpenPage(cloud: CloudSession, page: Page) {
   return can(cloud, map[page] || page);
 }
 
+function compactWorkOrderSnapshot(value?: WorkOrder) {
+  if (!value) return value;
+  return { ...value, evidencePhotos: [] };
+}
+
 function App({ cloud }: { cloud: CloudSession }) {
   const [store, setStore] = useState<AppStore>(emptyStore);
   const [page, setPage] = useState<Page>('dashboard');
@@ -147,12 +152,22 @@ function App({ cloud }: { cloud: CloudSession }) {
   };
 
   const writeChangeLog = async (order: WorkOrder, action: string, detail: string, before?: unknown, after?: unknown) => {
-    const log: ChangeLog = { id: uid(), workOrderId: order.id, workOrderNumber: order.number, action, actor: actorName, actorId: cloud.user.id, at: new Date().toISOString(), detail, before, after };
+    const log: ChangeLog = {
+      id: uid(), workOrderId: order.id, workOrderNumber: order.number, action,
+      actor: actorName, actorId: cloud.user.id, at: new Date().toISOString(), detail,
+      before: compactWorkOrderSnapshot(before as WorkOrder | undefined),
+      after: compactWorkOrderSnapshot(after as WorkOrder | undefined),
+    };
     await persist('changeLogs', log);
   };
 
   const requestApproval = async (request: Omit<ApprovalRequest, 'id' | 'status' | 'requestedBy' | 'requestedById' | 'requestedAt'>) => {
-    const row: ApprovalRequest = { ...request, id: uid(), status: '待授权', requestedBy: actorName, requestedById: cloud.user.id, requestedAt: new Date().toISOString() };
+    const row: ApprovalRequest = {
+      ...request,
+      proposedOrder: compactWorkOrderSnapshot(request.proposedOrder),
+      id: uid(), status: '待授权', requestedBy: actorName,
+      requestedById: cloud.user.id, requestedAt: new Date().toISOString(),
+    };
     await persist('approvalRequests', row);
     const relatedOrder = store.workOrders.find(item => item.id === row.workOrderId) || row.proposedOrder;
     if (relatedOrder) await writeChangeLog(relatedOrder, '申请双人授权', `${row.type}：${row.reason}`);
