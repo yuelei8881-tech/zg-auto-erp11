@@ -88,6 +88,10 @@ export type WorkOrder = {
   workflowStage?: '接车登记' | '技师诊断' | '报价待确认' | '维修施工' | '完工待结账' | '已结账';
   complaintEn?: string; diagnosisEn?: string; workPerformedEn?: string;
   printTime?: string; workTimeNote?: string;
+  documentSendHistory?: Array<{
+    id: string; documentType: string; email: string; sentAt: string;
+    status: 'sent' | 'mail-client' | 'failed'; providerId?: string; error?: string;
+  }>;
 };
 
 export type ApprovalRequest = {

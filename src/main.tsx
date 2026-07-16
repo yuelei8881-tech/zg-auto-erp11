@@ -532,7 +532,7 @@ function SendMenu({ order, settings, store, cloud }: { order: WorkOrder; setting
   const customer = store.customers.find(item => item.id === order.customerId || item.name === order.customer);
   const fleet = store.fleets.find(item => item.id === order.customerId || item.company === order.company || item.company === order.customer);
   const savedEmail = customer?.email || fleet?.billingEmail || '';
-  const notify = async (subject: string, html: string, email: string) => cloud.invokeFunction('zg-notify', { channel: 'email', type: 'email', to: email, subject, html });
+  const notify = async (subject: string, html: string, email: string) => cloud.invokeFunction<{ id?: string; status?: string }>('zg-notify', { channel: 'email', type: 'email', to: email, subject, html });
   const explainSendError = (error: unknown) => {
     let message = '未知发送错误';
     if (error instanceof Error) message = error.message;
@@ -578,6 +578,32 @@ function SendMenu({ order, settings, store, cloud }: { order: WorkOrder; setting
       alert(`云端邮件暂未发出，已打开本机邮件程序并填好内容。\n原因：${explainSendError(error)}`);
     }
   };
+  const sendCustomerDocument = async (kind: string) => {
+    const email = prompt('客户邮箱：', savedEmail);
+    if (!email?.trim()) return;
+    const cleanEmail = email.trim();
+    const documentNames: Record<string, string> = {
+      estimate: 'Estimate / 报价单', repair: 'Repair Order / 维修工单',
+      invoice: 'Invoice / 发票', receipt: 'Receipt / 收据',
+    };
+    const title = documentNames[kind] || documentNames.repair;
+    const laborRows = order.laborItems.map(item => `<tr><td>${escapeHtml(item.description)}</td><td style="text-align:right">${item.billingMode === 'flat' ? 'Flat' : Number(item.hours).toFixed(1)}</td><td style="text-align:right">${money(item.total)}</td></tr>`).join('');
+    const partRows = order.partItems.map(item => `<tr><td>${escapeHtml(item.partNo)}</td><td>${escapeHtml(item.name)}</td><td style="text-align:right">${item.qty}</td><td style="text-align:right">${money(item.price)}</td><td style="text-align:right">${money(item.total)}</td></tr>`).join('');
+    const amountLabel = kind === 'receipt' ? 'Amount Paid / 已付款' : 'Total / 总计';
+    const amount = kind === 'receipt' ? order.paid : order.total;
+    const html = `<div style="max-width:760px;margin:auto;font-family:Arial,sans-serif;color:#172033"><div style="text-align:center;border-bottom:3px solid #155eef;padding:18px"><h1 style="margin:0">Z&amp;G AUTO REPAIR</h1><p>${escapeHtml(settings.address)} · ${escapeHtml(settings.phone)}</p><h2>${title}</h2><b>${escapeHtml(order.number)}</b></div><table style="width:100%;margin:18px 0;border-collapse:collapse"><tr><td><b>Customer / 客户</b><br>${escapeHtml(order.customer)}</td><td><b>Vehicle / 车辆</b><br>${escapeHtml(order.vehicle)} · ${escapeHtml(order.plate)}</td></tr><tr><td><b>Phone / 电话</b><br>${escapeHtml(order.phone)}</td><td><b>VIN</b><br>${escapeHtml(order.vin)}</td></tr></table><h3>Customer Concern / 客户描述</h3><p>${escapeHtml(order.complaint || '—')}</p><h3>Diagnosis &amp; Work / 检查与维修</h3><p>${escapeHtml(order.diagnosis || '—')}<br>${escapeHtml(order.workPerformed || '')}</p>${laborRows ? `<h3>Labor / 人工</h3><table style="width:100%;border-collapse:collapse" border="1" cellpadding="7"><tr><th>项目</th><th>工时/方式</th><th>金额</th></tr>${laborRows}</table>` : ''}${partRows ? `<h3>Parts / 配件</h3><table style="width:100%;border-collapse:collapse" border="1" cellpadding="7"><tr><th>编号</th><th>名称</th><th>数量</th><th>销售价</th><th>金额</th></tr>${partRows}</table>` : ''}<table style="width:360px;margin:20px 0 20px auto;border-collapse:collapse" border="1" cellpadding="8"><tr><td>Labor / 人工</td><td style="text-align:right">${money(order.laborTotal)}</td></tr><tr><td>Parts / 配件</td><td style="text-align:right">${money(order.partsTotal)}</td></tr><tr><td>Tax / 税</td><td style="text-align:right">${money(order.tax)}</td></tr><tr><td><b>${amountLabel}</b></td><td style="text-align:right"><b>${money(amount)}</b></td></tr>${kind === 'receipt' ? '' : `<tr><td>Balance Due / 欠款</td><td style="text-align:right">${money(order.balance)}</td></tr>`}</table><p style="text-align:center;color:#667085">${escapeHtml(settings.invoiceTerms || 'Thank you for your business.')}</p></div>`;
+    const subject = `${settings.shopName} · ${title} · ${order.number}`;
+    try {
+      const result = await notify(subject, html, cleanEmail);
+      await cloud.upsertRecord('workOrders', { ...order, documentSendHistory: [...(order.documentSendHistory || []), { id: uid(), documentType: title, email: cleanEmail, sentAt: new Date().toISOString(), status: 'sent', providerId: result.id }] } as unknown as CloudRow);
+      alert(`${title} 已成功发送到 ${cleanEmail}，发送记录已保存。`);
+    } catch (error) {
+      const message = explainSendError(error);
+      await cloud.upsertRecord('workOrders', { ...order, documentSendHistory: [...(order.documentSendHistory || []), { id: uid(), documentType: title, email: cleanEmail, sentAt: new Date().toISOString(), status: 'mail-client', error: message }] } as unknown as CloudRow);
+      openMailClient(cleanEmail, subject, `${title}\n工单号：${order.number}\n客户：${order.customer}\n车辆：${order.vehicle} ${order.plate}\n总计：${money(order.total)}\n已付：${money(order.paid)}\n欠款：${money(order.balance)}\n\n${settings.phone}`);
+      alert(`云端邮件暂未发出，已打开本机邮件程序。系统已记录本次尝试。\n原因：${message}`);
+    }
+  };
   const approval = async () => {
     const email = prompt('接收在线确认链接的客户邮箱：', savedEmail);
     if (!email?.trim()) return;
@@ -598,11 +624,11 @@ function SendMenu({ order, settings, store, cloud }: { order: WorkOrder; setting
     if (!value) return;
     if (value === 'copy' && order.customerApprovalUrl) { const copied = await copyText(order.customerApprovalUrl); if (copied) alert('客户确认链接已复制。'); return; }
     setSending(true);
-    try { if (value === 'approval') await approval(); else await regularEmail(value); }
+    try { if (value === 'approval') await approval(); else if (['estimate','repair','invoice','receipt'].includes(value)) await sendCustomerDocument(value); else await regularEmail(value); }
     catch (error) { alert(`发送失败：${explainSendError(error)}`); }
     finally { setSending(false); }
   };
-  return <select className="send-select" value="" disabled={sending} onChange={event => { void choose(event.target.value); event.target.value = ''; }}><option value="">{sending ? '发送中…' : '发送…'}</option><option value="repair">邮件发送工单</option><option value="invoice">邮件发送发票</option><option value="inspection">邮件发送检查结果</option><option value="payment">邮件催费/结账</option><option value="approval">发送在线维修确认</option>{order.customerApprovalUrl && <option value="copy">复制现有确认链接</option>}</select>;
+  return <select className="send-select" value="" disabled={sending} onChange={event => { void choose(event.target.value); event.target.value = ''; }}><option value="">{sending ? '发送中…' : '发送…'}</option><option value="estimate">发送报价单</option><option value="repair">发送维修工单</option><option value="invoice">发送发票</option><option value="receipt">发送收据</option><option value="inspection">发送检查结果</option><option value="payment">发送催费/结账</option><option value="approval">发送在线维修确认</option>{order.customerApprovalUrl && <option value="copy">复制现有确认链接</option>}</select>;
 }
 
 function printDocument(order: WorkOrder, settings: ShopSettings, documentType: string) {
