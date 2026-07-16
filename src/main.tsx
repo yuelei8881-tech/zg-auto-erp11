@@ -610,7 +610,7 @@ function printDocument(order: WorkOrder, settings: ShopSettings, documentType: s
   const shopAddress = settings.address || '319 Agostino Rd, San Gabriel, CA 91776';
   const shopPhone = settings.phone || '626-508-0888';
   documentType = ({ Estimate: 'ESTIMATE / 报价单', 'Repair Order': 'REPAIR ORDER / 维修工单', Invoice: 'INVOICE / 发票', Receipt: 'RECEIPT / 收据' } as Record<string, string>)[documentType] || documentType;
-  const laborRows = order.laborItems.map(item => `<tr><td>${escapeHtml(item.description)}</td><td class="num">${item.hours.toFixed(1)}</td><td class="num">${money(item.rate)}</td><td class="num">${money(item.total)}</td></tr>`).join('');
+  const laborRows = order.laborItems.map(item => { const flat = item.billingMode === 'flat'; return `<tr><td>${escapeHtml(item.description)}</td><td class="num">${flat ? 'Flat' : item.hours.toFixed(1)}</td><td class="num">${flat ? '—' : money(item.rate)}</td><td class="num">${money(item.total)}</td></tr>`; }).join('');
   const partRows = order.partItems.map(item => `<tr><td>${escapeHtml(item.partNo)}</td><td>${escapeHtml(item.name)}</td><td class="num">${item.qty}</td><td class="num">${money(item.price)}</td><td class="num">${money(item.total)}</td></tr>`).join('');
   const signatureName = order.customerSignedBy || order.customer || '';
   const signatureTime = order.customerSignedAt ? new Date(order.customerSignedAt).toLocaleString() : '';

@@ -9,9 +9,13 @@ export const uid = () => crypto.randomUUID();
 export const num = (value: unknown) => Number(value || 0);
 
 export function recalculateWorkOrder(order: Partial<WorkOrder>): WorkOrder {
-  const laborItems = (order.laborItems || []).map((item: LaborItem) => ({
-    ...item, hours: num(item.hours), rate: num(item.rate), total: num(item.hours) * num(item.rate),
-  }));
+  const laborItems = (order.laborItems || []).map((item: LaborItem) => {
+    const billingMode = item.billingMode === 'flat' ? 'flat' : 'hourly';
+    const hours = num(item.hours);
+    const rate = num(item.rate);
+    const flatAmount = num(item.flatAmount);
+    return { ...item, billingMode, hours, rate, flatAmount, total: billingMode === 'flat' ? flatAmount : hours * rate };
+  });
   const partItems = (order.partItems || []).map((item: PartItem) => ({
     ...item, qty: num(item.qty), cost: num(item.cost), price: num(item.price),
     total: num(item.qty) * num(item.price), costTotal: num(item.qty) * num(item.cost),

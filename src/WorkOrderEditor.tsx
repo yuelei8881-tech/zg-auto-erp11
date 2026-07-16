@@ -264,7 +264,7 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, p
   };
 
   const addLabor = () => patch({ laborItems: [...calculated.laborItems, {
-    id: uid(), description: '', hours: 1, rate: settings.defaultLaborRate, technician: '', total: settings.defaultLaborRate,
+    id: uid(), description: '', hours: 1, rate: settings.defaultLaborRate, technician: '', total: settings.defaultLaborRate, billingMode: 'hourly', flatAmount: 0,
   }] });
   const toggleQuickRepair = (template: { name: string; hours: number }) => {
     const existing = calculated.laborItems.find(item => item.description === template.name);
@@ -275,7 +275,7 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, p
     patch({ laborItems: [...calculated.laborItems, {
       id: uid(), description: template.name, hours: template.hours,
       rate: settings.defaultLaborRate, technician: order.technician || '',
-      total: template.hours * settings.defaultLaborRate,
+      total: template.hours * settings.defaultLaborRate, billingMode: 'hourly', flatAmount: 0,
     }] });
   };
   const updateLabor = (id: string, changes: Partial<LaborItem>) => patch({
@@ -407,8 +407,8 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, p
 
     <section className="form-section"><div className="section-title"><div><h3>人工项目</h3><span className="muted">左右滚动选择常用维修项目，再根据实际情况修改工时和费率。</span></div><button onClick={addLabor}>＋ 自定义工时</button></div>
       <div className="quick-repair-scroll" aria-label="常用维修项目">{quickRepairItems.map(template => { const selected = calculated.laborItems.some(item => item.description === template.name); return <button key={template.name} type="button" className={selected ? 'selected' : ''} onClick={() => toggleQuickRepair(template)}><b>{selected ? '✓ ' : '＋ '}{template.name}</b><small>默认 {template.hours} 工时</small></button>; })}</div>
-      <div className="line-table"><div className="line-head labor-grid"><span>项目</span><span>工时</span><span>费率</span><span>技师</span><span>小计</span><span /></div>
-      {calculated.laborItems.map(item => <div className="line-row labor-grid" key={item.id}><input value={item.description} onChange={e => updateLabor(item.id, { description: e.target.value })} placeholder="例如：更换水泵" /><input type="number" inputMode="decimal" step="0.1" value={editableNumber(item.hours)} onChange={e => updateLabor(item.id, { hours: Number(e.target.value) })} /><input type="number" inputMode="decimal" step="0.01" value={editableNumber(item.rate)} onChange={e => updateLabor(item.id, { rate: Number(e.target.value) })} /><input value={item.technician || ''} onChange={e => updateLabor(item.id, { technician: e.target.value })} /><b>{canViewFinancials ? money(item.total) : '—'}</b><button className="danger-link" onClick={() => removeLabor(item.id)}>删除</button></div>)}
+      <div className="line-table"><div className="line-head labor-grid"><span>项目</span><span>计费</span><span>工时 / 一口价</span><span>费率</span><span>技师</span><span>小计</span><span /></div>
+      {calculated.laborItems.map(item => { const flat = item.billingMode === 'flat'; return <div className="line-row labor-grid" key={item.id}><input value={item.description} onChange={e => updateLabor(item.id, { description: e.target.value })} placeholder="例如：更换水泵" /><select value={flat ? 'flat' : 'hourly'} onChange={e => updateLabor(item.id, { billingMode: e.target.value as 'hourly' | 'flat', flatAmount: e.target.value === 'flat' ? item.total : item.flatAmount })}><option value="hourly">按小时</option><option value="flat">一口价</option></select><input type="number" inputMode="decimal" step={flat ? '0.01' : '0.1'} value={editableNumber(flat ? item.flatAmount : item.hours)} onChange={e => updateLabor(item.id, flat ? { flatAmount: Number(e.target.value) } : { hours: Number(e.target.value) })} aria-label={flat ? '一口价金额' : '工时'} /><input type="number" inputMode="decimal" step="0.01" value={editableNumber(item.rate)} disabled={flat} onChange={e => updateLabor(item.id, { rate: Number(e.target.value) })} /><input value={item.technician || ''} onChange={e => updateLabor(item.id, { technician: e.target.value })} /><b>{canViewFinancials ? money(item.total) : '—'}</b><button className="danger-link" onClick={() => removeLabor(item.id)}>删除</button></div> })}
       {!calculated.laborItems.length && <div className="empty-line">尚未添加人工项目</div>}</div>
     </section>
 
