@@ -253,13 +253,29 @@ function App({ cloud }: { cloud: CloudSession }) {
   };
 
   const addPayment = async (order: WorkOrder) => {
-    const raw = prompt(`工单 ${order.number} 欠款 ${money(order.balance)}\n请输入本次收款金额：`, String(order.balance));
-    if (!raw) return; const amount = Number(raw);
-    if (!amount || amount < 0 || amount > order.balance + 0.01) return alert('收款金额不正确。');
-    const method = prompt('付款方式：现金 / 刷卡 / 银行转账或 ACH / 支票 / Zelle / 扫码支付 / 在线付款 / 月结 / 其他', order.paymentMethod || '现金') || '现金';
-    const payment: Payment = { id: uid(), date: new Date().toISOString(), workOrderId: order.id, workOrderNumber: order.number, customer: order.customer, amount, method };
+    if (order.balance <= 0.009) return alert('这张工单已经没有欠款。');
+    const paymentChoice = prompt(`工单 ${order.number}\n当前欠款：${money(order.balance)}\n\n请选择结账方式：\n1 = 全额付款\n2 = 部分付款\n3 = 月结（今日暂不收款）`, '1');
+    if (paymentChoice === null) return;
+    const choice = paymentChoice.trim();
+    if (choice === '3' || choice === '月结') {
+      await persist('workOrders', recalculateWorkOrder({ ...order, paymentMethod: '月结' }));
+      return alert(`已设为月结。\n今日收入不增加，剩余欠款仍为 ${money(order.balance)}。`);
+    }
+    if (!['1', '2', '全额付款', '部分付款'].includes(choice)) return alert('请选择 1、2 或 3。');
+    let amount = order.balance;
+    const paymentType = choice === '2' || choice === '部分付款' ? '部分付款' : '全额付款';
+    if (paymentType === '部分付款') {
+      const raw = prompt(`当前欠款 ${money(order.balance)}\n请输入本次实际收到的金额：`, '');
+      if (raw === null) return;
+      amount = Number(raw);
+      if (!amount || amount <= 0 || amount >= order.balance - 0.009) return alert('部分付款金额必须大于 0，并且小于当前欠款。若已付清请选择“全额付款”。');
+    }
+    const method = prompt('实际付款方式：现金 / 刷卡 / 银行转账或 ACH / 支票 / Zelle / 扫码支付 / 在线付款 / 其他', order.paymentMethod === '月结' ? '现金' : order.paymentMethod || '现金') || '现金';
+    const payment: Payment = { id: uid(), date: new Date().toISOString(), workOrderId: order.id, workOrderNumber: order.number, customer: order.customer, amount, method, note: paymentType };
     await persist('payments', payment);
     await persist('workOrders', recalculateWorkOrder({ ...order, paid: order.paid + amount, paymentMethod: method }));
+    const remaining = Math.max(0, order.balance - amount);
+    alert(`${paymentType}已记录。\n本次实收 ${money(amount)} 已计入今日收入。\n剩余欠款 ${money(remaining)}。`);
   };
 
   const receiveStock = async (part: Part) => {
@@ -331,7 +347,7 @@ function App({ cloud }: { cloud: CloudSession }) {
       <nav>{nav.filter(item => canOpenPage(cloud, item.id)).map(item => <button key={item.id} className={page === item.id ? 'active' : ''} onClick={() => { setPage(item.id); setSearch(''); setSearchDraft(''); }}><span>{item.icon}</span>{item.label}</button>)}</nav>
       <div className="side-foot"><small>{cloud.organizationName}</small><b>{actorName}</b><span>{cloud.user.email}</span><button onClick={() => confirm('确定退出当前账号？') && void cloud.signOut()}>退出登录</button></div>
     </aside>
-    <main className="main"><header className="topbar"><div className="global-search">⌕<input value={searchDraft} onChange={e => setSearchDraft(e.target.value)} onKeyDown={e => e.key === 'Enter' && runGlobalSearch()} placeholder="搜索客户、电话、VIN、车牌、工单、司机…" /><button type="button" onClick={runGlobalSearch}>搜索</button>{searchSuggestions.length > 0 && <div className="search-suggestions">{searchSuggestions.map((item, index) => <button type="button" key={`${item.page}-${item.label}-${index}`} onClick={() => { setSearchDraft(item.query); setSearch(item.query); setPage(item.page); }}><b>{item.label}</b><small>{item.meta}</small></button>)}</div>}</div><div className="top-status"><span className={syncing ? 'syncing' : ''}>{syncing ? '正在同步…' : '● 云端已同步'}</span><span>{actorName}</span><b>v0.79.1</b><button type="button" className="topbar-logout" onClick={() => confirm('确定退出当前账号？') && void cloud.signOut()}>退出</button></div></header>
+    <main className="main"><header className="topbar"><div className="global-search">⌕<input value={searchDraft} onChange={e => setSearchDraft(e.target.value)} onKeyDown={e => e.key === 'Enter' && runGlobalSearch()} placeholder="搜索客户、电话、VIN、车牌、工单、司机…" /><button type="button" onClick={runGlobalSearch}>搜索</button>{searchSuggestions.length > 0 && <div className="search-suggestions">{searchSuggestions.map((item, index) => <button type="button" key={`${item.page}-${item.label}-${index}`} onClick={() => { setSearchDraft(item.query); setSearch(item.query); setPage(item.page); }}><b>{item.label}</b><small>{item.meta}</small></button>)}</div>}</div><div className="top-status"><span className={syncing ? 'syncing' : ''}>{syncing ? '正在同步…' : '● 云端已同步'}</span><span>{actorName}</span><b>v0.79.2</b><button type="button" className="topbar-logout" onClick={() => confirm('确定退出当前账号？') && void cloud.signOut()}>退出</button></div></header>
       {loading ? <div className="loading">正在读取正式服务器数据…</div> : <PageContent page={page} search={search} store={store} settings={settings} cloud={cloud} setPage={setPage} openModal={openModal} setEditingOrder={setEditingOrder} persist={persist} remove={remove} receiveStock={receiveStock} addPayment={addPayment} deleteWorkOrder={deleteWorkOrder} approveRequest={approveRequest} rejectRequest={rejectRequest} claimWorkOrder={claimWorkOrder} completeWorkOrder={completeWorkOrder} actorName={actorName} editOwnProfile={editOwnProfile} />}
     </main>
     {modal && <EntityModal state={modal} store={store} settings={settings} onClose={closeModal} onSave={saveModal} />}
@@ -461,7 +477,7 @@ function Finance({ store, openModal, persist }: ContentProps) {
 
 function SettingsPage({ settings, openModal, store }: ContentProps) {
   const downloadBackup = () => {
-    const payload = JSON.stringify({ product: 'Z&G AUTO ERP', version: '0.79.1', exportedAt: new Date().toISOString(), settings, data: store }, null, 2);
+    const payload = JSON.stringify({ product: 'Z&G AUTO ERP', version: '0.79.2', exportedAt: new Date().toISOString(), settings, data: store }, null, 2);
     const url = URL.createObjectURL(new Blob([payload], { type: 'application/json;charset=utf-8' }));
     const anchor = document.createElement('a');
     anchor.href = url; anchor.download = `ZG_AUTO_ERP_backup_${today()}.json`; anchor.click();
