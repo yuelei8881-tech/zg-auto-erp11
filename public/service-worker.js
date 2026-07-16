@@ -1,4 +1,4 @@
-const CACHE = 'zg-auto-erp-shell-v0763';
+const CACHE = 'zg-auto-erp-shell-v0784';
 const SHELL = ['/', '/manifest.webmanifest', '/icons/zg-auto-icon.svg'];
 self.addEventListener('install', event => { event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(SHELL))); self.skipWaiting(); });
 self.addEventListener('activate', event => {
@@ -11,7 +11,7 @@ self.addEventListener('fetch', event => {
   const url = new URL(request.url);
   if (url.origin !== self.location.origin) return;
   if (request.mode === 'navigate') {
-    event.respondWith(fetch(request).then(response => { const copy = response.clone(); caches.open(CACHE).then(cache => cache.put('/', copy)); return response; }).catch(() => caches.match('/')));
+    event.respondWith(fetch(request, { cache: 'no-store' }).then(response => { const copy = response.clone(); caches.open(CACHE).then(cache => cache.put('/', copy)); return response; }).catch(() => caches.match('/')));
     return;
   }
   if (['style', 'script', 'image', 'font'].includes(request.destination)) {
