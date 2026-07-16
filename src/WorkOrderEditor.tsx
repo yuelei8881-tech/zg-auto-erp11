@@ -148,7 +148,13 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, p
     } catch (error) {
       if (translationRequestId.current[sourceField] === requestId) {
         const rawMessage = error instanceof Error ? error.message : String(error || '翻译服务暂时不可用');
-        const friendlyMessage = rawMessage.includes('OPENAI_API_KEY')
+        const friendlyMessage = /Function failed to start|ByteString/i.test(rawMessage)
+          ? '翻译服务器启动失败，请稍后点击“重新翻译”'
+          : /invalid.*api.*key|incorrect api key|unauthorized/i.test(rawMessage)
+            ? '翻译服务密钥无效，请联系系统管理员'
+            : /quota|billing|credit/i.test(rawMessage)
+              ? '翻译服务额度不足，请检查 AI 账户额度'
+              : rawMessage.includes('OPENAI_API_KEY')
           ? '服务器尚未配置翻译密钥 OPENAI_API_KEY'
           : rawMessage.includes('non-2xx')
             ? '云端翻译服务返回错误，请检查服务器函数日志'

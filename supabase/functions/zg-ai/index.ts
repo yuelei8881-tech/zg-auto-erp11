@@ -4,12 +4,20 @@ import { requireOrganizationMember } from '../_shared/auth.ts';
 type OutputContent = { type?: string; text?: string };
 type OutputItem = { content?: OutputContent[] };
 
+function cleanSecret(value?: string) {
+  const cleaned = String(value || '')
+    .trim()
+    .replace(/^['"]|['"]$/g, '')
+    .replace(/[^\x20-\x7E]/g, '');
+  return cleaned.match(/sk-[A-Za-z0-9_-]{20,}/)?.[0] || cleaned;
+}
+
 Deno.serve(async (request) => {
   if (request.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
 
   let stage = 'initializing';
   try {
-    const key = Deno.env.get('OPENAI_API_KEY')?.trim();
+    const key = cleanSecret(Deno.env.get('OPENAI_API_KEY'));
     if (!key) throw new Error('OPENAI_API_KEY 尚未配置');
 
     stage = 'reading_request';
