@@ -115,6 +115,8 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, p
   latestOrder.current = order;
   const calculated = useMemo(() => recalculateWorkOrder(order), [order]);
   const selectedVehicle = vehicles.find(v => v.id === order.vehicleId);
+  const selectedAccountValue = order.fleetId ? `fleet:${order.fleetId}` : order.customerId ? `customer:${order.customerId}` : '';
+  const availableVehicles = vehicles.filter(vehicle => !order.customerId && !order.fleetId || vehicle.ownerId === (order.fleetId || order.customerId));
   const checklist: InspectionChecklist = order.inspectionChecklist || { intake: false, exterior: false, scan: false, diagnosis: false, estimate: false };
   const inspectionDone = inspectionItems.filter(([key]) => checklist[key]).length;
   const reviewStatus = order.reviewStatus || (order.status === '等待批准' ? '待审查' : ['维修中', '已完成', '已交车'].includes(order.status) ? '已通过' : '未提交');
@@ -200,19 +202,26 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, p
     recognition.start();
   };
 
-  const selectCustomer = (id: string) => {
-    const customer = customers.find(item => item.id === id);
-    patch({ customerId: id, customer: customer?.name || '', phone: customer?.phone || '', vehicleId: '', vehicle: '', plate: '', vin: '', mileage: 0 });
+  const selectCustomer = (value: string) => {
+    const [kind, id = ''] = value.split(':');
+    const fleet = kind === 'fleet' ? fleets.find(item => item.id === id) : undefined;
+    const customer = kind === 'customer' ? customers.find(item => item.id === id) : undefined;
+    patch({
+      customerId: customer?.id || '', customer: customer?.name || fleet?.company || '', phone: customer?.phone || fleet?.phone || '',
+      fleetId: fleet?.id || '', company: fleet?.company || '', driverId: '', driver: '', driverPhone: '',
+      vehicleId: '', vehicle: '', plate: '', vin: '', mileage: 0,
+    });
   };
 
   const createVehicle = async () => {
     const customer = customers.find(item => item.id === order.customerId);
-    if (!customer) return alert('请先选择客户。');
+    const fleet = fleets.find(item => item.id === order.fleetId);
+    if (!customer && !fleet) return alert('请先选择客户、公司或车队。');
     if (!vehicleDraft.plate.trim() || !vehicleDraft.year.trim() || !vehicleDraft.make.trim() || !vehicleDraft.model.trim()) return alert('请填写车牌、年份、品牌和车型。');
     const duplicate = vehicles.find(item => item.plate.trim().toUpperCase() === vehicleDraft.plate.trim().toUpperCase());
     if (duplicate) { selectVehicle(duplicate.id); setAddingVehicle(false); return alert('该车牌已存在，已经为您自动选中。'); }
     const vehicle: Vehicle = {
-      id: uid(), ownerType: customer.type, ownerId: customer.id, ownerName: customer.name,
+      id: uid(), ownerType: fleet ? '车队' : customer!.type, ownerId: fleet?.id || customer!.id, ownerName: fleet?.company || customer!.name,
       plate: vehicleDraft.plate.trim().toUpperCase(), vin: vehicleDraft.vin.trim().toUpperCase(),
       year: vehicleDraft.year.trim(), make: vehicleDraft.make.trim(), model: vehicleDraft.model.trim(), engine: vehicleDraft.engine.trim(), mileage: Number(vehicleDraft.mileage || 0),
     };
@@ -360,9 +369,9 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, p
       <label>日期<input type="date" value={order.date} onChange={e => patch({ date: e.target.value })} /></label>
       <label>状态<select value={order.status} disabled={!!order.archivedAt} onChange={e => patch({ status: e.target.value as WorkOrderStatus })}>{order.archivedAt && <option>已取消</option>}{statuses.map(item => <option key={item}>{item}</option>)}</select></label>
       <label>负责技师{canAssignTechnician ? <select value={order.technicianUserId || ''} onChange={e => { const member = technicians.find(item => item.userId === e.target.value); patch({ technicianUserId: member?.userId || '', technician: member?.displayName || '' }); }}><option value="">未分配</option>{technicians.filter(item => item.role === 'technician' || item.role === 'manager').map(item => <option key={item.userId} value={item.userId}>{item.displayName || item.userId.slice(0, 8)}</option>)}</select> : <input value={order.technician || currentUser} readOnly />}</label>
-      <label>客户<select value={order.customerId || ''} onChange={e => selectCustomer(e.target.value)}><option value="">选择客户</option>{customers.map(item => <option key={item.id} value={item.id}>{item.name} · {item.phone}</option>)}</select></label>
+      <label>客户 / 公司 / 车队<select value={selectedAccountValue} onChange={e => selectCustomer(e.target.value)}><option value="">请选择</option><optgroup label="个人与普通公司客户">{customers.map(item => <option key={item.id} value={`customer:${item.id}`}>{item.name} · {item.phone}</option>)}</optgroup><optgroup label="车队与公司账户">{fleets.map(item => <option key={item.id} value={`fleet:${item.id}`}>{item.company} · {item.contact} · {item.phone}</option>)}</optgroup></select></label>
       <label>联系电话<input value={order.phone || ''} onChange={e => patch({ phone: e.target.value })} /></label>
-      <label>车辆<div className="input-action"><select value={order.vehicleId || ''} onChange={e => selectVehicle(e.target.value)}><option value="">{vehicles.length ? '选择车辆' : '暂无车辆，请快速添加'}</option>{vehicles.map(item => <option key={item.id} value={item.id}>{item.plate || item.vin} · {item.year} {item.make} {item.model}{item.ownerName ? ` · ${item.ownerName}` : ''}</option>)}</select><button type="button" onClick={() => setAddingVehicle(current => !current)}>＋ 添加</button></div></label>
+      <label>车辆<div className="input-action"><select value={order.vehicleId || ''} onChange={e => selectVehicle(e.target.value)}><option value="">{availableVehicles.length ? '选择当前账户车辆' : '暂无车辆，请快速添加'}</option>{availableVehicles.map(item => <option key={item.id} value={item.id}>{item.plate || item.vin} · {item.year} {item.make} {item.model}{item.ownerName ? ` · ${item.ownerName}` : ''}</option>)}</select><button type="button" onClick={() => setAddingVehicle(current => !current)}>＋ 添加</button></div></label>
       <label>当前里程<input type="number" value={order.mileage || ''} onChange={e => patch({ mileage: Number(e.target.value) })} /></label>
     </div>{addingVehicle && <div className="quick-vehicle">
       <div><b>快速添加当前客户车辆</b><span>可拍摄车牌或车架号自动识别；保存后会自动选中。</span></div>
@@ -379,8 +388,9 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, p
 
     {(order.company || selectedVehicle?.ownerType === '车队') && <section className="form-section editor-panel panel-intake"><h3>车队送修信息</h3><div className="form-grid four">
       <label>公司名称<input value={order.company || ''} onChange={e => patch({ company: e.target.value })} /></label>
-      <label>本次司机<select value={order.driverId || ''} onChange={e => selectDriver(e.target.value)}><option value="">选择司机</option>{drivers.filter(item => !order.fleetId || item.fleetId === order.fleetId).map(item => <option key={item.id} value={item.id}>{item.name} · {item.phone}</option>)}</select></label>
-      <label>司机电话<input value={order.driverPhone || ''} onChange={e => patch({ driverPhone: e.target.value })} /></label>
+      <label>司机资料<select value={order.driverId || ''} onChange={e => selectDriver(e.target.value)}><option value="">手动填写实际司机</option>{drivers.filter(item => item.fleetId === order.fleetId).map(item => <option key={item.id} value={item.id}>{item.name} · {item.phone}</option>)}</select></label>
+      <label>本次实际司机<input value={order.driver || ''} onChange={e => patch({ driverId: '', driver: e.target.value })} placeholder="司机姓名" /></label>
+      <label>司机联系电话<input type="tel" value={order.driverPhone || ''} onChange={e => patch({ driverPhone: e.target.value })} placeholder="手机号码" /></label>
       <label>PO Number<input value={order.po || ''} onChange={e => patch({ po: e.target.value })} /></label>
       <label className="span-2">维修授权人<input value={order.authorizedContact || ''} onChange={e => patch({ authorizedContact: e.target.value })} /></label>
     </div></section>}

@@ -114,7 +114,7 @@ export function SmartTools({ cloud, workOrders, onVehicleDecoded }: Props) {
     finally { setBusy(''); }
   };
 
-  return <div className="page smart-page"><div className="page-title"><div><p className="eyebrow">智能工具中心</p><h2>AI、VIN、OCR 与客户服务</h2></div><span className="version-chip">v0.78.8</span></div>
+  return <div className="page smart-page"><div className="page-title"><div><p className="eyebrow">智能工具中心</p><h2>AI、VIN、OCR 与客户服务</h2></div><span className="version-chip">v0.78.9</span></div>
     <div className="smart-grid">
       <ToolCard title="VIN 自动识别" badge="立即可用"><div className="inline-form"><input value={vin} maxLength={17} onChange={e => setVin(e.target.value.toUpperCase())} placeholder="输入 17 位 VIN" /><button className="primary" onClick={runVin} disabled={busy === 'vin'}>{busy === 'vin' ? '识别中…' : '识别'}</button></div>{vinResult && <div className="result-box"><b>{vinResult.year} {vinResult.make} {vinResult.model}</b><span>{vinResult.engine}</span><span>{vinResult.vin}</span></div>}</ToolCard>
       <ToolCard title="OCR 车牌识别" badge="立即可用"><label className="upload-button">{busy === 'ocr' ? '正在识别…' : '拍照或选择车牌照片'}<input type="file" accept="image/*" capture="environment" onChange={runOcr} /></label>{plate && <div className="plate-result">{plate}</div>}{ocrText && <details><summary>查看 OCR 原文</summary><pre>{ocrText}</pre></details>}</ToolCard>
