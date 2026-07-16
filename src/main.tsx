@@ -314,6 +314,11 @@ function App({ cloud }: { cloud: CloudSession }) {
       const vehicle = store.vehicles.find(item => item.id === row.vehicleId);
       if (vehicle) { row.vehicle = `${vehicle.year} ${vehicle.make} ${vehicle.model}`; row.plate = vehicle.plate; }
     }
+    if (type === 'part') {
+      row.cost = Math.max(0, Number(row.cost) || 0);
+      row.price = Math.max(0, Number(row.price) || 0);
+      row.markupPercent = Math.max(0, Number(row.markupPercent) || 0);
+    }
     if (type === 'settings') await persist('settings', row as unknown as ShopSettings);
     else await persist(`${type}s` as keyof AppStore, row as { id: string });
     closeModal();
@@ -326,7 +331,7 @@ function App({ cloud }: { cloud: CloudSession }) {
       <nav>{nav.filter(item => canOpenPage(cloud, item.id)).map(item => <button key={item.id} className={page === item.id ? 'active' : ''} onClick={() => { setPage(item.id); setSearch(''); setSearchDraft(''); }}><span>{item.icon}</span>{item.label}</button>)}</nav>
       <div className="side-foot"><small>{cloud.organizationName}</small><b>{actorName}</b><span>{cloud.user.email}</span><button onClick={() => confirm('确定退出当前账号？') && void cloud.signOut()}>退出登录</button></div>
     </aside>
-    <main className="main"><header className="topbar"><div className="global-search">⌕<input value={searchDraft} onChange={e => setSearchDraft(e.target.value)} onKeyDown={e => e.key === 'Enter' && runGlobalSearch()} placeholder="搜索客户、电话、VIN、车牌、工单、司机…" /><button type="button" onClick={runGlobalSearch}>搜索</button>{searchSuggestions.length > 0 && <div className="search-suggestions">{searchSuggestions.map((item, index) => <button type="button" key={`${item.page}-${item.label}-${index}`} onClick={() => { setSearchDraft(item.query); setSearch(item.query); setPage(item.page); }}><b>{item.label}</b><small>{item.meta}</small></button>)}</div>}</div><div className="top-status"><span className={syncing ? 'syncing' : ''}>{syncing ? '正在同步…' : '● 云端已同步'}</span><span>{actorName}</span><b>v0.78.9</b><button type="button" className="topbar-logout" onClick={() => confirm('确定退出当前账号？') && void cloud.signOut()}>退出</button></div></header>
+    <main className="main"><header className="topbar"><div className="global-search">⌕<input value={searchDraft} onChange={e => setSearchDraft(e.target.value)} onKeyDown={e => e.key === 'Enter' && runGlobalSearch()} placeholder="搜索客户、电话、VIN、车牌、工单、司机…" /><button type="button" onClick={runGlobalSearch}>搜索</button>{searchSuggestions.length > 0 && <div className="search-suggestions">{searchSuggestions.map((item, index) => <button type="button" key={`${item.page}-${item.label}-${index}`} onClick={() => { setSearchDraft(item.query); setSearch(item.query); setPage(item.page); }}><b>{item.label}</b><small>{item.meta}</small></button>)}</div>}</div><div className="top-status"><span className={syncing ? 'syncing' : ''}>{syncing ? '正在同步…' : '● 云端已同步'}</span><span>{actorName}</span><b>v0.79.0</b><button type="button" className="topbar-logout" onClick={() => confirm('确定退出当前账号？') && void cloud.signOut()}>退出</button></div></header>
       {loading ? <div className="loading">正在读取正式服务器数据…</div> : <PageContent page={page} search={search} store={store} settings={settings} cloud={cloud} setPage={setPage} openModal={openModal} setEditingOrder={setEditingOrder} persist={persist} remove={remove} receiveStock={receiveStock} addPayment={addPayment} deleteWorkOrder={deleteWorkOrder} approveRequest={approveRequest} rejectRequest={rejectRequest} claimWorkOrder={claimWorkOrder} completeWorkOrder={completeWorkOrder} actorName={actorName} editOwnProfile={editOwnProfile} />}
     </main>
     {modal && <EntityModal state={modal} store={store} settings={settings} onClose={closeModal} onSave={saveModal} />}
@@ -456,7 +461,7 @@ function Finance({ store, openModal, persist }: ContentProps) {
 
 function SettingsPage({ settings, openModal, store }: ContentProps) {
   const downloadBackup = () => {
-    const payload = JSON.stringify({ product: 'Z&G AUTO ERP', version: '0.78.9', exportedAt: new Date().toISOString(), settings, data: store }, null, 2);
+    const payload = JSON.stringify({ product: 'Z&G AUTO ERP', version: '0.79.0', exportedAt: new Date().toISOString(), settings, data: store }, null, 2);
     const url = URL.createObjectURL(new Blob([payload], { type: 'application/json;charset=utf-8' }));
     const anchor = document.createElement('a');
     anchor.href = url; anchor.download = `ZG_AUTO_ERP_backup_${today()}.json`; anchor.click();
@@ -471,7 +476,19 @@ function EntityModal({ state, store, settings, onClose, onSave }: { state: NonNu
   const [vinBusy, setVinBusy] = useState(false);
   const [ocrBusy, setOcrBusy] = useState<'plate' | 'vin' | ''>('');
   const fields = formFields(state.type, store);
-  const patch = (key: string, value: unknown) => setData(current => ({ ...current, [key]: value }));
+  const patch = (key: string, value: unknown) => setData(current => {
+    const next = { ...current, [key]: value };
+    if (state.type === 'part' && (key === 'cost' || key === 'markupPercent')) {
+      const cost = Number(next.cost) || 0;
+      const markup = Math.max(0, Number(next.markupPercent) || 0);
+      next.price = Math.round(cost * (1 + markup / 100) * 100) / 100;
+    } else if (state.type === 'part' && key === 'price') {
+      const cost = Number(next.cost) || 0;
+      const price = Number(next.price) || 0;
+      if (cost > 0) next.markupPercent = Math.max(0, Math.round(((price / cost) - 1) * 10000) / 100);
+    }
+    return next;
+  });
   const runVin = async () => { setVinBusy(true); try { const result = await decodeVin(String(data.vin || '')); setData(current => ({ ...current, ...result })); } catch (error) { alert(error instanceof Error ? error.message : error); } finally { setVinBusy(false); } };
   const recognizePhoto = async (key: 'plate' | 'vin', file?: File) => {
     if (!file) return;
@@ -504,7 +521,7 @@ function formFields(type: NonNullable<ModalState>['type'], store: AppStore): Fie
   if (type === 'fleet') return [{ key: 'company', label: '公司名称', required: true }, { key: 'contact', label: '主要联系人', required: true }, { key: 'phone', label: '联系电话', required: true }, { key: 'billingEmail', label: '账单邮箱', type: 'email' }, { key: 'terms', label: '付款条款', type: 'select', options: ['现场付款','Net 15','Net 30','Net 45'].map(v => ({ value: v, label: v })) }, { key: 'creditLimit', label: '信用额度', type: 'number', step: '0.01' }, { key: 'notes', label: '车队备注', type: 'textarea', wide: true }];
   if (type === 'driver') return [{ key: 'fleetId', label: '所属公司', type: 'select', options: fleetOptions }, { key: 'company', label: '公司名称' }, { key: 'name', label: '司机姓名', required: true }, { key: 'phone', label: '司机电话', required: true }, { key: 'licenseLast4', label: '驾照后四位' }, { key: 'authorized', label: '允许签字/批准', type: 'checkbox' }, { key: 'notes', label: '备注', type: 'textarea', wide: true }];
   if (type === 'vehicle') return [{ key: 'ownerType', label: '客户类型', type: 'select', required: true, options: ['个人','公司','车队'].map(v => ({ value: v, label: v })) }, { key: 'ownerId', label: '所属客户/公司', type: 'select', options: ownerOptions }, { key: 'ownerName', label: '客户/公司名称', required: true }, { key: 'unit', label: 'Unit Number' }, { key: 'plate', label: '车牌', required: true }, { key: 'state', label: '州' }, { key: 'vin', label: 'VIN（17位）' }, { key: 'year', label: '年份', required: true }, { key: 'make', label: '品牌', required: true }, { key: 'model', label: '车型', required: true }, { key: 'engine', label: '发动机' }, { key: 'color', label: '颜色' }, { key: 'mileage', label: '当前里程', type: 'number' }, { key: 'driverId', label: '常用司机', type: 'select', options: driverOptions }, { key: 'driverName', label: '司机姓名' }, { key: 'driverPhone', label: '司机电话' }, { key: 'notes', label: '车辆备注', type: 'textarea', wide: true }];
-  if (type === 'part') return [{ key: 'partNo', label: '配件编号/SKU', required: true }, { key: 'oemNo', label: 'OEM 编号' }, { key: 'name', label: '配件名称', required: true }, { key: 'brand', label: '品牌' }, { key: 'supplier', label: '供应商' }, { key: 'location', label: '货架位置' }, { key: 'cost', label: '真实采购单价（仅内部）', type: 'number', step: '0.01', required: true }, { key: 'price', label: '客户销售单价（工单显示）', type: 'number', step: '0.01', required: true }, { key: 'qty', label: '当前库存', type: 'number', required: true }, { key: 'minimum', label: '最低库存', type: 'number', required: true }, { key: 'notes', label: '备注', type: 'textarea', wide: true }];
+  if (type === 'part') return [{ key: 'partNo', label: '配件编号/SKU', required: true }, { key: 'oemNo', label: 'OEM 编号' }, { key: 'name', label: '配件名称', required: true }, { key: 'brand', label: '品牌' }, { key: 'supplier', label: '供应商' }, { key: 'location', label: '货架位置' }, { key: 'cost', label: '真实采购单价（仅内部）', type: 'number', step: '0.01', required: true }, { key: 'markupPercent', label: '销售加价百分比 %（自动算售价）', type: 'number', step: '0.01', required: true }, { key: 'price', label: '客户销售单价（可手动修改）', type: 'number', step: '0.01', required: true }, { key: 'qty', label: '当前库存', type: 'number', required: true }, { key: 'minimum', label: '最低库存', type: 'number', required: true }, { key: 'notes', label: '备注', type: 'textarea', wide: true }];
   if (type === 'expense') return [{ key: 'date', label: '日期', type: 'date', required: true }, { key: 'category', label: '支出类别', type: 'select', required: true, options: ['配件采购','房租','水电','工资','工具设备','外包加工','拖车','保险','广告','退款','其他'].map(v => ({ value: v, label: v })) }, { key: 'vendor', label: '收款方' }, { key: 'amount', label: '金额', type: 'number', step: '0.01', required: true }, { key: 'method', label: '付款方式', type: 'select', options: ['现金','银行卡','Zelle','支票','ACH'].map(v => ({ value: v, label: v })) }, { key: 'note', label: '备注/收据号', type: 'textarea', wide: true }];
   if (type === 'campaign') return [{ key: 'name', label: '活动名称', required: true }, { key: 'status', label: '状态', type: 'select', required: true, options: ['启用','停用'].map(v => ({ value: v, label: v })) }, { key: 'start', label: '开始日期', type: 'date', required: true }, { key: 'end', label: '结束日期', type: 'date', required: true }, { key: 'benefit', label: '活动权益', type: 'textarea', wide: true, required: true }, { key: 'warrantyMonths', label: '保修月数', type: 'number' }, { key: 'warrantyMiles', label: '保修里程', type: 'number' }, { key: 'partsFree', label: '配件免费', type: 'checkbox' }, { key: 'laborFree', label: '人工免费', type: 'checkbox' }, { key: 'terms', label: '活动与保修条款', type: 'textarea', wide: true }];
   if (type === 'warranty') return [{ key: 'vehicleId', label: '车辆', type: 'select', required: true, options: store.vehicles.map(item => ({ value: item.id, label: `${item.plate || '无车牌'} · ${item.year} ${item.make} ${item.model}` })) }, { key: 'item', label: '保修项目', required: true }, { key: 'originalRO', label: '原始工单号' }, { key: 'start', label: '开始日期', type: 'date', required: true }, { key: 'end', label: '到期日期', type: 'date', required: true }, { key: 'mileageLimit', label: '里程上限', type: 'number' }, { key: 'coverage', label: '保障范围', type: 'select', required: true, options: ['仅配件','仅人工','配件和人工'].map(v => ({ value: v, label: v })) }, { key: 'status', label: '状态', type: 'select', required: true, options: ['有效','已使用','已到期','作废'].map(v => ({ value: v, label: v })) }, { key: 'notes', label: '保修说明', type: 'textarea', wide: true }];
@@ -512,12 +529,19 @@ function formFields(type: NonNullable<ModalState>['type'], store: AppStore): Fie
 }
 
 function initialForm(type: NonNullable<ModalState>['type'], value: Record<string, unknown> | undefined, settings: ShopSettings): Record<string, unknown> {
-  if (value) return value;
+  if (value) {
+    if (type === 'part' && value.markupPercent === undefined) {
+      const cost = Number(value.cost) || 0;
+      const price = Number(value.price) || 0;
+      return { ...value, markupPercent: cost > 0 ? Math.max(0, Math.round(((price / cost) - 1) * 10000) / 100) : 30 };
+    }
+    return value;
+  }
   if (type === 'customer') return { type: '个人', membership: '普通会员', name: '', phone: '' };
   if (type === 'fleet') return { terms: 'Net 30', creditLimit: 0 };
   if (type === 'driver') return { authorized: false };
   if (type === 'vehicle') return { ownerType: '个人', mileage: 0 };
-  if (type === 'part') return { cost: 0, price: 0, qty: 0, minimum: 1 };
+  if (type === 'part') return { cost: 0, markupPercent: 30, price: 0, qty: 0, minimum: 1 };
   if (type === 'expense') return { date: today(), category: '配件采购', amount: 0, method: '银行卡' };
   if (type === 'campaign') return { start: today(), end: today(), warrantyMonths: 12, warrantyMiles: 12000, partsFree: true, laborFree: false, status: '启用' };
   if (type === 'warranty') return { start: today(), end: today(), mileageLimit: 12000, coverage: '仅配件', status: '有效' };

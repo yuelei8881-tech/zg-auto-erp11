@@ -22,7 +22,7 @@ export type Vehicle = {
 
 export type Part = {
   id: string; partNo: string; oemNo?: string; name: string; brand?: string; supplier?: string;
-  cost: number; price: number; qty: number; minimum: number; location?: string; notes?: string;
+  cost: number; price: number; markupPercent?: number; qty: number; minimum: number; location?: string; notes?: string;
 };
 
 export type LaborItem = {
