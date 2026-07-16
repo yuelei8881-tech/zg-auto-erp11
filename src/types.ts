@@ -105,6 +105,7 @@ export type ChangeLog = {
 export type InventoryLog = {
   id: string; date: string; partId: string; partNo: string; partName: string; type: string;
   change: number; before: number; after: number; reference?: string; note?: string;
+  unitCost?: number; totalCost?: number;
 };
 
 export type Payment = {

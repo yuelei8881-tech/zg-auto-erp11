@@ -52,12 +52,18 @@ async function compressEvidence(file: File): Promise<string> {
   const image = await new Promise<HTMLImageElement>((resolve, reject) => {
     const element = new Image(); element.onload = () => resolve(element); element.onerror = reject; element.src = source;
   });
-  const max = 1280;
+  const max = 1024;
   const scale = Math.min(1, max / Math.max(image.width, image.height));
   const canvas = document.createElement('canvas');
   canvas.width = Math.max(1, Math.round(image.width * scale)); canvas.height = Math.max(1, Math.round(image.height * scale));
   canvas.getContext('2d')?.drawImage(image, 0, 0, canvas.width, canvas.height);
-  return canvas.toDataURL('image/jpeg', 0.72);
+  let quality = 0.68;
+  let compressed = canvas.toDataURL('image/jpeg', quality);
+  while (compressed.length > 600_000 && quality > 0.42) {
+    quality -= 0.08;
+    compressed = canvas.toDataURL('image/jpeg', quality);
+  }
+  return compressed;
 }
 
 export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, parts, settings, nextNumber, onSave, onCancel, onCreateVehicle, onPrint, cloud, currentUser, currentUserId, technicians, canApproveReview, canAssignTechnician, canEditPricing, canViewFinancials }: Props) {
@@ -265,7 +271,7 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, p
 
   const addEvidence = async (files: FileList | null, forcedCategory?: EvidencePhoto['category']) => {
     if (!files?.length) return;
-    if ((order.evidencePhotos || []).length + files.length > 24) return alert('每张工单最多保留 24 张证据照片。');
+    if ((order.evidencePhotos || []).length + files.length > 48) return alert('每张工单最多保留 48 张证据照片（含已作废归档照片）。');
     setEvidenceSaving(true);
     try {
       const additions: EvidencePhoto[] = [];
@@ -336,9 +342,9 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, p
       <label><span className="field-title">完成的维修 <button type="button" onClick={() => dictate('workPerformed')}>🎤 语音</button></span><textarea value={order.workPerformed || ''} onChange={e => patch({ workPerformed: e.target.value })} /><small>English translation（打印显示）</small>{translationControls('workPerformed')}<textarea className="translation-input" value={order.workPerformedEn || ''} onChange={e => patch({ workPerformedEn: e.target.value })} placeholder="Work performed in English" /></label>
     </div><div className="form-grid two compact time-fields"><label>打印时间（可授权修改）<input type="datetime-local" value={order.printTime || ''} onChange={e => patch({ printTime: e.target.value })} /></label><label>做工时间备注<input value={order.workTimeNote || ''} onChange={e => patch({ workTimeNote: e.target.value })} placeholder="例如：2026/07/15 09:00–14:30" /></label></div></section>
 
-    <section className="form-section evidence-section"><div className="section-title"><div><h3>证据留存 / Evidence</h3><span>照片同步保存在工单档案中；打印报价单、工单、发票和收据时不会打印照片。</span></div><b>{activeEvidence.length} 张有效照片</b></div>
+    <section className="form-section evidence-section"><div className="section-title"><div><h3>证据留存 / Evidence</h3><span>正前、正后、左侧、右侧为 4 张必拍照片；可继续添加损伤、里程、维修过程等证据，每张工单最多 48 张。</span></div><b>{activeEvidence.length} / 48 张有效照片</b></div>
       <div className="direction-capture-grid">{requiredViews.map(category => { const photo = activeEvidence.find(item => item.category === category); return <label key={category} className={`direction-capture ${photo ? 'captured' : ''}`}><span className="car-outline">{category === '正前' ? '🚘' : category === '正后' ? '🚗' : '▱🚙▱'}</span><b>{category}</b><small>{photo ? '已拍摄，可重新补拍' : '必拍照片'}</small><input type="file" accept="image/*" capture="environment" disabled={evidenceSaving} onChange={e => { void addEvidence(e.target.files, category); e.currentTarget.value = ''; }} /></label>; })}</div>
-      <div className="evidence-toolbar"><label>照片类别<select value={evidenceCategory} onChange={e => setEvidenceCategory(e.target.value as EvidencePhoto['category'])}>{evidenceCategories.map(item => <option key={item}>{item}</option>)}</select></label><label className="camera-button">{evidenceSaving ? '正在处理照片…' : '＋ 拍照 / 选择照片'}<input type="file" accept="image/*" capture="environment" multiple disabled={evidenceSaving} onChange={e => { void addEvidence(e.target.files); e.currentTarget.value = ''; }} /></label><span>手机打开时会优先调用后置相机，系统自动压缩并记录拍摄人和时间。</span></div>
+      <div className="evidence-toolbar"><label>补充照片类别<select value={evidenceCategory} onChange={e => setEvidenceCategory(e.target.value as EvidencePhoto['category'])}>{evidenceCategories.map(item => <option key={item}>{item}</option>)}</select></label><label className="camera-button">{evidenceSaving ? '正在处理照片…' : '＋ 添加更多证据照片'}<input type="file" accept="image/*" capture="environment" multiple disabled={evidenceSaving} onChange={e => { void addEvidence(e.target.files); e.currentTarget.value = ''; }} /></label><span>第 4 张之后请在这里继续添加。系统会自动压缩，并记录拍摄人和时间。</span></div>
       <div className="evidence-grid">{activeEvidence.map(photo => <article key={photo.id} className="evidence-card"><button type="button" className="evidence-image" onClick={() => window.open(photo.dataUrl, '_blank')}><img src={photo.dataUrl} alt={photo.category} /></button><div><b>{photo.category}</b><small>{photo.capturedBy} · {new Date(photo.capturedAt).toLocaleString()}</small><input value={photo.note || ''} placeholder="照片备注（例如：右前保险杠原有划痕）" onChange={e => patch({ evidencePhotos: (order.evidencePhotos || []).map(item => item.id === photo.id ? { ...item, note: e.target.value } : item) })} /><button type="button" className="danger-link" onClick={() => archiveEvidence(photo)}>作废归档</button></div></article>)}</div>
       {!activeEvidence.length && <div className="empty-line">尚未留存证据照片。建议至少拍摄车牌、四角、仪表里程和已有损伤。</div>}
       {!!order.evidencePhotos?.some(item => item.archivedAt) && <details className="archived-evidence"><summary>查看已作废照片（{order.evidencePhotos.filter(item => item.archivedAt).length}）</summary>{order.evidencePhotos.filter(item => item.archivedAt).map(item => <div key={item.id}><span>{item.category} · {item.fileName}</span><small>{item.archivedBy} 作废于 {new Date(item.archivedAt!).toLocaleString()} · {item.archiveReason}</small></div>)}</details>}
