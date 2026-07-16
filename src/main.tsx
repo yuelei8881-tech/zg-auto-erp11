@@ -326,7 +326,7 @@ function App({ cloud }: { cloud: CloudSession }) {
       <nav>{nav.filter(item => canOpenPage(cloud, item.id)).map(item => <button key={item.id} className={page === item.id ? 'active' : ''} onClick={() => { setPage(item.id); setSearch(''); setSearchDraft(''); }}><span>{item.icon}</span>{item.label}</button>)}</nav>
       <div className="side-foot"><small>{cloud.organizationName}</small><b>{actorName}</b><span>{cloud.user.email}</span><button onClick={() => confirm('确定退出当前账号？') && void cloud.signOut()}>退出登录</button></div>
     </aside>
-    <main className="main"><header className="topbar"><div className="global-search">⌕<input value={searchDraft} onChange={e => setSearchDraft(e.target.value)} onKeyDown={e => e.key === 'Enter' && runGlobalSearch()} placeholder="搜索客户、电话、VIN、车牌、工单、司机…" /><button type="button" onClick={runGlobalSearch}>搜索</button>{searchSuggestions.length > 0 && <div className="search-suggestions">{searchSuggestions.map((item, index) => <button type="button" key={`${item.page}-${item.label}-${index}`} onClick={() => { setSearchDraft(item.query); setSearch(item.query); setPage(item.page); }}><b>{item.label}</b><small>{item.meta}</small></button>)}</div>}</div><div className="top-status"><span className={syncing ? 'syncing' : ''}>{syncing ? '正在同步…' : '● 云端已同步'}</span><span>{actorName}</span><b>v0.78.5</b><button type="button" className="topbar-logout" onClick={() => confirm('确定退出当前账号？') && void cloud.signOut()}>退出</button></div></header>
+    <main className="main"><header className="topbar"><div className="global-search">⌕<input value={searchDraft} onChange={e => setSearchDraft(e.target.value)} onKeyDown={e => e.key === 'Enter' && runGlobalSearch()} placeholder="搜索客户、电话、VIN、车牌、工单、司机…" /><button type="button" onClick={runGlobalSearch}>搜索</button>{searchSuggestions.length > 0 && <div className="search-suggestions">{searchSuggestions.map((item, index) => <button type="button" key={`${item.page}-${item.label}-${index}`} onClick={() => { setSearchDraft(item.query); setSearch(item.query); setPage(item.page); }}><b>{item.label}</b><small>{item.meta}</small></button>)}</div>}</div><div className="top-status"><span className={syncing ? 'syncing' : ''}>{syncing ? '正在同步…' : '● 云端已同步'}</span><span>{actorName}</span><b>v0.78.6</b><button type="button" className="topbar-logout" onClick={() => confirm('确定退出当前账号？') && void cloud.signOut()}>退出</button></div></header>
       {loading ? <div className="loading">正在读取正式服务器数据…</div> : <PageContent page={page} search={search} store={store} settings={settings} cloud={cloud} setPage={setPage} openModal={openModal} setEditingOrder={setEditingOrder} persist={persist} remove={remove} receiveStock={receiveStock} addPayment={addPayment} deleteWorkOrder={deleteWorkOrder} approveRequest={approveRequest} rejectRequest={rejectRequest} claimWorkOrder={claimWorkOrder} completeWorkOrder={completeWorkOrder} actorName={actorName} editOwnProfile={editOwnProfile} />}
     </main>
     {modal && <EntityModal state={modal} store={store} settings={settings} onClose={closeModal} onSave={saveModal} />}
@@ -408,7 +408,13 @@ function Vehicles({ store, search, openModal, remove, setEditingOrder }: Content
 function WorkOrders({ store, search, settings, cloud, setEditingOrder, addPayment, deleteWorkOrder, approveRequest, rejectRequest, claimWorkOrder, completeWorkOrder, actorName }: ContentProps) {
   const assignedOnly = cloud.role === 'technician' && !can(cloud, 'workOrders');
   const visible = assignedOnly ? store.workOrders.filter(order => (!order.technicianUserId && !order.technician) || order.technicianUserId === cloud.user.id || order.technician === actorName || order.technician === cloud.user.email) : store.workOrders;
-  const rows = filterRows(visible, search).sort((a, b) => b.date.localeCompare(a.date));
+  const rows = filterRows(visible, search).sort((a, b) => {
+    const byDate = String(b.date || '').localeCompare(String(a.date || ''));
+    if (byDate) return byDate;
+    const aNumber = Number(a.number.match(/(\d+)$/)?.[1] || 0);
+    const bNumber = Number(b.number.match(/(\d+)$/)?.[1] || 0);
+    return bNumber - aNumber || b.number.localeCompare(a.number);
+  });
   const pending = store.approvalRequests.filter(item => item.status === '待授权' && (can(cloud, 'approve') || item.requestedById === cloud.user.id));
   const canApprove = can(cloud, 'approve');
   const showFinance = can(cloud, 'pricing') || can(cloud, 'finance');
@@ -450,7 +456,7 @@ function Finance({ store, openModal, persist }: ContentProps) {
 
 function SettingsPage({ settings, openModal, store }: ContentProps) {
   const downloadBackup = () => {
-    const payload = JSON.stringify({ product: 'Z&G AUTO ERP', version: '0.78.5', exportedAt: new Date().toISOString(), settings, data: store }, null, 2);
+    const payload = JSON.stringify({ product: 'Z&G AUTO ERP', version: '0.78.6', exportedAt: new Date().toISOString(), settings, data: store }, null, 2);
     const url = URL.createObjectURL(new Blob([payload], { type: 'application/json;charset=utf-8' }));
     const anchor = document.createElement('a');
     anchor.href = url; anchor.download = `ZG_AUTO_ERP_backup_${today()}.json`; anchor.click();
