@@ -96,6 +96,7 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, p
     laborItems: [], partItems: [], outsource: 0, discount: 0, taxRate: settings.defaultTaxRate,
   }));
   const [saving, setSaving] = useState(false);
+  const [activePanel, setActivePanel] = useState<'intake' | 'evidence' | 'pricing'>('intake');
   const [addingVehicle, setAddingVehicle] = useState(false);
   const [vehicleSaving, setVehicleSaving] = useState(false);
   const [vinScanning, setVinScanning] = useState(false);
@@ -335,19 +336,25 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, p
   };
 
   const submit = async () => {
-    if (!calculated.customer || !calculated.vehicle) return alert('请选择客户和车辆。');
-    if (!checklist.intake || !checklist.exterior) return alert('接车单至少完成“接车资料”和“车辆外观”两项后才能保存。');
-    if (calculated.laborItems.some(item => !item.description)) return alert('请填写所有人工项目名称。');
-    if (calculated.partItems.some(item => !item.name || item.qty <= 0)) return alert('请检查配件名称和数量。');
+    if (!calculated.customer || !calculated.vehicle) { setActivePanel('intake'); return alert('请选择客户和车辆。'); }
+    if (!checklist.intake || !checklist.exterior) { setActivePanel('evidence'); return alert('请先完成“接车资料”和“车辆外观”两项检查。'); }
+    if (calculated.laborItems.some(item => !item.description)) { setActivePanel('pricing'); return alert('请填写所有人工项目名称。'); }
+    if (calculated.partItems.some(item => !item.name || item.qty <= 0)) { setActivePanel('pricing'); return alert('请检查配件名称和数量。'); }
     setSaving(true);
     try { await onSave(calculated); } finally { setSaving(false); }
   };
 
-  return <div className="editor-screen">
+  return <div className="editor-screen focused-editor" data-panel={activePanel}>
     <div className="editor-head"><div><p className="eyebrow">维修工单 / Repair Order</p><h2>{value ? `编辑 ${order.number}` : '新建维修工单'}</h2></div><div className="toolbar"><button type="button" onClick={() => onPrint(calculated, 'Repair Order')}>打印工单</button><button type="button" onClick={onCancel}>取消</button><button type="button" className="primary" onClick={submit} disabled={saving}>{saving ? '保存中…' : '保存工单'}</button></div></div>
     <div className="workflow-strip">{workflowStages.map((stage, index) => <div key={stage} className={`workflow-step ${workflowStages.indexOf(workflowStage) >= index ? 'done' : ''} ${workflowStage === stage ? 'active' : ''}`}><span className="step-number">{index + 1}</span><strong>{stage}</strong><small>{['前两项即可保存','员工领取并诊断','配件工时与确认','施工及证据留存','收款与交车','流程完成'][index]}</small></div>)}</div>
 
-    <section className="form-section"><h3>客户与车辆</h3><div className="form-grid four">
+    <nav className="editor-section-nav" aria-label="工单填写步骤">
+      <button type="button" className={activePanel === 'intake' ? 'active' : ''} onClick={() => setActivePanel('intake')}><span>1</span><b>接车资料</b><small>客户、车辆与描述</small></button>
+      <button type="button" className={activePanel === 'evidence' ? 'active' : ''} onClick={() => setActivePanel('evidence')}><span>2</span><b>维修与证据</b><small>照片、签字与检查</small></button>
+      <button type="button" className={activePanel === 'pricing' ? 'active' : ''} onClick={() => setActivePanel('pricing')}><span>3</span><b>费用结算</b><small>人工、配件与总价</small></button>
+    </nav>
+
+    <section className="form-section editor-panel panel-intake"><h3>客户与车辆</h3><div className="form-grid four">
       <label>工单号<input value={order.number} onChange={e => patch({ number: e.target.value })} /></label>
       <label>日期<input type="date" value={order.date} onChange={e => patch({ date: e.target.value })} /></label>
       <label>状态<select value={order.status} disabled={!!order.archivedAt} onChange={e => patch({ status: e.target.value as WorkOrderStatus })}>{order.archivedAt && <option>已取消</option>}{statuses.map(item => <option key={item}>{item}</option>)}</select></label>
@@ -369,7 +376,7 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, p
       </div><div className="toolbar"><button type="button" onClick={() => setAddingVehicle(false)}>取消</button><button type="button" className="primary" onClick={createVehicle} disabled={vehicleSaving}>{vehicleSaving ? '保存中…' : '保存并选择车辆'}</button></div>
     </div>}{selectedVehicle && <div className="vehicle-strip"><b>{selectedVehicle.plate || '无车牌'}</b><span>VIN {selectedVehicle.vin || '—'}</span><span>Unit {selectedVehicle.unit || '—'}</span><span>{selectedVehicle.ownerName}</span></div>}</section>
 
-    {(order.company || selectedVehicle?.ownerType === '车队') && <section className="form-section"><h3>车队送修信息</h3><div className="form-grid four">
+    {(order.company || selectedVehicle?.ownerType === '车队') && <section className="form-section editor-panel panel-intake"><h3>车队送修信息</h3><div className="form-grid four">
       <label>公司名称<input value={order.company || ''} onChange={e => patch({ company: e.target.value })} /></label>
       <label>本次司机<select value={order.driverId || ''} onChange={e => selectDriver(e.target.value)}><option value="">选择司机</option>{drivers.filter(item => !order.fleetId || item.fleetId === order.fleetId).map(item => <option key={item.id} value={item.id}>{item.name} · {item.phone}</option>)}</select></label>
       <label>司机电话<input value={order.driverPhone || ''} onChange={e => patch({ driverPhone: e.target.value })} /></label>
@@ -377,7 +384,7 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, p
       <label className="span-2">维修授权人<input value={order.authorizedContact || ''} onChange={e => patch({ authorizedContact: e.target.value })} /></label>
     </div></section>}
 
-    <section className="form-section"><h3>维修内容</h3><div className="form-grid three voice-fields">
+    <section className="form-section editor-panel panel-intake"><h3>维修内容</h3><div className="form-grid three voice-fields">
       <label><span className="field-title">客户描述 <button type="button" onClick={() => dictate('complaint')}>🎤 语音</button></span><textarea value={order.complaint || ''} onChange={e => patch({ complaint: e.target.value })} /><small>English translation（打印显示）</small>{translationControls('complaint')}<textarea className="translation-input" value={order.complaintEn || ''} onChange={e => patch({ complaintEn: e.target.value })} placeholder="Customer concern in English" /></label>
       <label><span className="field-title">检查/诊断结果 <button type="button" onClick={() => dictate('diagnosis')}>🎤 语音</button></span><textarea value={order.diagnosis || ''} onChange={e => patch({ diagnosis: e.target.value })} /><small>English translation（打印显示）</small>{translationControls('diagnosis')}<textarea className="translation-input" value={order.diagnosisEn || ''} onChange={e => patch({ diagnosisEn: e.target.value })} placeholder="Diagnosis in English" /></label>
       <label><span className="field-title">完成的维修 <button type="button" onClick={() => dictate('workPerformed')}>🎤 语音</button></span><textarea value={order.workPerformed || ''} onChange={e => patch({ workPerformed: e.target.value })} /><small>English translation（打印显示）</small>{translationControls('workPerformed')}<textarea className="translation-input" value={order.workPerformedEn || ''} onChange={e => patch({ workPerformedEn: e.target.value })} placeholder="Work performed in English" /></label>

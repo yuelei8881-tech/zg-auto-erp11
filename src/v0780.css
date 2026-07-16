@@ -93,3 +93,31 @@
   .kpi-grid{grid-template-columns:1fr 1fr}.kpi span{font-size:11px}
   .editor-head .eyebrow{display:none}
 }
+
+/* Focused work-order layout: show one meaningful group at a time. */
+.focused-editor>.form-section{display:none}
+.focused-editor[data-panel="intake"]>.panel-intake,
+.focused-editor[data-panel="evidence"]>.evidence-section,
+.focused-editor[data-panel="evidence"]>.signature-section,
+.focused-editor[data-panel="evidence"]>.review-section,
+.focused-editor[data-panel="pricing"]>.form-section:has(.labor-grid),
+.focused-editor[data-panel="pricing"]>.form-section:has(.parts-grid),
+.focused-editor[data-panel="pricing"]>.totals-section{display:block}
+.focused-editor[data-panel="pricing"]>.totals-section{display:grid}
+
+.editor-section-nav{position:sticky;top:78px;z-index:4;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:0 0 16px;padding:7px;border:1px solid #dbe3ef;border-radius:16px;background:rgba(255,255,255,.94);box-shadow:0 8px 24px rgba(15,23,42,.08);backdrop-filter:blur(12px)}
+.editor-section-nav button{display:grid;grid-template-columns:30px 1fr;grid-template-rows:auto auto;column-gap:9px;align-items:center;text-align:left;border:0;border-radius:11px;padding:10px 12px;background:transparent;color:#64748b}
+.editor-section-nav button>span{grid-row:1/3;width:28px;height:28px;display:grid;place-items:center;border-radius:50%;background:#e8edf5;color:#475569;font-size:12px;font-weight:800}
+.editor-section-nav b{font-size:14px;color:#263248}.editor-section-nav small{font-size:10px}
+.editor-section-nav button.active{background:linear-gradient(135deg,#155eef,#3975ee);color:#dce8ff;box-shadow:0 5px 14px rgba(21,94,239,.22)}
+.editor-section-nav button.active>span{background:#fff;color:#155eef}.editor-section-nav button.active b{color:#fff}
+.focused-editor>.form-section{border:0;border-radius:18px;box-shadow:0 7px 24px rgba(15,23,42,.06)}
+.focused-editor>.form-section>h3,.focused-editor>.form-section .section-title h3{font-size:18px;letter-spacing:-.01em}
+
+@media(max-width:760px){
+  .editor-section-nav{top:120px;margin:0 0 12px;padding:5px;border-radius:14px}
+  .editor-section-nav button{display:flex;justify-content:center;gap:6px;min-height:46px;padding:8px 5px;text-align:center}
+  .editor-section-nav button>span{width:22px;height:22px;flex:0 0 22px}.editor-section-nav small{display:none}.editor-section-nav b{font-size:12px}
+  .focused-editor>.workflow-strip{margin-bottom:10px}
+  .focused-editor>.form-section{padding:16px;border-radius:16px}
+}
