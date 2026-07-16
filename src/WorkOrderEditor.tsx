@@ -64,6 +64,7 @@ const quickRepairItems: Array<{ name: string; hours: number }> = [
   { name: '全车安全检查', hours: 1 },
   { name: '路试和故障确认', hours: 0.5 },
 ];
+const paymentMethods = ['未记录', '现金', '刷卡', '银行转账 / ACH', '支票', 'Zelle', '扫码支付', '在线付款', '月结', '其他'];
 
 async function compressEvidence(file: File): Promise<string> {
   const source = await new Promise<string>((resolve, reject) => {
@@ -430,6 +431,7 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, p
       <label>折扣<input type="number" inputMode="decimal" step="0.01" value={editableNumber(order.discount)} onChange={e => patch({ discount: Number(e.target.value) })} /></label>
       <label>配件销售税率 %（人工不计税）<input type="number" inputMode="decimal" step="0.01" value={editableNumber(order.taxRate)} onChange={e => patch({ taxRate: Number(e.target.value) })} /></label>
       <label>已付款<input type="number" inputMode="decimal" step="0.01" value={editableNumber(order.paid)} onChange={e => patch({ paid: Number(e.target.value) })} /></label>
+      <label>客户支付方式<select value={order.paymentMethod || '未记录'} onChange={e => patch({ paymentMethod: e.target.value === '未记录' ? '' : e.target.value })}>{paymentMethods.map(method => <option key={method}>{method}</option>)}</select></label>
       <label>实际结账金额（仅手动改价需双人授权）<input type="number" step="0.01" placeholder={`自动计算 ${money(calculated.laborTotal + calculated.partsTotal + calculated.outsource + calculated.tax - calculated.discount)}`} value={order.settlementTotal ?? ''} onChange={e => patch({ settlementTotal: e.target.value === '' ? undefined : Number(e.target.value) })} /></label>
     </div><p className="tax-guidance">加州默认规则：系统仅对配件销售额计算销售税；单独列示的维修/安装人工通常不计销售税。制造加工人工等例外请由会计确认。参考：<a href="https://www.cdtfa.ca.gov/formspubs/pub25.pdf" target="_blank" rel="noreferrer">CDTFA Publication 25</a>、<a href="https://www.cdtfa.ca.gov/lawguides/vol1/sutr/1546.html" target="_blank" rel="noreferrer">Regulation 1546</a>。</p></div><div className="totals-card"><div><span>人工（免销售税）</span><b>{money(calculated.laborTotal)}</b></div><div><span>配件</span><b>{money(calculated.partsTotal)}</b></div><div><span>配件销售税</span><b>{money(calculated.tax)}</b></div><div className="grand"><span>总价</span><b>{money(calculated.total)}</b></div><div className="balance"><span>欠款</span><b>{money(calculated.balance)}</b></div></div></section>}
   </div>;
