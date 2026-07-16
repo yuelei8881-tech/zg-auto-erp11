@@ -45,10 +45,25 @@ async function sendEmail(body: Record<string, unknown>) {
     throw new NotifyError('邮件服务尚未配置 RESEND_API_KEY。', 503, 'EMAIL_NOT_CONFIGURED', 'email');
   }
 
+  const rawAttachments = Array.isArray(body.attachments) ? body.attachments.slice(0, 8) : [];
+  const attachments = rawAttachments.map((item, index) => {
+    const value = item && typeof item === 'object' ? item as Record<string, unknown> : {};
+    const content = String(value.content || '').replace(/^data:[^;]+;base64,/, '');
+    if (!content || content.length > 6_000_000) throw new NotifyError(`附件 ${index + 1} 无效或过大。`, 413, 'ATTACHMENT_TOO_LARGE', 'email');
+    return {
+      filename: String(value.filename || `evidence-${index + 1}.jpg`).replace(/[^\w.()-]/g, '_'),
+      content,
+      content_id: String(value.contentId || `evidence-${index + 1}`),
+    };
+  });
+  if (attachments.reduce((sum, item) => sum + item.content.length, 0) > 20_000_000) {
+    throw new NotifyError('证据照片附件总大小过大，请减少照片数量。', 413, 'ATTACHMENTS_TOO_LARGE', 'email');
+  }
+
   const response = await fetch('https://api.resend.com/emails', {
     method: 'POST',
     headers: { Authorization: `Bearer ${resendKey}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ from: emailFrom, to: [to], subject, html }),
+    body: JSON.stringify({ from: emailFrom, to: [to], subject, html, ...(attachments.length ? { attachments } : {}) }),
   });
   const result = await response.json().catch(() => ({})) as Record<string, unknown>;
   if (!response.ok) {

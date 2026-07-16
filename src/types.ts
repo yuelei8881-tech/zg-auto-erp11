@@ -53,6 +53,7 @@ export type EvidencePhoto = {
   note?: string;
   capturedAt: string;
   capturedBy: string;
+  customerVisible?: boolean;
   archivedAt?: string;
   archivedBy?: string;
   archiveReason?: string;
