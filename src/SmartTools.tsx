@@ -5,7 +5,7 @@ import { decodeVin, money } from './lib/erp';
 
 declare global {
   interface Window {
-    Tesseract?: { recognize: (image: File | string, language: string) => Promise<{ data: { text: string } }> };
+    Tesseract?: { recognize: (image: File | string, language: string, options?: Record<string, unknown>) => Promise<{ data: { text: string } }> };
     webkitSpeechRecognition?: new () => SpeechRecognitionLike;
     SpeechRecognition?: new () => SpeechRecognitionLike;
   }
