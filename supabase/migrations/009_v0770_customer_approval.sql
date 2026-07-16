@@ -30,7 +30,7 @@ create or replace function public.zg_create_customer_approval(
 declare v_token text;
 begin
   if not public.zg_is_org_member(p_organization_id) then raise exception 'Not authorized'; end if;
-  v_token := encode(gen_random_bytes(24), 'hex');
+  v_token := encode(extensions.gen_random_bytes(24), 'hex');
   update public.zg_customer_approvals set status = 'expired'
     where organization_id = p_organization_id and work_order_id = p_work_order_id and status = 'pending';
   insert into public.zg_customer_approvals(organization_id, work_order_id, token_hash, snapshot, customer_email, customer_name, created_by)
