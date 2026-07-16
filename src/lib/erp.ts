@@ -29,14 +29,15 @@ export function recalculateWorkOrder(order: Partial<WorkOrder>): WorkOrder {
   // California repair orders: labor is not part of the taxable base. This ERP
   // intentionally applies sales tax to parts only.
   const taxableParts = Math.max(0, partsTotal);
-  const tax = taxableParts * taxRate / 100;
+  const calculatedTax = taxableParts * taxRate / 100;
+  const tax = order.taxOverride === undefined ? calculatedTax : Math.max(0, num(order.taxOverride));
   const calculatedTotal = Math.max(0, laborTotal + partsTotal + outsource + tax - discount);
   const total = order.settlementTotal === undefined ? calculatedTotal : Math.max(0, num(order.settlementTotal));
   const paid = num(order.paid);
   return {
     id: order.id || uid(), number: order.number || '', date: order.date || today(),
     customer: order.customer || '', vehicle: order.vehicle || '', status: order.status || '等待检查',
-    ...order, laborItems, partItems, outsource, discount, taxRate, laborTotal, partsTotal,
+    ...order, laborItems, partItems, outsource, discount, taxRate, taxOverride: order.taxOverride, laborTotal, partsTotal,
     partsCost, tax, total, paid, balance: Math.max(0, total - paid),
     grossProfit: laborTotal + partsTotal - partsCost - outsource - discount,
   } as WorkOrder;

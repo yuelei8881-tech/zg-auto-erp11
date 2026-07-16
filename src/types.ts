@@ -65,7 +65,7 @@ export type WorkOrder = {
   fleetId?: string; company?: string; driverId?: string; driver?: string; driverPhone?: string;
   authorizedContact?: string; po?: string; complaint?: string; diagnosis?: string; workPerformed?: string;
   technician?: string; status: WorkOrderStatus; laborItems: LaborItem[]; partItems: PartItem[];
-  outsource: number; discount: number; taxRate: number; laborTotal: number; partsTotal: number;
+  outsource: number; discount: number; taxRate: number; taxOverride?: number; laborTotal: number; partsTotal: number;
   partsCost: number; tax: number; total: number; paid: number; balance: number; grossProfit: number;
   paymentMethod?: string; inventoryCommitted?: boolean; notes?: string;
   technicianUserId?: string;
