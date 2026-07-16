@@ -51,3 +51,45 @@
 @media(max-width:1050px){.workflow-strip{grid-template-columns:repeat(3,minmax(0,1fr))}.quick-vehicle-grid,.direction-capture-grid,.evidence-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.inspection-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}
 @media(max-width:680px){.workflow-strip{grid-template-columns:1fr 1fr}.workflow-step{min-height:58px;padding:10px 8px 9px 36px}.workflow-step .step-number{left:9px;top:10px}.quick-vehicle-grid,.direction-capture-grid,.evidence-grid,.time-fields,.signature-name,.signature-time{grid-template-columns:1fr 1fr}.inspection-grid{grid-template-columns:1fr 1fr}.inventory-query-bar{align-items:stretch}.inventory-query-bar input{min-width:100%}.backup-panel{align-items:flex-start}.evidence-section,.signature-section,.review-section{padding:14px}.direction-capture{min-height:126px}.car-outline{height:62px}}
 @media(max-width:430px){.workflow-strip,.quick-vehicle-grid,.time-fields,.signature-name,.signature-time{grid-template-columns:1fr}.direction-capture-grid,.evidence-grid{grid-template-columns:1fr 1fr}.title-actions>*{flex:1}.vin-field{align-items:stretch;flex-direction:column}.review-actions>*{flex:1}.greeting-name{max-width:150px;overflow:hidden;text-overflow:ellipsis;vertical-align:bottom}}
+
+/* Mobile usability pass: readable cards, safe-area navigation and thumb-sized controls. */
+@media(max-width:760px){
+  body{overflow-x:hidden;-webkit-text-size-adjust:100%}
+  button,input,select,textarea{font-size:16px}
+  button{min-height:42px}
+  .main{padding-bottom:calc(76px + env(safe-area-inset-bottom))}
+  .sidebar{padding:5px 5px calc(5px + env(safe-area-inset-bottom));box-shadow:0 -8px 24px rgba(15,23,42,.12)}
+  .sidebar nav{scroll-snap-type:x proximity;scrollbar-width:none}.sidebar nav::-webkit-scrollbar{display:none}
+  .sidebar nav button{min-width:82px;min-height:54px;scroll-snap-align:start}
+  .topbar{height:auto;min-height:64px;padding:8px 10px;gap:8px}
+  .global-search{width:auto;flex:1;min-width:0;padding:7px 9px}.global-search input{min-width:0}
+  .top-status{gap:6px}.top-status b,.version-chip{padding:5px 7px}
+  .page,.editor-screen{padding:12px}
+  .editor-head{top:0;margin:0 -12px 14px;padding:10px 12px;border-bottom:1px solid #dbe3ef;background:rgba(244,246,250,.96);backdrop-filter:blur(12px);box-shadow:0 5px 14px rgba(15,23,42,.06)}
+  .editor-head h2{font-size:21px}.editor-head .toolbar{display:grid;grid-template-columns:1fr 1fr 1.25fr;width:100%}.editor-head .toolbar button{width:100%;padding:8px 6px}
+  .form-section,.panel,.tool-card,.settings-card{padding:14px;border-radius:14px}
+  .section-title{align-items:flex-start;flex-wrap:wrap}.section-title>button{width:100%}
+  .workflow-strip{display:flex;overflow-x:auto;scroll-snap-type:x mandatory;scrollbar-width:none;margin:10px 0 14px}.workflow-strip::-webkit-scrollbar{display:none}
+  .workflow-step{flex:0 0 72%;scroll-snap-align:start}
+  .voice-fields{gap:18px}.voice-fields>label{padding-bottom:16px;border-bottom:1px solid #e8edf4}.voice-fields>label:last-child{border-bottom:0;padding-bottom:0}
+  .line-table{overflow:visible;border:0;background:transparent}
+  .line-head{display:none}
+  .line-row,.line-row.labor-grid,.line-row.parts-grid{min-width:0!important;display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:0 0 12px;padding:14px;border:1px solid #dbe3ef;border-radius:14px;background:#fff;box-shadow:0 3px 10px rgba(15,23,42,.05)}
+  .line-row.labor-grid>:first-child,.line-row.parts-grid>:first-child,.line-row.parts-grid>:nth-child(2){grid-column:1/-1}
+  .line-row>div{grid-template-columns:1fr 1.35fr}
+  .line-row input,.line-row select{min-height:44px;padding:9px}
+  .line-row>b{display:flex;align-items:center;justify-content:flex-end;min-height:42px;padding:8px 10px;border-radius:8px;background:#f0f6ff;color:#174ea6;font-size:16px}
+  .line-row>.danger-link{grid-column:1/-1;border:1px solid #fecaca;background:#fff7f7}
+  .quick-repair-scroll{margin-left:-2px;margin-right:-2px;padding-bottom:10px}.quick-repair-scroll button{min-width:170px;min-height:64px}
+  .evidence-toolbar{grid-template-columns:1fr!important}.evidence-toolbar>span{grid-column:auto!important}.camera-button{min-height:46px}
+  .modal-backdrop{align-items:end;padding:0}.modal{width:100%;max-height:92dvh;border-radius:20px 20px 0 0;padding-bottom:env(safe-area-inset-bottom)}
+  .modal-head{position:sticky;top:0;z-index:2;background:#fff}.modal-foot{position:sticky;bottom:0;z-index:2;background:#fff;padding-bottom:calc(16px + env(safe-area-inset-bottom))}
+  .pwa-install-card{bottom:calc(74px + env(safe-area-inset-bottom))}
+}
+
+@media(max-width:430px){
+  .direction-capture-grid,.evidence-grid{grid-template-columns:1fr}
+  .direction-capture{min-height:112px}.car-outline{height:54px}
+  .kpi-grid{grid-template-columns:1fr 1fr}.kpi span{font-size:11px}
+  .editor-head .eyebrow{display:none}
+}
