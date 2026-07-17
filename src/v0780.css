@@ -177,7 +177,6 @@
   .focused-editor[data-mobile-step="quote"]>.totals-section,
   .focused-editor[data-mobile-step="approval"]>.signature-section,
   .focused-editor[data-mobile-step="approval"]>.review-section,
-  .focused-editor[data-mobile-step="repair"]>.panel-intake:has(.voice-fields),
   .focused-editor[data-mobile-step="repair"]>.evidence-section,
   .focused-editor[data-mobile-step="checkout"]>.totals-section{display:block!important}
   .focused-editor[data-mobile-step="quote"]>.totals-section,
