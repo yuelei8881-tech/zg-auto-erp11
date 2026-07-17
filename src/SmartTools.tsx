@@ -2,6 +2,7 @@ import { useRef, useState, type ChangeEvent, type ReactNode } from 'react';
 import type { CloudSession } from './lib/cloud';
 import type { Vehicle, WorkOrder } from './types';
 import { decodeVin, money } from './lib/erp';
+import { recognizeVehiclePhoto } from './lib/ocr';
 
 declare global {
   interface Window {
@@ -37,25 +38,14 @@ export function SmartTools({ cloud, workOrders, onVehicleDecoded }: Props) {
     finally { setBusy(''); }
   };
 
-  const loadTesseract = () => new Promise<void>((resolve, reject) => {
-    if (window.Tesseract) return resolve();
-    const script = document.createElement('script');
-    script.src = 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js';
-    script.onload = () => resolve(); script.onerror = () => reject(new Error('OCR 组件加载失败，请检查网络。'));
-    document.head.appendChild(script);
-  });
-
   const runOcr = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
     setBusy('ocr'); setPlate(''); setOcrText('');
     try {
-      await loadTesseract();
-      const result = await window.Tesseract!.recognize(file, 'eng');
-      const text = result.data.text.toUpperCase().replace(/[^A-Z0-9\s-]/g, ' ');
-      setOcrText(text.trim());
-      const candidates = text.match(/\b[A-Z0-9]{5,8}\b/g) || [];
-      setPlate(candidates.sort((a, b) => b.length - a.length)[0] || '未自动找到，请手动确认');
+      const recognized = await recognizeVehiclePhoto(file, 'plate', cloud.invokeFunction);
+      setPlate(recognized);
+      setOcrText('已使用 AI 视觉识别，并通过本地 OCR 作为自动备用。');
     } catch (error) { alert(error instanceof Error ? error.message : '车牌识别失败'); }
     finally { setBusy(''); }
   };
@@ -114,7 +104,7 @@ export function SmartTools({ cloud, workOrders, onVehicleDecoded }: Props) {
     finally { setBusy(''); }
   };
 
-  return <div className="page smart-page"><div className="page-title"><div><p className="eyebrow">智能工具中心</p><h2>AI、VIN、OCR 与客户服务</h2></div><span className="version-chip">v0.80.2</span></div>
+  return <div className="page smart-page"><div className="page-title"><div><p className="eyebrow">智能工具中心</p><h2>AI、VIN、OCR 与客户服务</h2></div><span className="version-chip">v0.81.0</span></div>
     <div className="smart-grid">
       <ToolCard title="VIN 自动识别" badge="立即可用"><div className="inline-form"><input value={vin} maxLength={17} onChange={e => setVin(e.target.value.toUpperCase())} placeholder="输入 17 位 VIN" /><button className="primary" onClick={runVin} disabled={busy === 'vin'}>{busy === 'vin' ? '识别中…' : '识别'}</button></div>{vinResult && <div className="result-box"><b>{vinResult.year} {vinResult.make} {vinResult.model}</b><span>{vinResult.engine}</span><span>{vinResult.vin}</span></div>}</ToolCard>
       <ToolCard title="OCR 车牌识别" badge="立即可用"><label className="upload-button">{busy === 'ocr' ? '正在识别…' : '拍照或选择车牌照片'}<input type="file" accept="image/*" capture="environment" onChange={runOcr} /></label>{plate && <div className="plate-result">{plate}</div>}{ocrText && <details><summary>查看 OCR 原文</summary><pre>{ocrText}</pre></details>}</ToolCard>

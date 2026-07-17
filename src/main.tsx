@@ -11,7 +11,7 @@ import { StaffPage } from './StaffPage';
 import { BRAND_LOGO_SVG } from './brandLogo';
 import { PwaInstall } from './PwaInstall';
 import { registerPwa } from './pwa';
-import { recognizePlatePhoto, recognizeVinPhoto } from './lib/ocr';
+import { recognizeVehiclePhoto } from './lib/ocr';
 import { CustomerApprovalPage } from './CustomerApprovalPage';
 import { printDocumentV077 } from './printDocument';
 import './styles.css';
@@ -365,10 +365,10 @@ function App({ cloud }: { cloud: CloudSession }) {
       <nav>{nav.filter(item => canOpenPage(cloud, item.id)).map(item => <button key={item.id} className={page === item.id ? 'active' : ''} onClick={() => { setPage(item.id); setSearch(''); setSearchDraft(''); }}><span>{item.icon}</span>{item.label}</button>)}</nav>
       <div className="side-foot"><small>{cloud.organizationName}</small><b>{actorName}</b><span>{cloud.user.email}</span><button onClick={() => confirm('确定退出当前账号？') && void cloud.signOut()}>退出登录</button></div>
     </aside>
-    <main className="main"><header className="topbar"><div className="global-search">⌕<input value={searchDraft} onChange={e => setSearchDraft(e.target.value)} onKeyDown={e => e.key === 'Enter' && runGlobalSearch()} placeholder="搜索客户、电话、VIN、车牌、工单、司机…" /><button type="button" onClick={runGlobalSearch}>搜索</button>{searchSuggestions.length > 0 && <div className="search-suggestions">{searchSuggestions.map((item, index) => <button type="button" key={`${item.page}-${item.label}-${index}`} onClick={() => { setSearchDraft(item.query); setSearch(item.query); setPage(item.page); }}><b>{item.label}</b><small>{item.meta}</small></button>)}</div>}</div><div className="top-status"><span className={syncing ? 'syncing' : ''}>{syncing ? '正在同步…' : '● 云端已同步'}</span><span>{actorName}</span><b>v0.80.2</b><button type="button" className="topbar-logout" onClick={() => confirm('确定退出当前账号？') && void cloud.signOut()}>退出</button></div></header>
+    <main className="main"><header className="topbar"><div className="global-search">⌕<input value={searchDraft} onChange={e => setSearchDraft(e.target.value)} onKeyDown={e => e.key === 'Enter' && runGlobalSearch()} placeholder="搜索客户、电话、VIN、车牌、工单、司机…" /><button type="button" onClick={runGlobalSearch}>搜索</button>{searchSuggestions.length > 0 && <div className="search-suggestions">{searchSuggestions.map((item, index) => <button type="button" key={`${item.page}-${item.label}-${index}`} onClick={() => { setSearchDraft(item.query); setSearch(item.query); setPage(item.page); }}><b>{item.label}</b><small>{item.meta}</small></button>)}</div>}</div><div className="top-status"><span className={syncing ? 'syncing' : ''}>{syncing ? '正在同步…' : '● 云端已同步'}</span><span>{actorName}</span><b>v0.81.0</b><button type="button" className="topbar-logout" onClick={() => confirm('确定退出当前账号？') && void cloud.signOut()}>退出</button></div></header>
       {loading ? <div className="loading">正在读取正式服务器数据…</div> : <PageContent page={page} search={search} store={store} settings={settings} cloud={cloud} setPage={setPage} openModal={openModal} setEditingOrder={setEditingOrder} persist={persist} remove={remove} receiveStock={receiveStock} addPayment={addPayment} deleteWorkOrder={deleteWorkOrder} approveRequest={approveRequest} rejectRequest={rejectRequest} claimWorkOrder={claimWorkOrder} completeWorkOrder={completeWorkOrder} actorName={actorName} editOwnProfile={editOwnProfile} />}
     </main>
-    {modal && <EntityModal state={modal} store={store} settings={settings} onClose={closeModal} onSave={saveModal} />}
+    {modal && <EntityModal state={modal} store={store} settings={settings} cloud={cloud} onClose={closeModal} onSave={saveModal} />}
   </div>;
 }
 
@@ -505,7 +505,7 @@ function SettingsPage({ settings, openModal, store }: ContentProps) {
   return <div className="page"><div className="page-title"><div><p className="eyebrow">System Settings</p><h2>修理厂设置</h2></div><div className="title-actions"><button onClick={downloadBackup}>下载全部资料备份</button><button className="primary" onClick={() => openModal('settings', settings)}>编辑设置</button></div></div><section className="settings-card"><div className="print-logo">Z&G</div><div><h2>{settings.shopName}</h2><p>{settings.address || '尚未填写地址'}</p><p>{settings.phone || '尚未填写电话'} · {settings.email}</p></div><dl><div><dt>默认工时费率</dt><dd>{money(settings.defaultLaborRate)}/小时</dd></div><div><dt>默认配件税率</dt><dd>{settings.defaultTaxRate}%（仅配件）</dd></div></dl></section><section className="panel backup-panel"><div><h3>本地资料备份</h3><p>下载客户、车辆、工单、库存、财务、活动、员工权限和修改记录。服务器资料不会被删除。</p></div><button className="primary-soft" onClick={downloadBackup}>下载 JSON 备份</button></section><section className="panel"><h3>智能服务状态</h3><div className="integration-list"><div><b>VIN 自动识别</b><span className="success-text">已启用（NHTSA vPIC）</span></div><div><b>本地 OCR 车牌识别</b><span className="success-text">已启用（Tesseract）</span></div><div><b>浏览器语音输入</b><span className="success-text">兼容 Edge / Chrome</span></div><div><b>AI 故障诊断与照片分类</b><span>需部署 zg-ai 云函数并配置 OPENAI_API_KEY</span></div><div><b>邮件与短信通知</b><span>云端发送失败时自动打开本机邮件程序并保留客户确认链接</span></div><div><b>在线付款</b><span>需部署 zg-payment 云函数并配置 Stripe</span></div></div></section></div>;
 }
 
-function EntityModal({ state, store, settings, onClose, onSave }: { state: NonNullable<ModalState>; store: AppStore; settings: ShopSettings; onClose: () => void; onSave: (type: NonNullable<ModalState>['type'], data: Record<string, unknown>) => Promise<void> }) {
+function EntityModal({ state, store, settings, cloud, onClose, onSave }: { state: NonNullable<ModalState>; store: AppStore; settings: ShopSettings; cloud: CloudSession; onClose: () => void; onSave: (type: NonNullable<ModalState>['type'], data: Record<string, unknown>) => Promise<void> }) {
   const [data, setData] = useState<Record<string, unknown>>(() => initialForm(state.type, state.value, settings));
   const [saving, setSaving] = useState(false);
   const [vinBusy, setVinBusy] = useState(false);
@@ -529,7 +529,7 @@ function EntityModal({ state, store, settings, onClose, onSave }: { state: NonNu
     if (!file) return;
     setOcrBusy(key);
     try {
-      const recognized = key === 'plate' ? await recognizePlatePhoto(file) : await recognizeVinPhoto(file);
+      const recognized = await recognizeVehiclePhoto(file, key, cloud.invokeFunction);
       if (!recognized) throw new Error(key === 'plate' ? '没有识别到车牌，请重新拍摄清晰、正面的车牌照片。' : '没有识别到17位 VIN，请重新拍摄仪表台或车门标签。');
       patch(key, recognized.toUpperCase());
       if (key === 'vin') {

@@ -121,7 +121,7 @@ function bestVin(texts: string[]) {
 }
 
 function bestPlate(texts: string[]) {
-  const ignored = new Set(['CALIFORNIA', 'VEHICLE', 'MOTORS', 'LICENSE', 'PLATE', 'DMVCA']);
+  const ignored = new Set(['CALIFORNIA', 'VEHICLE', 'MOTORS', 'LICENSE', 'PLATE', 'DMVCA', 'UNKNOWN', 'UNREADABLE']);
   const candidates = new Set<string>();
   for (const text of texts) {
     for (const raw of text.split(/\s+/)) {
@@ -156,6 +156,44 @@ async function readVinBarcode(file: File) {
     }
   } catch { /* OCR remains available when barcode detection is unsupported. */ }
   return '';
+}
+
+type AiInvoker = <T = unknown>(name: string, body: Record<string, unknown>) => Promise<T>;
+
+async function aiImage(file: File) {
+  const image = await imageElement(file);
+  const scale = Math.min(1, 1800 / Math.max(image.naturalWidth, image.naturalHeight));
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
+  canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
+  const context = canvas.getContext('2d')!;
+  context.drawImage(image, 0, 0, canvas.width, canvas.height);
+  return canvas.toDataURL('image/jpeg', 0.88);
+}
+
+async function recognizeWithAi(file: File, mode: 'plate' | 'vin', invoke: AiInvoker) {
+  const prompt = mode === 'vin'
+    ? 'Read the vehicle VIN from this photo. Focus on the line labeled VIN on the door-jamb/manufacturer label or dashboard. Return ONLY the exact 17-character VIN using uppercase A-Z and 0-9. VINs never contain I, O, or Q. Use the VIN check digit to verify the reading. If it cannot be read confidently, return UNKNOWN.'
+    : 'Read the vehicle license plate number from this photo. Focus only on the large registration characters inside the physical license plate; ignore California, dealer markings, vehicle numbers, TCP/DOT numbers, frames, and background text. Return ONLY the plate number in uppercase letters and digits with no spaces or punctuation. If it cannot be read confidently, return UNKNOWN.';
+  const response = await invoke<{ answer?: string }>('zg-ai', { type: 'photo', image: await aiImage(file), prompt });
+  const answer = String(response.answer || '').toUpperCase().trim();
+  if (mode === 'vin') {
+    const vin = vinCandidates([answer]).find(validVinChecksum) || '';
+    return vin;
+  }
+  const direct = answer.replace(/[^A-Z0-9]/g, '');
+  if (/^[A-Z0-9]{4,8}$/.test(direct) && !['UNKNOWN', 'UNREADABLE'].includes(direct)) return direct;
+  return bestPlate([answer])?.value || '';
+}
+
+export async function recognizeVehiclePhoto(file: File, mode: 'plate' | 'vin', invoke?: AiInvoker) {
+  if (invoke) {
+    try {
+      const recognized = await recognizeWithAi(file, mode, invoke);
+      if (recognized) return recognized;
+    } catch { /* Automatically fall back to on-device OCR. */ }
+  }
+  return mode === 'vin' ? recognizeVinPhoto(file) : recognizePlatePhoto(file);
 }
 
 export async function recognizeVinPhoto(file: File) {

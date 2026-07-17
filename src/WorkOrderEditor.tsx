@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Customer, Driver, EvidencePhoto, Fleet, InspectionChecklist, LaborItem, Part, PartItem, ShopSettings, Vehicle, WorkOrder, WorkOrderStatus } from './types';
 import { decodeVin, money, recalculateWorkOrder, today, uid } from './lib/erp';
-import { recognizePlatePhoto, recognizeVinPhoto } from './lib/ocr';
+import { recognizeVehiclePhoto } from './lib/ocr';
 import { SignaturePad } from './SignaturePad';
 import type { CloudSession, StaffMember } from './lib/cloud';
 
@@ -252,7 +252,7 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, p
     if (!file) return;
     setVinScanning(true);
     try {
-      const vin = await recognizeVinPhoto(file);
+      const vin = await recognizeVehiclePhoto(file, 'vin', cloud.invokeFunction);
       const decoded = await decodeVin(vin);
       setVehicleDraft(current => ({ ...current, vin, year: decoded.year || current.year, make: decoded.make || current.make, model: decoded.model || current.model, engine: decoded.engine || current.engine }));
       alert(`已识别 VIN：${vin}\n车辆资料已自动填写，请核对后保存。`);
@@ -264,7 +264,7 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, p
     if (!file) return;
     setPlateScanning(true);
     try {
-      const plate = await recognizePlatePhoto(file);
+      const plate = await recognizeVehiclePhoto(file, 'plate', cloud.invokeFunction);
       setVehicleDraft(current => ({ ...current, plate }));
       alert(`已识别车牌：${plate}\n请核对后保存车辆。`);
     } catch (error) { alert(`车牌识别失败：${error instanceof Error ? error.message : error}`); }
