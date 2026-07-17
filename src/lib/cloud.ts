@@ -51,7 +51,10 @@ export async function openCloudSession(user: User): Promise<CloudSession> {
 
   let membership = await findMembership();
   if (!membership) {
-    const activationCode = sessionStorage.getItem('zg_staff_activation_code') || '';
+    // Email verification may open in a new tab, where sessionStorage is empty.
+    // Keep the invite code in the signed-up user's private metadata as a fallback.
+    const activationCode = sessionStorage.getItem('zg_staff_activation_code')
+      || String(user.user_metadata?.zg_staff_activation_code || '');
     const { error: inviteError } = await client.rpc('zg_accept_staff_invite', { p_code: activationCode });
     const missingActivationRpc = inviteError && String(inviteError.message || '').includes('Could not find the function');
     if (inviteError && !missingActivationRpc) throw inviteError;

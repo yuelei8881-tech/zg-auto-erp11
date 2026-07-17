@@ -91,7 +91,11 @@ export function FormalGate({ children }: { children: (cloud: CloudSession) => Re
     if (activationCode.length < 6) { setError('请输入老板提供的员工激活码。'); return; }
     setSubmitting(true); setError(''); setNotice('');
     sessionStorage.setItem('zg_staff_activation_code', activationCode);
-    const { data, error: signupError } = await supabase.auth.signUp({ email, password });
+    const { data, error: signupError } = await supabase.auth.signUp({
+      email,
+      password,
+      options: { data: { zg_staff_activation_code: activationCode } },
+    });
     if (signupError) setError(friendlyAuthError(signupError.message));
     else if (data.session) setNotice('账号已激活，正在进入系统…');
     else setNotice('账号已建立，请打开验证邮件完成确认后登录。');
@@ -137,7 +141,7 @@ export function FormalGate({ children }: { children: (cloud: CloudSession) => Re
 
   if (!session) return <div className="auth-screen"><form className="auth-card" onSubmit={mode === 'register' ? register : mode === 'forgot' ? forgot : login}>
     <div className="auth-logo">Z&G</div><h1>Z&G AUTO ERP</h1>
-    <p>{mode === 'forgot' ? '找回密码' : '员工账号登录 · v0.79.7'}</p>
+    <p>{mode === 'forgot' ? '找回密码' : '员工账号登录 · v0.79.8'}</p>
     <label><span>邮箱</span><input name="email" type="email" autoComplete="email" required /></label>
     {mode !== 'forgot' && <label><span>密码</span><input name="password" type="password" autoComplete={mode === 'register' ? 'new-password' : 'current-password'} required minLength={8} /></label>}
     {mode === 'register' && <label><span>员工激活码</span><input name="activationCode" autoComplete="one-time-code" placeholder="由老板提供的 8 位激活码" required /></label>}
