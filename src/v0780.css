@@ -168,6 +168,8 @@
   .mobile-workflow-nav button b{font-size:10px;white-space:nowrap}
   .mobile-workflow-nav button.active{background:linear-gradient(145deg,#155eef,#3975ee);color:#fff;box-shadow:0 4px 12px rgba(21,94,239,.22)}
   .mobile-workflow-nav button.active span{background:#fff;color:#155eef}
+  .mobile-workflow-nav button.complete:not(.active){color:#067647;background:#ecfdf3}
+  .mobile-workflow-nav button.complete:not(.active) span{background:#12b76a;color:#fff}
   .focused-editor>.form-section{display:none!important}
   .focused-editor[data-mobile-step="account"]>.panel-intake:not(:has(.voice-fields)),
   .focused-editor[data-mobile-step="account"]>.evidence-section,

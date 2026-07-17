@@ -8,7 +8,7 @@ import type { CloudSession, StaffMember } from './lib/cloud';
 type Props = {
   value?: WorkOrder; customers: Customer[]; vehicles: Vehicle[]; fleets: Fleet[]; drivers: Driver[]; workOrders: WorkOrder[];
   parts: Part[]; settings: ShopSettings; nextNumber: string;
-  onSave: (order: WorkOrder) => Promise<void>; onCancel: () => void;
+  onSave: (order: WorkOrder, keepOpen?: boolean) => Promise<void>; onCancel: () => void;
     onCreateVehicle: (vehicle: Vehicle) => Promise<void>;
     onPrint: (order: WorkOrder, documentType: string) => void;
     canPrintDocuments: boolean;
@@ -148,6 +148,14 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, w
   const activeEvidence = (order.evidencePhotos || []).filter(item => !item.archivedAt);
   const workflowStage = order.workflowStage || '接车登记';
   const requiredViewCount = requiredViews.filter(category => activeEvidence.some(photo => photo.category === category)).length;
+  const mobileStepComplete: Record<MobileStep, boolean> = {
+    account: !!calculated.customer && !!calculated.vehicle,
+    inspection: !!order.complaint?.trim() && !!order.diagnosis?.trim(),
+    quote: calculated.laborItems.some(item => !!item.description.trim()) || calculated.partItems.some(item => !!item.name.trim()),
+    approval: !!order.customerSignature || order.customerApprovalStatus === '客户已批准' || reviewStatus === '已通过',
+    repair: requiredViewCount >= 4 && !!order.workPerformed?.trim(),
+    checkout: calculated.balance <= 0.009 && !!order.paymentMethod,
+  };
 
   const patch = (changes: Partial<WorkOrder>) => setOrder(current => recalculateWorkOrder({ ...current, ...changes }));
 
@@ -402,6 +410,13 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, w
     setSaving(true);
     try { await onSave(calculated); } finally { setSaving(false); }
   };
+  const saveProgress = async () => {
+    if (!calculated.customer || !calculated.vehicle) { selectMobileStep('account'); return alert('请先选择客户和车辆，然后即可保存当前进度。'); }
+    setSaving(true);
+    try {
+      await onSave(recalculateWorkOrder({ ...calculated, inspectionChecklist: { ...checklist, intake: true } }), true);
+    } finally { setSaving(false); }
+  };
 
   const selectMobileStep = (step: MobileStep) => {
     setMobileStep(step);
@@ -425,7 +440,7 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, w
     </nav>
 
     <nav className="mobile-workflow-nav" aria-label="手机工单流程">
-      {mobileSteps.map((step, index) => <button type="button" key={step.key} className={mobileStep === step.key ? 'active' : ''} onClick={() => selectMobileStep(step.key)}><span>{index + 1}</span><b>{step.short}</b></button>)}
+      {mobileSteps.map((step, index) => <button type="button" key={step.key} className={`${mobileStep === step.key ? 'active' : ''} ${mobileStepComplete[step.key] ? 'complete' : ''}`} onClick={() => selectMobileStep(step.key)}><span>{mobileStepComplete[step.key] ? '✓' : index + 1}</span><b>{step.short}</b></button>)}
     </nav>
 
     <section className="form-section editor-panel panel-intake"><h3>客户与车辆</h3><div className="form-grid four">
@@ -512,6 +527,6 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, w
       <label>客户支付方式<select value={order.paymentMethod || '未记录'} onChange={e => patch({ paymentMethod: e.target.value === '未记录' ? '' : e.target.value })}>{paymentMethods.map(method => <option key={method}>{method}</option>)}</select></label>
       <label>实际结账金额（仅手动改价需双人授权）<input type="number" step="0.01" placeholder={`自动计算 ${money(calculated.laborTotal + calculated.partsTotal + calculated.outsource + calculated.tax - calculated.discount)}`} value={order.settlementTotal ?? ''} onChange={e => patch({ settlementTotal: e.target.value === '' ? undefined : Number(e.target.value) })} /></label>
     </div><p className="tax-guidance">加州默认规则：系统仅对配件销售额计算销售税；单独列示的维修/安装人工通常不计销售税。制造加工人工等例外请由会计确认。参考：<a href="https://www.cdtfa.ca.gov/formspubs/pub25.pdf" target="_blank" rel="noreferrer">CDTFA Publication 25</a>、<a href="https://www.cdtfa.ca.gov/lawguides/vol1/sutr/1546.html" target="_blank" rel="noreferrer">Regulation 1546</a>。</p></div><div className="totals-card"><div><span>人工（免销售税）</span><b>{money(calculated.laborTotal)}</b></div><div><span>配件</span><b>{money(calculated.partsTotal)}</b></div><div><span>配件销售税</span><b>{money(calculated.tax)}</b></div><div className="grand"><span>总价</span><b>{money(calculated.total)}</b></div><div className="balance"><span>欠款</span><b>{money(calculated.balance)}</b></div></div></section>}
-    <div className="mobile-editor-actions"><div><small>{mobileStepIndex + 1} / {mobileSteps.length}</small><b>{mobileSteps[mobileStepIndex]?.label}</b></div><button type="button" onClick={() => moveMobileStep(-1)} disabled={mobileStepIndex === 0}>上一步</button><button type="button" className="primary" onClick={submit} disabled={saving}>{saving ? '保存中…' : '保存工单'}</button><button type="button" onClick={() => moveMobileStep(1)} disabled={mobileStepIndex === mobileSteps.length - 1}>下一步</button></div>
+    <div className="mobile-editor-actions"><div><small>{mobileStepIndex + 1} / {mobileSteps.length}</small><b>{mobileSteps[mobileStepIndex]?.label}</b></div><button type="button" onClick={() => moveMobileStep(-1)} disabled={mobileStepIndex === 0}>上一步</button><button type="button" className="primary" onClick={saveProgress} disabled={saving}>{saving ? '保存中…' : '保存进度'}</button><button type="button" onClick={() => moveMobileStep(1)} disabled={mobileStepIndex === mobileSteps.length - 1}>下一步</button></div>
   </div>;
 }
