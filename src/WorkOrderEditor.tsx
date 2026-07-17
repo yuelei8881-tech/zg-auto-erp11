@@ -101,6 +101,38 @@ async function compressEvidence(file: File): Promise<string> {
   return compressed;
 }
 
+type WorkOrderDraft = { key: string; savedAt: string; order: WorkOrder; mobileStep: MobileStep };
+const draftDatabaseName = 'zg-auto-erp-drafts';
+const draftStoreName = 'workOrders';
+const openDraftDatabase = () => new Promise<IDBDatabase>((resolve, reject) => {
+  const request = indexedDB.open(draftDatabaseName, 1);
+  request.onupgradeneeded = () => { if (!request.result.objectStoreNames.contains(draftStoreName)) request.result.createObjectStore(draftStoreName, { keyPath: 'key' }); };
+  request.onsuccess = () => resolve(request.result);
+  request.onerror = () => reject(request.error);
+});
+async function readWorkOrderDraft(key: string) {
+  const database = await openDraftDatabase();
+  return new Promise<WorkOrderDraft | undefined>((resolve, reject) => {
+    const request = database.transaction(draftStoreName, 'readonly').objectStore(draftStoreName).get(key);
+    request.onsuccess = () => resolve(request.result as WorkOrderDraft | undefined);
+    request.onerror = () => reject(request.error);
+  }).finally(() => database.close());
+}
+async function writeWorkOrderDraft(draft: WorkOrderDraft) {
+  const database = await openDraftDatabase();
+  return new Promise<void>((resolve, reject) => {
+    const request = database.transaction(draftStoreName, 'readwrite').objectStore(draftStoreName).put(draft);
+    request.onsuccess = () => resolve(); request.onerror = () => reject(request.error);
+  }).finally(() => database.close());
+}
+async function removeWorkOrderDraft(key: string) {
+  const database = await openDraftDatabase();
+  return new Promise<void>((resolve, reject) => {
+    const request = database.transaction(draftStoreName, 'readwrite').objectStore(draftStoreName).delete(key);
+    request.onsuccess = () => resolve(); request.onerror = () => reject(request.error);
+  }).finally(() => database.close());
+}
+
 export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, workOrders, parts, settings, nextNumber, onSave, onCancel, onCreateVehicle, onPrint, cloud, currentUser, currentUserId, technicians, canApproveReview, canAssignTechnician, canEditPricing, canViewFinancials, canPrintDocuments }: Props) {
   const [order, setOrder] = useState<WorkOrder>(() => recalculateWorkOrder(value || {
     id: uid(), number: nextNumber, date: today(), customer: '', vehicle: '', status: '等待检查',
@@ -111,6 +143,8 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, w
   const [partSearch, setPartSearch] = useState('');
   const [activePanel, setActivePanel] = useState<'intake' | 'evidence' | 'pricing'>('intake');
   const [mobileStep, setMobileStep] = useState<MobileStep>('account');
+  const [draftReady, setDraftReady] = useState(false);
+  const [draftStatus, setDraftStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const [addingVehicle, setAddingVehicle] = useState(false);
   const [vehicleSaving, setVehicleSaving] = useState(false);
   const [vinScanning, setVinScanning] = useState(false);
@@ -126,6 +160,7 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, w
   const translationRequestId = useRef<Record<TranslationSource, number>>({ complaint: 0, diagnosis: 0, workPerformed: 0 });
   const latestOrder = useRef(order);
   latestOrder.current = order;
+  const draftKey = `work-order:${value?.id || 'new'}`;
   const calculated = useMemo(() => recalculateWorkOrder(order), [order]);
   const laborPriceHistory = useMemo(() => {
     const remembered = new Map<string, LaborItem>();
@@ -156,6 +191,30 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, w
     repair: requiredViewCount >= 4 && !!order.workPerformed?.trim(),
     checkout: calculated.balance <= 0.009 && !!order.paymentMethod,
   };
+
+  useEffect(() => {
+    let cancelled = false;
+    void readWorkOrderDraft(draftKey).then(draft => {
+      if (cancelled) return;
+      if (draft && confirm(`发现 ${new Date(draft.savedAt).toLocaleString()} 自动保存的未完成工单，是否恢复？`)) {
+        setOrder(recalculateWorkOrder(draft.order));
+        setMobileStep(draft.mobileStep || 'account');
+        setActivePanel(draft.mobileStep === 'account' || draft.mobileStep === 'inspection' ? 'intake' : draft.mobileStep === 'quote' || draft.mobileStep === 'checkout' ? 'pricing' : 'evidence');
+      } else if (draft) void removeWorkOrderDraft(draftKey);
+      setDraftReady(true);
+    }).catch(() => { if (!cancelled) { setDraftStatus('error'); setDraftReady(true); } });
+    return () => { cancelled = true; };
+  }, [draftKey]);
+
+  useEffect(() => {
+    if (!draftReady) return;
+    setDraftStatus('saving');
+    const timer = window.setTimeout(() => {
+      void writeWorkOrderDraft({ key: draftKey, savedAt: new Date().toISOString(), order: calculated, mobileStep })
+        .then(() => setDraftStatus('saved')).catch(() => setDraftStatus('error'));
+    }, 700);
+    return () => window.clearTimeout(timer);
+  }, [calculated, draftKey, draftReady, mobileStep]);
 
   const patch = (changes: Partial<WorkOrder>) => setOrder(current => recalculateWorkOrder({ ...current, ...changes }));
 
@@ -408,7 +467,7 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, w
     if (calculated.laborItems.some(item => !item.description)) { setActivePanel('pricing'); return alert('请填写所有人工项目名称。'); }
     if (calculated.partItems.some(item => !item.name || item.qty <= 0)) { setActivePanel('pricing'); return alert('请检查配件名称和数量。'); }
     setSaving(true);
-    try { await onSave(calculated); } finally { setSaving(false); }
+    try { await onSave(calculated); await removeWorkOrderDraft(draftKey); } finally { setSaving(false); }
   };
   const saveProgress = async () => {
     if (!calculated.customer || !calculated.vehicle) { selectMobileStep('account'); return alert('请先选择客户和车辆，然后即可保存当前进度。'); }
@@ -527,6 +586,6 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, w
       <label>客户支付方式<select value={order.paymentMethod || '未记录'} onChange={e => patch({ paymentMethod: e.target.value === '未记录' ? '' : e.target.value })}>{paymentMethods.map(method => <option key={method}>{method}</option>)}</select></label>
       <label>实际结账金额（仅手动改价需双人授权）<input type="number" step="0.01" placeholder={`自动计算 ${money(calculated.laborTotal + calculated.partsTotal + calculated.outsource + calculated.tax - calculated.discount)}`} value={order.settlementTotal ?? ''} onChange={e => patch({ settlementTotal: e.target.value === '' ? undefined : Number(e.target.value) })} /></label>
     </div><p className="tax-guidance">加州默认规则：系统仅对配件销售额计算销售税；单独列示的维修/安装人工通常不计销售税。制造加工人工等例外请由会计确认。参考：<a href="https://www.cdtfa.ca.gov/formspubs/pub25.pdf" target="_blank" rel="noreferrer">CDTFA Publication 25</a>、<a href="https://www.cdtfa.ca.gov/lawguides/vol1/sutr/1546.html" target="_blank" rel="noreferrer">Regulation 1546</a>。</p></div><div className="totals-card"><div><span>人工（免销售税）</span><b>{money(calculated.laborTotal)}</b></div><div><span>配件</span><b>{money(calculated.partsTotal)}</b></div><div><span>配件销售税</span><b>{money(calculated.tax)}</b></div><div className="grand"><span>总价</span><b>{money(calculated.total)}</b></div><div className="balance"><span>欠款</span><b>{money(calculated.balance)}</b></div></div></section>}
-    <div className="mobile-editor-actions"><div><small>{mobileStepIndex + 1} / {mobileSteps.length}</small><b>{mobileSteps[mobileStepIndex]?.label}</b></div><button type="button" onClick={() => moveMobileStep(-1)} disabled={mobileStepIndex === 0}>上一步</button><button type="button" className="primary" onClick={saveProgress} disabled={saving}>{saving ? '保存中…' : '保存进度'}</button><button type="button" onClick={() => moveMobileStep(1)} disabled={mobileStepIndex === mobileSteps.length - 1}>下一步</button></div>
+    <div className="mobile-editor-actions"><div><small>{mobileStepIndex + 1} / {mobileSteps.length} · {draftStatus === 'saving' ? '正在自动保存…' : draftStatus === 'saved' ? '草稿已保存在本机' : draftStatus === 'error' ? '本机草稿保存失败' : '自动保存已开启'}</small><b>{mobileSteps[mobileStepIndex]?.label}</b></div><button type="button" onClick={() => moveMobileStep(-1)} disabled={mobileStepIndex === 0}>上一步</button><button type="button" className="primary" onClick={saveProgress} disabled={saving}>{saving ? '保存中…' : '保存进度'}</button><button type="button" onClick={() => moveMobileStep(1)} disabled={mobileStepIndex === mobileSteps.length - 1}>下一步</button></div>
   </div>;
 }
