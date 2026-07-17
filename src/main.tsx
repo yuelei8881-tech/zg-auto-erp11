@@ -37,10 +37,10 @@ const nav: Array<{ id: Page; icon: string; label: string }> = [
 
 const roleDefaults: Record<string, string[]> = {
   owner: ['*'],
-  manager: ['customers', 'customerContact', 'workOrders', 'createWorkOrders', 'diagnosis', 'pricing', 'assignTechnician', 'collectPayment', 'finance', 'inventory', 'campaigns', 'staff', 'archive', 'approve', 'smart', 'settings'],
-  frontdesk: ['customers', 'customerContact', 'workOrders', 'createWorkOrders', 'diagnosis', 'pricing', 'assignTechnician', 'collectPayment', 'campaigns', 'smart'],
+  manager: ['customers', 'customerContact', 'workOrders', 'createWorkOrders', 'diagnosis', 'pricing', 'assignTechnician', 'collectPayment', 'printDocuments', 'finance', 'inventory', 'campaigns', 'staff', 'archive', 'approve', 'smart', 'settings'],
+  frontdesk: ['customers', 'customerContact', 'workOrders', 'createWorkOrders', 'diagnosis', 'pricing', 'assignTechnician', 'collectPayment', 'printDocuments', 'campaigns', 'smart'],
   technician: ['assignedWorkOrders', 'claimWorkOrders', 'completeWorkOrders', 'diagnosis', 'smart'],
-  finance: ['customers', 'customerContact', 'workOrders', 'pricing', 'collectPayment', 'finance', 'approve'],
+  finance: ['customers', 'customerContact', 'workOrders', 'pricing', 'collectPayment', 'printDocuments', 'finance', 'approve'],
   warehouse: ['workOrders', 'inventory'],
 };
 
@@ -358,14 +358,14 @@ function App({ cloud }: { cloud: CloudSession }) {
     closeModal();
   };
 
-  if (editingOrder) return <WorkOrderEditor value={editingOrder === 'new' ? undefined : editingOrder} customers={store.customers} vehicles={store.vehicles} fleets={store.fleets} drivers={store.drivers} parts={store.parts} settings={settings} nextNumber={nextWorkOrderNumber(store.workOrders)} onCreateVehicle={vehicle => persist('vehicles', vehicle)} onPrint={(order, type) => printDocumentV077(recalculateWorkOrder(order), settings, type)} onSave={saveWorkOrder} onCancel={() => setEditingOrder(null)} cloud={cloud} currentUser={actorName} currentUserId={cloud.user.id} technicians={staffMembers} canApproveReview={can(cloud, 'approve')} canAssignTechnician={can(cloud, 'assignTechnician')} canEditPricing={can(cloud, 'pricing')} canViewFinancials={can(cloud, 'pricing') || can(cloud, 'finance')} />;
+  if (editingOrder) return <WorkOrderEditor value={editingOrder === 'new' ? undefined : editingOrder} customers={store.customers} vehicles={store.vehicles} fleets={store.fleets} drivers={store.drivers} parts={store.parts} settings={settings} nextNumber={nextWorkOrderNumber(store.workOrders)} onCreateVehicle={vehicle => persist('vehicles', vehicle)} onPrint={(order, type) => printDocumentV077(recalculateWorkOrder(order), settings, type)} onSave={saveWorkOrder} onCancel={() => setEditingOrder(null)} cloud={cloud} currentUser={actorName} currentUserId={cloud.user.id} technicians={staffMembers} canApproveReview={can(cloud, 'approve')} canAssignTechnician={can(cloud, 'assignTechnician')} canEditPricing={can(cloud, 'pricing')} canViewFinancials={can(cloud, 'pricing') || can(cloud, 'finance')} canPrintDocuments={can(cloud, 'printDocuments')} />;
 
   return <div className="app-shell">
     <aside className="sidebar"><div className="brand"><div className="brand-mark">Z&G</div><div><b>AUTO ERP</b><small>正式服务器版</small></div></div>
       <nav>{nav.filter(item => canOpenPage(cloud, item.id)).map(item => <button key={item.id} className={page === item.id ? 'active' : ''} onClick={() => { setPage(item.id); setSearch(''); setSearchDraft(''); }}><span>{item.icon}</span>{item.label}</button>)}</nav>
       <div className="side-foot"><small>{cloud.organizationName}</small><b>{actorName}</b><span>{cloud.user.email}</span><button onClick={() => confirm('确定退出当前账号？') && void cloud.signOut()}>退出登录</button></div>
     </aside>
-    <main className="main"><header className="topbar"><div className="global-search">⌕<input value={searchDraft} onChange={e => setSearchDraft(e.target.value)} onKeyDown={e => e.key === 'Enter' && runGlobalSearch()} placeholder="搜索客户、电话、VIN、车牌、工单、司机…" /><button type="button" onClick={runGlobalSearch}>搜索</button>{searchSuggestions.length > 0 && <div className="search-suggestions">{searchSuggestions.map((item, index) => <button type="button" key={`${item.page}-${item.label}-${index}`} onClick={() => { setSearchDraft(item.query); setSearch(item.query); setPage(item.page); }}><b>{item.label}</b><small>{item.meta}</small></button>)}</div>}</div><div className="top-status"><span className={syncing ? 'syncing' : ''}>{syncing ? '正在同步…' : '● 云端已同步'}</span><span>{actorName}</span><b>v0.80.1</b><button type="button" className="topbar-logout" onClick={() => confirm('确定退出当前账号？') && void cloud.signOut()}>退出</button></div></header>
+    <main className="main"><header className="topbar"><div className="global-search">⌕<input value={searchDraft} onChange={e => setSearchDraft(e.target.value)} onKeyDown={e => e.key === 'Enter' && runGlobalSearch()} placeholder="搜索客户、电话、VIN、车牌、工单、司机…" /><button type="button" onClick={runGlobalSearch}>搜索</button>{searchSuggestions.length > 0 && <div className="search-suggestions">{searchSuggestions.map((item, index) => <button type="button" key={`${item.page}-${item.label}-${index}`} onClick={() => { setSearchDraft(item.query); setSearch(item.query); setPage(item.page); }}><b>{item.label}</b><small>{item.meta}</small></button>)}</div>}</div><div className="top-status"><span className={syncing ? 'syncing' : ''}>{syncing ? '正在同步…' : '● 云端已同步'}</span><span>{actorName}</span><b>v0.80.2</b><button type="button" className="topbar-logout" onClick={() => confirm('确定退出当前账号？') && void cloud.signOut()}>退出</button></div></header>
       {loading ? <div className="loading">正在读取正式服务器数据…</div> : <PageContent page={page} search={search} store={store} settings={settings} cloud={cloud} setPage={setPage} openModal={openModal} setEditingOrder={setEditingOrder} persist={persist} remove={remove} receiveStock={receiveStock} addPayment={addPayment} deleteWorkOrder={deleteWorkOrder} approveRequest={approveRequest} rejectRequest={rejectRequest} claimWorkOrder={claimWorkOrder} completeWorkOrder={completeWorkOrder} actorName={actorName} editOwnProfile={editOwnProfile} />}
     </main>
     {modal && <EntityModal state={modal} store={store} settings={settings} onClose={closeModal} onSave={saveModal} />}
@@ -459,7 +459,7 @@ function WorkOrders({ store, search, settings, cloud, setEditingOrder, addPaymen
   const canApprove = can(cloud, 'approve');
   const showFinance = can(cloud, 'pricing') || can(cloud, 'finance');
   const canEdit = can(cloud, 'workOrders') || can(cloud, 'diagnosis');
-  const canPrint = can(cloud, 'workOrders');
+  const canPrint = can(cloud, 'printDocuments');
   const canSend = can(cloud, 'customerContact') || can(cloud, 'workOrders');
   const visibleLogs = store.changeLogs.filter(log => visible.some(order => order.id === log.workOrderId));
   return <div className="page"><div className="page-title"><div><p className="eyebrow">Z&G AUTO ERP</p><h2>{assignedOnly ? '我的维修任务' : '维修工单'}</h2></div>{can(cloud, 'createWorkOrders') && <button className="primary" onClick={() => setEditingOrder('new')}>＋ 新建工单</button>}</div>

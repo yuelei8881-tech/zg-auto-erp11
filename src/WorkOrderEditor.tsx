@@ -9,8 +9,9 @@ type Props = {
   value?: WorkOrder; customers: Customer[]; vehicles: Vehicle[]; fleets: Fleet[]; drivers: Driver[];
   parts: Part[]; settings: ShopSettings; nextNumber: string;
   onSave: (order: WorkOrder) => Promise<void>; onCancel: () => void;
-  onCreateVehicle: (vehicle: Vehicle) => Promise<void>;
-  onPrint: (order: WorkOrder, documentType: string) => void;
+    onCreateVehicle: (vehicle: Vehicle) => Promise<void>;
+    onPrint: (order: WorkOrder, documentType: string) => void;
+    canPrintDocuments: boolean;
   cloud: CloudSession;
   currentUser: string;
   currentUserId: string; technicians: StaffMember[];
@@ -90,7 +91,7 @@ async function compressEvidence(file: File): Promise<string> {
   return compressed;
 }
 
-export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, parts, settings, nextNumber, onSave, onCancel, onCreateVehicle, onPrint, cloud, currentUser, currentUserId, technicians, canApproveReview, canAssignTechnician, canEditPricing, canViewFinancials }: Props) {
+export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, parts, settings, nextNumber, onSave, onCancel, onCreateVehicle, onPrint, cloud, currentUser, currentUserId, technicians, canApproveReview, canAssignTechnician, canEditPricing, canViewFinancials, canPrintDocuments }: Props) {
   const [order, setOrder] = useState<WorkOrder>(() => recalculateWorkOrder(value || {
     id: uid(), number: nextNumber, date: today(), customer: '', vehicle: '', status: '等待检查',
     technician: canAssignTechnician ? '' : currentUser, technicianUserId: canAssignTechnician ? '' : currentUserId,
@@ -369,7 +370,7 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, p
   };
 
   return <div className="editor-screen focused-editor" data-panel={activePanel}>
-    <div className="editor-head"><div><p className="eyebrow">维修工单 / Repair Order</p><h2>{value ? `编辑 ${order.number}` : '新建维修工单'}</h2></div><div className="toolbar"><button type="button" onClick={() => onPrint(calculated, 'Repair Order')}>打印工单</button><button type="button" onClick={onCancel}>取消</button><button type="button" className="primary" onClick={submit} disabled={saving}>{saving ? '保存中…' : '保存工单'}</button></div></div>
+    <div className="editor-head"><div><p className="eyebrow">维修工单 / Repair Order</p><h2>{value ? `编辑 ${order.number}` : '新建维修工单'}</h2></div><div className="toolbar">{canPrintDocuments && <button type="button" onClick={() => onPrint(calculated, 'Repair Order')}>打印工单</button>}<button type="button" onClick={onCancel}>取消</button><button type="button" className="primary" onClick={submit} disabled={saving}>{saving ? '保存中…' : '保存工单'}</button></div></div>
     <div className="workflow-strip">{workflowStages.map((stage, index) => <div key={stage} className={`workflow-step ${workflowStages.indexOf(workflowStage) >= index ? 'done' : ''} ${workflowStage === stage ? 'active' : ''}`}><span className="step-number">{index + 1}</span><strong>{stage}</strong><small>{['前两项即可保存','员工领取并诊断','配件工时与确认','施工及证据留存','收款与交车','流程完成'][index]}</small></div>)}</div>
 
     <nav className="editor-section-nav" aria-label="工单填写步骤">

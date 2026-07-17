@@ -11,7 +11,7 @@ const permissionItems = [
   ['workOrders', '查看全部工单'], ['assignedWorkOrders', '仅查看分配给自己的工单'],
   ['createWorkOrders', '新建工单'], ['diagnosis', '填写诊断与维修记录'],
   ['pricing', '查看和修改价格'], ['assignTechnician', '分配技师'],
-  ['collectPayment', '收款与结账'], ['finance', '财务与利润'],
+  ['collectPayment', '收款与结账'], ['printDocuments', '打印工单、报价单、发票和收据'], ['finance', '财务与利润'],
   ['inventory', '库存与采购'], ['campaigns', '活动与保修'], ['staff', '员工与授权'],
   ['archive', '申请作废/归档资料'], ['approve', '审批与双人授权'],
 ] as const;
