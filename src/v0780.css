@@ -1,5 +1,5 @@
 /* v0.78.0 — staged repair flow, evidence capture, inventory search and backup */
-.greeting-name{appearance:none;border:0;background:transparent;color:inherit;font:inherit;font-weight:800;padding:0 3px;border-bottom:1px dashed rgba(255,255,255,.45);cursor:pointer}
+.greeting-name{appearance:none;display:block;width:min(100%,360px);border:0;background:transparent;color:inherit;font:inherit;font-weight:800;padding:0 3px;text-align:left;cursor:pointer}
 .greeting-name:hover{background:rgba(255,255,255,.1);border-color:currentColor}
 .title-actions,.inventory-query-bar,.backup-panel,.evidence-toolbar,.field-title,.review-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
 .inventory-query-bar{margin:0 0 16px}.inventory-query-bar input{flex:1;min-width:240px}
@@ -50,7 +50,7 @@
 
 @media(max-width:1050px){.workflow-strip{grid-template-columns:repeat(3,minmax(0,1fr))}.quick-vehicle-grid,.direction-capture-grid,.evidence-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.inspection-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}
 @media(max-width:680px){.workflow-strip{grid-template-columns:1fr 1fr}.workflow-step{min-height:58px;padding:10px 8px 9px 36px}.workflow-step .step-number{left:9px;top:10px}.quick-vehicle-grid,.direction-capture-grid,.evidence-grid,.time-fields,.signature-name,.signature-time{grid-template-columns:1fr 1fr}.inspection-grid{grid-template-columns:1fr 1fr}.inventory-query-bar{align-items:stretch}.inventory-query-bar input{min-width:100%}.backup-panel{align-items:flex-start}.evidence-section,.signature-section,.review-section{padding:14px}.direction-capture{min-height:126px}.car-outline{height:62px}}
-@media(max-width:430px){.workflow-strip,.quick-vehicle-grid,.time-fields,.signature-name,.signature-time{grid-template-columns:1fr}.direction-capture-grid,.evidence-grid{grid-template-columns:1fr 1fr}.title-actions>*{flex:1}.vin-field{align-items:stretch;flex-direction:column}.review-actions>*{flex:1}.greeting-name{max-width:150px;overflow:hidden;text-overflow:ellipsis;vertical-align:bottom}}
+@media(max-width:430px){.workflow-strip,.quick-vehicle-grid,.time-fields,.signature-name,.signature-time{grid-template-columns:1fr}.direction-capture-grid,.evidence-grid{grid-template-columns:1fr 1fr}.title-actions>*{flex:1}.vin-field{align-items:stretch;flex-direction:column}.review-actions>*{flex:1}.greeting-name{width:100%;max-width:290px;overflow:visible;vertical-align:bottom}.greeting-name h1{white-space:nowrap}}
 
 /* Mobile usability pass: readable cards, safe-area navigation and thumb-sized controls. */
 @media(max-width:760px){
