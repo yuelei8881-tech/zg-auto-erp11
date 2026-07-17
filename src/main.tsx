@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { FormalGate } from './FormalGate';
 import type { CloudRow, CloudSession, CloudStore, StaffMember } from './lib/cloud';
@@ -82,6 +82,7 @@ function App({ cloud }: { cloud: CloudSession }) {
   const [modal, setModal] = useState<ModalState>(null);
   const [editingOrder, setEditingOrder] = useState<WorkOrder | 'new' | null>(null);
   const [staffMembers, setStaffMembers] = useState<StaffMember[]>([]);
+  const paymentInFlight = useRef(new Set<string>());
 
   const refresh = async (quiet = false) => {
     if (!quiet) setLoading(true);
@@ -271,6 +272,7 @@ function App({ cloud }: { cloud: CloudSession }) {
   };
 
   const addPayment = async (order: WorkOrder) => {
+    if (paymentInFlight.current.has(order.id)) return alert('这张工单的收款正在处理中，请不要重复点击。');
     if (order.balance <= 0.009) return alert('这张工单已经没有欠款。');
     const paymentChoice = prompt(`工单 ${order.number}\n当前欠款：${money(order.balance)}\n\n请选择结账方式：\n1 = 全额付款\n2 = 部分付款\n3 = 月结（今日暂不收款）`, '1');
     if (paymentChoice === null) return;
@@ -290,10 +292,22 @@ function App({ cloud }: { cloud: CloudSession }) {
     }
     const method = prompt('实际付款方式：现金 / 刷卡 / 银行转账或 ACH / 支票 / Zelle / 扫码支付 / 在线付款 / 其他', order.paymentMethod === '月结' ? '现金' : order.paymentMethod || '现金') || '现金';
     const payment: Payment = { id: uid(), date: new Date().toISOString(), workOrderId: order.id, workOrderNumber: order.number, customer: order.customer, amount, method, note: paymentType };
-    await persist('payments', payment);
-    await persist('workOrders', recalculateWorkOrder({ ...order, paid: order.paid + amount, paymentMethod: method }));
-    const remaining = Math.max(0, order.balance - amount);
-    alert(`${paymentType}已记录。\n本次实收 ${money(amount)} 已计入今日收入。\n剩余欠款 ${money(remaining)}。`);
+    paymentInFlight.current.add(order.id);
+    setSyncing(true);
+    try {
+      const updatedOrder = recalculateWorkOrder(await cloud.recordPayment(order.id, payment as unknown as CloudRow) as unknown as WorkOrder);
+      setStore(current => ({
+        ...current,
+        payments: upsertLocal(current.payments, payment),
+        workOrders: upsertLocal(current.workOrders, updatedOrder),
+      }));
+      alert(`${paymentType}已记录。\n本次实收 ${money(amount)} 已计入今日收入。\n剩余欠款 ${money(updatedOrder.balance)}。`);
+    } catch (error) {
+      alert(`收款失败：${error instanceof Error ? error.message : error}\n系统没有写入新的收款流水，请刷新后核对。`);
+    } finally {
+      paymentInFlight.current.delete(order.id);
+      setSyncing(false);
+    }
   };
 
   const receiveStock = async (part: Part) => {

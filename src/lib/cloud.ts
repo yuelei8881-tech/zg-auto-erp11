@@ -17,6 +17,7 @@ export type CloudSession = {
   permissions: Record<string, boolean>;
   loadStore: () => Promise<CloudStore>;
   upsertRecord: (module: string, row: CloudRow) => Promise<void>;
+  recordPayment: (workOrderId: string, payment: CloudRow) => Promise<CloudRow>;
   deleteRecord: (module: string, id: string) => Promise<void>;
   subscribe: (refresh: () => void) => () => void;
   invokeFunction: <T = unknown>(name: string, body: Record<string, unknown>) => Promise<T>;
@@ -190,6 +191,16 @@ export async function openCloudSession(user: User): Promise<CloudSession> {
     return payload as T;
   };
 
+  const recordPayment = async (workOrderId: string, payment: CloudRow) => {
+    const { data, error } = await client.rpc('zg_record_payment', {
+      p_org: organizationId,
+      p_order_id: workOrderId,
+      p_payment: payment,
+    });
+    if (error) throw error;
+    return data as CloudRow;
+  };
+
   const uploadEvidencePhoto = async (workOrderId: string, photoId: string, blob: Blob) => {
     const safeWorkOrderId = workOrderId.replace(/[^a-zA-Z0-9_-]/g, '');
     const safePhotoId = photoId.replace(/[^a-zA-Z0-9_-]/g, '');
@@ -272,7 +283,7 @@ export async function openCloudSession(user: User): Promise<CloudSession> {
     organizationName: organization?.name || 'Z&G AUTO REPAIR',
     role: String(membership.role),
     permissions: (membership.permissions || {}) as Record<string, boolean>,
-    loadStore, upsertRecord, deleteRecord, subscribe, invokeFunction, uploadEvidencePhoto, createCustomerApproval, listStaff, createStaffInvite, updateStaff, updateOwnProfile, cancelStaffInvite, deleteStaffByEmail,
+    loadStore, upsertRecord, deleteRecord, recordPayment, subscribe, invokeFunction, uploadEvidencePhoto, createCustomerApproval, listStaff, createStaffInvite, updateStaff, updateOwnProfile, cancelStaffInvite, deleteStaffByEmail,
     signOut: async () => { await client.auth.signOut(); },
   };
 }
