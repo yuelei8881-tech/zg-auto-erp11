@@ -18,7 +18,9 @@ export function FormalGate({ children }: { children: (cloud: CloudSession) => Re
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
-  const [mode, setMode] = useState<AuthMode>('login');
+  const [mode, setMode] = useState<AuthMode>(() =>
+    new URLSearchParams(location.search).get('recovery') === '1' ? 'recovery' : 'login'
+  );
   const [notice, setNotice] = useState('');
   const [connectionAttempt, setConnectionAttempt] = useState(0);
 
@@ -107,7 +109,9 @@ export function FormalGate({ children }: { children: (cloud: CloudSession) => Re
     if (!supabase) return;
     const email = String(new FormData(event.currentTarget).get('email') || '').trim().toLowerCase();
     setSubmitting(true); setError(''); setNotice('');
-    const { error: resetError } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: `${location.origin}/` });
+    const { error: resetError } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: `${location.origin}/?recovery=1`,
+    });
     if (resetError) setError(friendlyAuthError(resetError.message));
     else setNotice('密码重置邮件已发送，请检查收件箱和垃圾邮件。');
     setSubmitting(false);
@@ -123,6 +127,7 @@ export function FormalGate({ children }: { children: (cloud: CloudSession) => Re
     if (updateError) setError(friendlyAuthError(updateError.message));
     else {
       await supabase.auth.signOut({ scope: 'local' });
+      history.replaceState({}, '', `${location.origin}${location.pathname}`);
       setSession(null); setCloud(null); setMode('login');
       setNotice('密码已经更新，请使用新密码登录。');
     }
@@ -141,7 +146,7 @@ export function FormalGate({ children }: { children: (cloud: CloudSession) => Re
 
   if (!session) return <div className="auth-screen"><form className="auth-card" onSubmit={mode === 'register' ? register : mode === 'forgot' ? forgot : login}>
     <div className="auth-logo">Z&G</div><h1>Z&G AUTO ERP</h1>
-    <p>{mode === 'forgot' ? '找回密码' : '员工账号登录 · v0.79.8'}</p>
+    <p>{mode === 'forgot' ? '找回密码' : '员工账号登录 · v0.79.9'}</p>
     <label><span>邮箱</span><input name="email" type="email" autoComplete="email" required /></label>
     {mode !== 'forgot' && <label><span>密码</span><input name="password" type="password" autoComplete={mode === 'register' ? 'new-password' : 'current-password'} required minLength={8} /></label>}
     {mode === 'register' && <label><span>员工激活码</span><input name="activationCode" autoComplete="one-time-code" placeholder="由老板提供的 8 位激活码" required /></label>}
