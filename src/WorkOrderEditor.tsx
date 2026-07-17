@@ -28,7 +28,7 @@ const mobileSteps: Array<{ key: MobileStep; label: string; short: string }> = [
   { key: 'inspection', label: '检查诊断', short: '检查' },
   { key: 'quote', label: '报价明细', short: '报价' },
   { key: 'approval', label: '客户批准', short: '批准' },
-  { key: 'repair', label: '维修证据', short: '维修' },
+  { key: 'repair', label: '维修证据', short: '证据' },
   { key: 'checkout', label: '结账交车', short: '结账' },
 ];
 
