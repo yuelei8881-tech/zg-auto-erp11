@@ -24,11 +24,11 @@ type TranslationStatus = 'idle' | 'translating' | 'done' | 'error';
 type MobileStep = 'account' | 'inspection' | 'quote' | 'approval' | 'repair' | 'checkout';
 
 const mobileSteps: Array<{ key: MobileStep; label: string; short: string }> = [
-  { key: 'account', label: '客户车辆', short: '接车' },
-  { key: 'repair', label: '接车证据', short: '证据' },
+  { key: 'account', label: '接车与照片', short: '接车' },
   { key: 'inspection', label: '检查诊断', short: '检查' },
   { key: 'quote', label: '报价明细', short: '报价' },
   { key: 'approval', label: '客户批准', short: '批准' },
+  { key: 'repair', label: '维修施工', short: '维修' },
   { key: 'checkout', label: '结账交车', short: '结账' },
 ];
 
