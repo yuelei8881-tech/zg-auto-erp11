@@ -137,7 +137,7 @@ export function FormalGate({ children }: { children: (cloud: CloudSession) => Re
 
   if (!session) return <div className="auth-screen"><form className="auth-card" onSubmit={mode === 'register' ? register : mode === 'forgot' ? forgot : login}>
     <div className="auth-logo">Z&G</div><h1>Z&G AUTO ERP</h1>
-    <p>{mode === 'forgot' ? '找回密码' : '员工账号登录 · v0.79.3'}</p>
+    <p>{mode === 'forgot' ? '找回密码' : '员工账号登录 · v0.79.4'}</p>
     <label><span>邮箱</span><input name="email" type="email" autoComplete="email" required /></label>
     {mode !== 'forgot' && <label><span>密码</span><input name="password" type="password" autoComplete={mode === 'register' ? 'new-password' : 'current-password'} required minLength={8} /></label>}
     {mode === 'register' && <label><span>员工激活码</span><input name="activationCode" autoComplete="one-time-code" placeholder="由老板提供的 8 位激活码" required /></label>}
