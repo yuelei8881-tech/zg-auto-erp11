@@ -27,7 +27,6 @@ function detectChannel(body: Record<string, unknown>): Channel {
   const requested = String(body.channel || body.type || '').trim().toLowerCase();
   if (requested === 'email' || requested === 'sms') return requested;
   if (requested) throw new NotifyError('不支持的通知通道。', 400, 'INVALID_CHANNEL');
-  // Backward compatibility: older clients did not always send channel.
   return body.subject || body.html ? 'email' : 'sms';
 }
 
@@ -49,7 +48,9 @@ async function sendEmail(body: Record<string, unknown>) {
   const attachments = rawAttachments.map((item, index) => {
     const value = item && typeof item === 'object' ? item as Record<string, unknown> : {};
     const content = String(value.content || '').replace(/^data:[^;]+;base64,/, '');
-    if (!content || content.length > 6_000_000) throw new NotifyError(`附件 ${index + 1} 无效或过大。`, 413, 'ATTACHMENT_TOO_LARGE', 'email');
+    if (!content || content.length > 6_000_000) {
+      throw new NotifyError(`附件 ${index + 1} 无效或过大。`, 413, 'ATTACHMENT_TOO_LARGE', 'email');
+    }
     return {
       filename: String(value.filename || `evidence-${index + 1}.jpg`).replace(/[^\w.()-]/g, '_'),
       content,
