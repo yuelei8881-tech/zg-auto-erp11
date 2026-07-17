@@ -90,8 +90,8 @@ export type WorkOrder = {
   complaintEn?: string; diagnosisEn?: string; workPerformedEn?: string;
   printTime?: string; workTimeNote?: string;
   documentSendHistory?: Array<{
-    id: string; documentType: string; email: string; sentAt: string;
-    status: 'sent' | 'mail-client' | 'failed'; providerId?: string; error?: string;
+    id: string; documentType: string; email?: string; phone?: string; channel?: 'email' | 'sms'; sentAt: string;
+    status: 'sent' | 'queued' | 'mail-client' | 'failed'; providerId?: string; error?: string;
   }>;
 };
 

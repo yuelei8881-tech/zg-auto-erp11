@@ -73,8 +73,10 @@ async function sendEmail(body: Record<string, unknown>) {
 }
 
 async function sendSms(body: Record<string, unknown>) {
-  const to = String(body.to || '').trim();
-  const message = String(body.message || '').trim();
+  const rawTo = String(body.to || '').trim();
+  const digits = rawTo.replace(/\D/g, '');
+  const to = digits.length === 10 ? `+1${digits}` : digits.length === 11 && digits.startsWith('1') ? `+${digits}` : rawTo;
+  let message = String(body.message || '').trim();
   if (!to || !message) {
     throw new NotifyError('缺少收件号码或短信内容。', 400, 'SMS_FIELDS_REQUIRED', 'sms');
   }
@@ -82,11 +84,16 @@ async function sendSms(body: Record<string, unknown>) {
   const sid = Deno.env.get('TWILIO_ACCOUNT_SID');
   const token = Deno.env.get('TWILIO_AUTH_TOKEN');
   const from = Deno.env.get('TWILIO_FROM_NUMBER');
-  if (!sid || !token || !from) {
+  const messagingServiceSid = Deno.env.get('TWILIO_MESSAGING_SERVICE_SID');
+  if (!sid || !token || (!from && !messagingServiceSid)) {
     throw new NotifyError('短信服务尚未配置 Twilio。', 503, 'SMS_NOT_CONFIGURED', 'sms');
   }
 
-  const params = new URLSearchParams({ To: to, From: from, Body: message });
+  if (!/reply\s+stop|回复\s*stop/i.test(message)) message += '\nReply STOP to opt out.';
+  if (message.length > 1200) throw new NotifyError('短信内容过长，请缩短后重试。', 400, 'SMS_TOO_LONG', 'sms');
+  const params = new URLSearchParams({ To: to, Body: message });
+  if (messagingServiceSid) params.set('MessagingServiceSid', messagingServiceSid);
+  else params.set('From', String(from));
   const response = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${sid}/Messages.json`, {
     method: 'POST',
     headers: { Authorization: `Basic ${btoa(`${sid}:${token}`)}`, 'Content-Type': 'application/x-www-form-urlencoded' },

@@ -365,7 +365,7 @@ function App({ cloud }: { cloud: CloudSession }) {
       <nav>{nav.filter(item => canOpenPage(cloud, item.id)).map(item => <button key={item.id} className={page === item.id ? 'active' : ''} onClick={() => { setPage(item.id); setSearch(''); setSearchDraft(''); }}><span>{item.icon}</span>{item.label}</button>)}</nav>
       <div className="side-foot"><small>{cloud.organizationName}</small><b>{actorName}</b><span>{cloud.user.email}</span><button onClick={() => confirm('确定退出当前账号？') && void cloud.signOut()}>退出登录</button></div>
     </aside>
-    <main className="main"><header className="topbar"><div className="global-search">⌕<input value={searchDraft} onChange={e => setSearchDraft(e.target.value)} onKeyDown={e => e.key === 'Enter' && runGlobalSearch()} placeholder="搜索客户、电话、VIN、车牌、工单、司机…" /><button type="button" onClick={runGlobalSearch}>搜索</button>{searchSuggestions.length > 0 && <div className="search-suggestions">{searchSuggestions.map((item, index) => <button type="button" key={`${item.page}-${item.label}-${index}`} onClick={() => { setSearchDraft(item.query); setSearch(item.query); setPage(item.page); }}><b>{item.label}</b><small>{item.meta}</small></button>)}</div>}</div><div className="top-status"><span className={syncing ? 'syncing' : ''}>{syncing ? '正在同步…' : '● 云端已同步'}</span><span>{actorName}</span><b>v0.81.0</b><button type="button" className="topbar-logout" onClick={() => confirm('确定退出当前账号？') && void cloud.signOut()}>退出</button></div></header>
+    <main className="main"><header className="topbar"><div className="global-search">⌕<input value={searchDraft} onChange={e => setSearchDraft(e.target.value)} onKeyDown={e => e.key === 'Enter' && runGlobalSearch()} placeholder="搜索客户、电话、VIN、车牌、工单、司机…" /><button type="button" onClick={runGlobalSearch}>搜索</button>{searchSuggestions.length > 0 && <div className="search-suggestions">{searchSuggestions.map((item, index) => <button type="button" key={`${item.page}-${item.label}-${index}`} onClick={() => { setSearchDraft(item.query); setSearch(item.query); setPage(item.page); }}><b>{item.label}</b><small>{item.meta}</small></button>)}</div>}</div><div className="top-status"><span className={syncing ? 'syncing' : ''}>{syncing ? '正在同步…' : '● 云端已同步'}</span><span>{actorName}</span><b>v0.82.0</b><button type="button" className="topbar-logout" onClick={() => confirm('确定退出当前账号？') && void cloud.signOut()}>退出</button></div></header>
       {loading ? <div className="loading">正在读取正式服务器数据…</div> : <PageContent page={page} search={search} store={store} settings={settings} cloud={cloud} setPage={setPage} openModal={openModal} setEditingOrder={setEditingOrder} persist={persist} remove={remove} receiveStock={receiveStock} addPayment={addPayment} deleteWorkOrder={deleteWorkOrder} approveRequest={approveRequest} rejectRequest={rejectRequest} claimWorkOrder={claimWorkOrder} completeWorkOrder={completeWorkOrder} actorName={actorName} editOwnProfile={editOwnProfile} />}
     </main>
     {modal && <EntityModal state={modal} store={store} settings={settings} cloud={cloud} onClose={closeModal} onSave={saveModal} />}
@@ -597,7 +597,9 @@ function SendMenu({ order, settings, store, cloud }: { order: WorkOrder; setting
   const customer = store.customers.find(item => item.id === order.customerId || item.name === order.customer);
   const fleet = store.fleets.find(item => item.id === order.customerId || item.company === order.company || item.company === order.customer);
   const savedEmail = customer?.email || fleet?.billingEmail || '';
+  const savedPhone = order.driverPhone || order.phone || customer?.phone || fleet?.phone || '';
   const notify = async (subject: string, html: string, email: string, attachments?: Array<{ filename: string; content: string; contentId: string }>) => cloud.invokeFunction<{ id?: string; status?: string }>('zg-notify', { channel: 'email', type: 'email', to: email, subject, html, attachments: attachments || [] });
+  const notifySms = async (phone: string, message: string) => cloud.invokeFunction<{ id?: string; status?: string }>('zg-notify', { channel: 'sms', type: 'sms', to: phone, message, workOrderId: order.id });
   const explainSendError = (error: unknown) => {
     let message = '未知发送错误';
     if (error instanceof Error) message = error.message;
@@ -610,6 +612,7 @@ function SendMenu({ order, settings, store, cloud }: { order: WorkOrder; setting
     if (message.toLowerCase().includes('twilio')) return '服务器仍在运行旧版通知函数，邮件请求被错误送入短信通道。请更新 zg-notify 通知函数；工单资料没有丢失。';
     if (message.includes('RESEND_API_KEY') || message.includes('EMAIL_NOT_CONFIGURED')) return '邮件服务尚未配置 RESEND_API_KEY。工单资料没有丢失；配置邮件服务后即可由公司邮箱自动发送。';
     if (message.includes('RESEND_FROM') || message.includes('EMAIL_FROM') || message.toLowerCase().includes('sender')) return `邮件发件地址尚未验证：${message}`;
+    if (message.includes('SMS_NOT_CONFIGURED') || message.includes('短信服务尚未配置')) return '短信服务程序已经安装，但 Twilio 账号和发送号码尚未配置。';
     if (message.toLowerCase().includes('function') && message.toLowerCase().includes('not found')) return '邮件云函数 zg-notify 尚未部署。';
     return message;
   };
@@ -694,15 +697,41 @@ function SendMenu({ order, settings, store, cloud }: { order: WorkOrder; setting
       alert(`客户在线确认链接已经生成${copied ? '并复制' : ''}。云端邮件暂未发出，已打开本机邮件程序并填好确认链接。\n原因：${explainSendError(error)}`);
     }
   };
+  const saveSmsHistory = async (documentType: string, phone: string, result: { id?: string; status?: string }) => {
+    await cloud.upsertRecord('workOrders', { ...order, documentSendHistory: [...(order.documentSendHistory || []), { id: uid(), documentType, phone, channel: 'sms', sentAt: new Date().toISOString(), status: result.status === 'queued' ? 'queued' : 'sent', providerId: result.id }] } as unknown as CloudRow);
+  };
+  const sendSmsNotice = async (kind: 'repair' | 'invoice' | 'progress') => {
+    const phone = prompt('客户手机号码：', savedPhone);
+    if (!phone?.trim()) return;
+    const messages = {
+      repair: `Z&G AUTO: Repair order ${order.number} for ${order.vehicle} is ready. Total ${money(order.total)}. Questions: ${settings.phone}.`,
+      invoice: `Z&G AUTO: Invoice ${order.number} is ready. Total ${money(order.total)}, paid ${money(order.paid)}, balance ${money(order.balance)}. Questions: ${settings.phone}.`,
+      progress: `Z&G AUTO: Update for ${order.number} (${order.vehicle}): ${order.status}. ${order.workPerformed ? `Work update: ${order.workPerformed.slice(0, 180)}. ` : ''}Questions: ${settings.phone}.`,
+    };
+    const labels = { repair: '短信工单通知', invoice: '短信发票通知', progress: '短信维修进度通知' };
+    const result = await notifySms(phone.trim(), messages[kind]);
+    await saveSmsHistory(labels[kind], phone.trim(), result);
+    alert(`${labels[kind]}已发送到 ${phone.trim()}，发送记录已保存。`);
+  };
+  const sendSmsApproval = async () => {
+    const phone = prompt('接收在线维修确认的客户手机号码：', savedPhone);
+    if (!phone?.trim()) return;
+    const { token } = await cloud.createCustomerApproval(order.id, '', order.customer, order as unknown as Record<string, unknown>);
+    const url = `${window.location.origin}${window.location.pathname}?approval=${encodeURIComponent(token)}`;
+    const result = await notifySms(phone.trim(), `Z&G AUTO: Your estimate ${order.number} for ${order.vehicle} is ready (${money(order.total)}). Review, sign and approve: ${url}`);
+    const updated: WorkOrder = { ...order, customerApprovalStatus: '待客户确认', customerApprovalUrl: url, documentSendHistory: [...(order.documentSendHistory || []), { id: uid(), documentType: '短信在线维修确认', phone: phone.trim(), channel: 'sms', sentAt: new Date().toISOString(), status: result.status === 'queued' ? 'queued' : 'sent', providerId: result.id }] };
+    await cloud.upsertRecord('workOrders', updated as unknown as CloudRow);
+    alert('在线维修确认短信已发送。客户可打开链接查看、签字、批准或拒绝，结果会自动回传系统。');
+  };
   const choose = async (value: string) => {
     if (!value) return;
     if (value === 'copy' && order.customerApprovalUrl) { const copied = await copyText(order.customerApprovalUrl); if (copied) alert('客户确认链接已复制。'); return; }
     setSending(true);
-    try { if (value === 'approval') await approval(); else if (['estimate','repair','invoice','receipt'].includes(value)) await sendCustomerDocument(value); else await regularEmail(value); }
+    try { if (value === 'approval') await approval(); else if (value === 'sms-approval') await sendSmsApproval(); else if (value === 'sms-repair') await sendSmsNotice('repair'); else if (value === 'sms-invoice') await sendSmsNotice('invoice'); else if (value === 'sms-progress') await sendSmsNotice('progress'); else if (['estimate','repair','invoice','receipt'].includes(value)) await sendCustomerDocument(value); else await regularEmail(value); }
     catch (error) { alert(`发送失败：${explainSendError(error)}`); }
     finally { setSending(false); }
   };
-  return <select className="send-select" value="" disabled={sending} onChange={event => { void choose(event.target.value); event.target.value = ''; }}><option value="">{sending ? '发送中…' : '发送…'}</option><option value="estimate">发送报价单</option><option value="repair">发送维修工单</option><option value="invoice">发送发票</option><option value="receipt">发送收据</option><option value="inspection">发送检查结果</option><option value="payment">发送催费/结账</option><option value="approval">发送在线维修确认</option>{order.customerApprovalUrl && <option value="copy">复制现有确认链接</option>}</select>;
+  return <select className="send-select" value="" disabled={sending} onChange={event => { void choose(event.target.value); event.target.value = ''; }}><option value="">{sending ? '发送中…' : '发送…'}</option><optgroup label="短信通知"><option value="sms-approval">短信：在线维修确认</option><option value="sms-repair">短信：工单通知</option><option value="sms-invoice">短信：发票/余额通知</option><option value="sms-progress">短信：维修进度通知</option></optgroup><optgroup label="电子邮件"><option value="estimate">邮件：发送报价单</option><option value="repair">邮件：发送维修工单</option><option value="invoice">邮件：发送发票</option><option value="receipt">邮件：发送收据</option><option value="inspection">邮件：发送检查结果</option><option value="payment">邮件：发送催费/结账</option><option value="approval">邮件：在线维修确认</option></optgroup>{order.customerApprovalUrl && <option value="copy">复制现有确认链接</option>}</select>;
 }
 
 function printDocument(order: WorkOrder, settings: ShopSettings, documentType: string) {
