@@ -234,6 +234,14 @@ function App({ cloud }: { cloud: CloudSession }) {
 
   const approveRequest = async (request: ApprovalRequest) => {
     if (request.requestedById === cloud.user.id) return alert('双人授权规则：申请人不能批准自己的申请。请让另一位有审批权限的员工登录处理。');
+    if (request.type === '支出') {
+      const expense = request.proposedExpense;
+      if (!expense) return alert('支出申请资料不完整，无法批准。');
+      if (!confirm(`批准这笔支出？\n类别：${expense.category}\n收款方：${expense.vendor || '—'}\n金额：${money(expense.amount)}\n申请人：${request.requestedBy}\n备注：${expense.note || '—'}`)) return;
+      await persist('expenses', expense);
+      await persist('approvalRequests', { ...request, status: '已执行', approvedBy: actorName, approvedById: cloud.user.id, approvedAt: new Date().toISOString() });
+      return alert(`支出 ${money(expense.amount)} 已由 ${actorName} 批准并计入财务。`);
+    }
     const order = store.workOrders.find(item => item.id === request.workOrderId);
     if (!order) return alert('关联工单不存在。');
     if (!confirm(`批准“${request.type}”？\n工单：${request.workOrderNumber}\n申请人：${request.requestedBy}\n原因：${request.reason}`)) return;
@@ -335,6 +343,13 @@ function App({ cloud }: { cloud: CloudSession }) {
       row.price = Math.max(0, Number(row.price) || 0);
       row.markupPercent = Math.max(0, Number(row.markupPercent) || 0);
     }
+    if (type === 'expense') {
+      const expense = row as unknown as Expense;
+      if (!Number.isFinite(Number(expense.amount)) || Number(expense.amount) <= 0) return alert('请输入正确的支出金额。');
+      await requestApproval({ type: '支出', reason: `${expense.category} · ${expense.vendor || '未填写收款方'} · ${money(expense.amount)}`, proposedExpense: expense });
+      closeModal();
+      return alert('支出申请已提交，必须由另一位有审批权限的员工批准后才会计入支出。');
+    }
     if (type === 'settings') await persist('settings', row as unknown as ShopSettings);
     else await persist(`${type}s` as keyof AppStore, row as { id: string });
     closeModal();
@@ -347,7 +362,7 @@ function App({ cloud }: { cloud: CloudSession }) {
       <nav>{nav.filter(item => canOpenPage(cloud, item.id)).map(item => <button key={item.id} className={page === item.id ? 'active' : ''} onClick={() => { setPage(item.id); setSearch(''); setSearchDraft(''); }}><span>{item.icon}</span>{item.label}</button>)}</nav>
       <div className="side-foot"><small>{cloud.organizationName}</small><b>{actorName}</b><span>{cloud.user.email}</span><button onClick={() => confirm('确定退出当前账号？') && void cloud.signOut()}>退出登录</button></div>
     </aside>
-    <main className="main"><header className="topbar"><div className="global-search">⌕<input value={searchDraft} onChange={e => setSearchDraft(e.target.value)} onKeyDown={e => e.key === 'Enter' && runGlobalSearch()} placeholder="搜索客户、电话、VIN、车牌、工单、司机…" /><button type="button" onClick={runGlobalSearch}>搜索</button>{searchSuggestions.length > 0 && <div className="search-suggestions">{searchSuggestions.map((item, index) => <button type="button" key={`${item.page}-${item.label}-${index}`} onClick={() => { setSearchDraft(item.query); setSearch(item.query); setPage(item.page); }}><b>{item.label}</b><small>{item.meta}</small></button>)}</div>}</div><div className="top-status"><span className={syncing ? 'syncing' : ''}>{syncing ? '正在同步…' : '● 云端已同步'}</span><span>{actorName}</span><b>v0.79.5</b><button type="button" className="topbar-logout" onClick={() => confirm('确定退出当前账号？') && void cloud.signOut()}>退出</button></div></header>
+    <main className="main"><header className="topbar"><div className="global-search">⌕<input value={searchDraft} onChange={e => setSearchDraft(e.target.value)} onKeyDown={e => e.key === 'Enter' && runGlobalSearch()} placeholder="搜索客户、电话、VIN、车牌、工单、司机…" /><button type="button" onClick={runGlobalSearch}>搜索</button>{searchSuggestions.length > 0 && <div className="search-suggestions">{searchSuggestions.map((item, index) => <button type="button" key={`${item.page}-${item.label}-${index}`} onClick={() => { setSearchDraft(item.query); setSearch(item.query); setPage(item.page); }}><b>{item.label}</b><small>{item.meta}</small></button>)}</div>}</div><div className="top-status"><span className={syncing ? 'syncing' : ''}>{syncing ? '正在同步…' : '● 云端已同步'}</span><span>{actorName}</span><b>v0.79.6</b><button type="button" className="topbar-logout" onClick={() => confirm('确定退出当前账号？') && void cloud.signOut()}>退出</button></div></header>
       {loading ? <div className="loading">正在读取正式服务器数据…</div> : <PageContent page={page} search={search} store={store} settings={settings} cloud={cloud} setPage={setPage} openModal={openModal} setEditingOrder={setEditingOrder} persist={persist} remove={remove} receiveStock={receiveStock} addPayment={addPayment} deleteWorkOrder={deleteWorkOrder} approveRequest={approveRequest} rejectRequest={rejectRequest} claimWorkOrder={claimWorkOrder} completeWorkOrder={completeWorkOrder} actorName={actorName} editOwnProfile={editOwnProfile} />}
     </main>
     {modal && <EntityModal state={modal} store={store} settings={settings} onClose={closeModal} onSave={saveModal} />}
@@ -398,6 +413,7 @@ function Dashboard({ store, setPage, setEditingOrder, cloud, actorName, editOwnP
   return <div className="page"><div className="hero"><div><p className="eyebrow">{isTechnician ? '技师工作台' : '老板经营驾驶舱'}</p><button type="button" className="greeting-name" onClick={() => void editOwnProfile()} title="点击修改我的名字"><h1>{greetingForNow()}，{actorName || 'Z&G AUTO REPAIR'}</h1><small>点击姓名可修改</small></button><p>{isTechnician ? '这里显示分配给您的任务和可自行领取的未分配工单。领取、完成和修改都会留下员工姓名与时间。' : '营业、工单、库存和欠款都来自正式服务器实时数据。'}</p></div><div className="toolbar">{can(cloud, 'customers') && <button onClick={() => setPage('customers')}>＋ 新客户</button>}{can(cloud, 'createWorkOrders') && <button className="primary" onClick={() => setEditingOrder('new')}>＋ 新建工单</button>}</div></div>
     <div className="dashboard-actions">{can(cloud, 'workOrders') && <button onClick={() => setPage('workOrders')}><b>维修工单</b><span>接车、检查、施工与结账</span></button>}{can(cloud, 'parts') && <button onClick={() => setPage('parts')}><b>库存查询</b><span>配件编号、名称与库存</span></button>}{can(cloud, 'finance') && <button onClick={() => setPage('finance')}><b>财务收款</b><span>收入、支出与欠款</span></button>}{can(cloud, 'campaigns') && <button onClick={() => setPage('campaigns')}><b>活动与保修</b><span>优惠活动和车辆保修</span></button>}</div>
     {showFinance ? <div className="kpi-grid"><Kpi label="今日开单营业额" value={money(metrics.todaySales)} tone="blue" /><Kpi label="今日实收" value={money(metrics.todayReceived)} tone="green" /><Kpi label="今日毛利润" value={money(metrics.todayGross)} tone="purple" /><Kpi label="未收款总额" value={money(metrics.receivables)} tone="orange" /><Kpi label="本月营业额" value={money(metrics.monthSales)} /><Kpi label="本月实收" value={money(metrics.monthReceived)} /><Kpi label="本月支出" value={money(metrics.monthExpenses)} /><Kpi label="本月净经营收益" value={money(metrics.monthNet)} /></div> : <div className="kpi-grid technician-kpis"><Kpi label="分配给我的工单" value={String(visibleOrders.length)} tone="blue" /><Kpi label="等待检查" value={String(visibleOrders.filter(item => item.status === '等待检查').length)} /><Kpi label="维修中" value={String(visibleOrders.filter(item => item.status === '维修中').length)} tone="purple" /><Kpi label="今日完成" value={String(visibleOrders.filter(item => item.date === today() && item.status === '已完成').length)} tone="green" /></div>}
+    {showFinance && <div className="kpi-grid today-expense-kpi"><Kpi label="今日支出（洛杉矶时间）" value={money(metrics.todayExpenses)} tone="orange" /></div>}
     <div className="dashboard-grid"><section className="panel wide"><div className="section-title"><h3>最近工单</h3><button onClick={() => setPage('workOrders')}>查看全部</button></div><table><thead><tr><th>工单</th><th>客户/车辆</th><th>状态</th>{showFinance && <><th>总价</th><th>欠款</th></>}</tr></thead><tbody>{recent.map(order => <tr key={order.id}><td><b>{order.number}</b><small>{order.date}</small></td><td>{order.customer}<small>{order.plate} · {order.vehicle}</small></td><td><Status value={order.status} /></td>{showFinance && <><td>{money(order.total)}</td><td className={order.balance > 0 ? 'warning-text' : ''}>{money(order.balance)}</td></>}</tr>)}</tbody></table>{!recent.length && <Empty text="还没有分配给您的工单。" />}</section>
       <section className="panel"><h3>今日车间</h3><div className="count-list"><div><span>等待批准</span><b>{visibleOrders.filter(item => item.status === '等待批准').length}</b></div><div><span>等待配件</span><b>{visibleOrders.filter(item => item.status === '等待配件').length}</b></div><div><span>维修中</span><b>{visibleOrders.filter(item => item.status === '维修中').length}</b></div><div><span>今日完成</span><b>{visibleOrders.filter(item => item.date === today() && item.status === '已完成').length}</b></div></div></section>
       {can(cloud, 'inventory') && <section className="panel"><h3>库存提醒</h3><div className="count-list"><div><span>低库存配件</span><b className="warning-text">{store.parts.filter(item => item.qty <= item.minimum).length}</b></div><div><span>库存品种</span><b>{store.parts.length}</b></div><div><span>库存成本</span><b>{money(store.parts.reduce((sum, item) => sum + item.qty * item.cost, 0))}</b></div></div><button className="full" onClick={() => setPage('parts')}>打开库存中心</button></section>}
@@ -477,7 +493,7 @@ function Finance({ store, openModal, persist }: ContentProps) {
 
 function SettingsPage({ settings, openModal, store }: ContentProps) {
   const downloadBackup = () => {
-    const payload = JSON.stringify({ product: 'Z&G AUTO ERP', version: '0.79.5', exportedAt: new Date().toISOString(), settings, data: store }, null, 2);
+    const payload = JSON.stringify({ product: 'Z&G AUTO ERP', version: '0.79.6', exportedAt: new Date().toISOString(), settings, data: store }, null, 2);
     const url = URL.createObjectURL(new Blob([payload], { type: 'application/json;charset=utf-8' }));
     const anchor = document.createElement('a');
     anchor.href = url; anchor.download = `ZG_AUTO_ERP_backup_${today()}.json`; anchor.click();
@@ -558,7 +574,7 @@ function initialForm(type: NonNullable<ModalState>['type'], value: Record<string
   if (type === 'driver') return { authorized: false };
   if (type === 'vehicle') return { ownerType: '个人', mileage: 0 };
   if (type === 'part') return { cost: 0, markupPercent: 30, price: 0, qty: 0, minimum: 1 };
-  if (type === 'expense') return { date: today(), category: '配件采购', amount: 0, method: '银行卡' };
+  if (type === 'expense') return { date: losAngelesDateKey(new Date().toISOString()), category: '配件采购', amount: 0, method: '银行卡' };
   if (type === 'campaign') return { start: today(), end: today(), warrantyMonths: 12, warrantyMiles: 12000, partsFree: true, laborFree: false, status: '启用' };
   if (type === 'warranty') return { start: today(), end: today(), mileageLimit: 12000, coverage: '仅配件', status: '有效' };
   return settings as unknown as Record<string, unknown>;
@@ -744,7 +760,7 @@ function losAngelesDateKey(value: string) {
   const part = (type: string) => parts.find(item => item.type === type)?.value || '';
   return `${part('year')}-${part('month')}-${part('day')}`;
 }
-function dashboardMetrics(store: AppStore) { const date = losAngelesDateKey(new Date().toISOString()), month = date.slice(0, 7), valid = store.workOrders.filter(item => item.status !== '已取消'); const todayOrders = valid.filter(item => losAngelesDateKey(item.date) === date), monthOrders = valid.filter(item => losAngelesDateKey(item.date).startsWith(month)); const todayPayments = store.payments.filter(item => losAngelesDateKey(item.date) === date), monthPayments = store.payments.filter(item => losAngelesDateKey(item.date).startsWith(month)), monthExpensesRows = store.expenses.filter(item => losAngelesDateKey(item.date).startsWith(month)); return { todaySales: sum(todayOrders, 'total'), monthSales: sum(monthOrders, 'total'), todayReceived: sum(todayPayments, 'amount'), monthReceived: sum(monthPayments, 'amount'), todayGross: sum(todayOrders, 'grossProfit'), monthGross: sum(monthOrders, 'grossProfit'), monthExpenses: sum(monthExpensesRows, 'amount'), monthNet: sum(monthOrders, 'grossProfit') - sum(monthExpensesRows, 'amount'), receivables: sum(valid, 'balance') }; }
+function dashboardMetrics(store: AppStore) { const date = losAngelesDateKey(new Date().toISOString()), month = date.slice(0, 7), valid = store.workOrders.filter(item => item.status !== '已取消'); const todayOrders = valid.filter(item => losAngelesDateKey(item.date) === date), monthOrders = valid.filter(item => losAngelesDateKey(item.date).startsWith(month)); const todayPayments = store.payments.filter(item => losAngelesDateKey(item.date) === date), monthPayments = store.payments.filter(item => losAngelesDateKey(item.date).startsWith(month)), todayExpensesRows = store.expenses.filter(item => losAngelesDateKey(item.date) === date), monthExpensesRows = store.expenses.filter(item => losAngelesDateKey(item.date).startsWith(month)); return { todaySales: sum(todayOrders, 'total'), monthSales: sum(monthOrders, 'total'), todayReceived: sum(todayPayments, 'amount'), monthReceived: sum(monthPayments, 'amount'), todayExpenses: sum(todayExpensesRows, 'amount'), todayGross: sum(todayOrders, 'grossProfit'), monthGross: sum(monthOrders, 'grossProfit'), monthExpenses: sum(monthExpensesRows, 'amount'), monthNet: sum(monthOrders, 'grossProfit') - sum(monthExpensesRows, 'amount'), receivables: sum(valid, 'balance') }; }
 function sum<T extends object>(rows: T[], key: keyof T) { return rows.reduce((total, row) => total + Number(row[key] || 0), 0); }
 
 registerPwa();

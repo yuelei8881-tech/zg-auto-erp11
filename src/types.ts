@@ -96,10 +96,10 @@ export type WorkOrder = {
 };
 
 export type ApprovalRequest = {
-  id: string; workOrderId: string; workOrderNumber: string;
-  type: '删除工单' | '工单折扣' | '实际结账金额'; status: '待授权' | '已批准' | '已拒绝' | '已执行';
+  id: string; workOrderId?: string; workOrderNumber?: string;
+  type: '删除工单' | '工单折扣' | '实际结账金额' | '支出'; status: '待授权' | '已批准' | '已拒绝' | '已执行';
   requestedBy: string; requestedById: string; requestedAt: string; reason: string;
-  oldValue?: number; newValue?: number; proposedOrder?: WorkOrder;
+  oldValue?: number; newValue?: number; proposedOrder?: WorkOrder; proposedExpense?: Expense;
   approvedBy?: string; approvedById?: string; approvedAt?: string; decisionNote?: string;
 };
 
