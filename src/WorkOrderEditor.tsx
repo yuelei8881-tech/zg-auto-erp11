@@ -6,7 +6,7 @@ import { SignaturePad } from './SignaturePad';
 import type { CloudSession, StaffMember } from './lib/cloud';
 
 type Props = {
-  value?: WorkOrder; customers: Customer[]; vehicles: Vehicle[]; fleets: Fleet[]; drivers: Driver[];
+  value?: WorkOrder; customers: Customer[]; vehicles: Vehicle[]; fleets: Fleet[]; drivers: Driver[]; workOrders: WorkOrder[];
   parts: Part[]; settings: ShopSettings; nextNumber: string;
   onSave: (order: WorkOrder) => Promise<void>; onCancel: () => void;
     onCreateVehicle: (vehicle: Vehicle) => Promise<void>;
@@ -91,7 +91,7 @@ async function compressEvidence(file: File): Promise<string> {
   return compressed;
 }
 
-export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, parts, settings, nextNumber, onSave, onCancel, onCreateVehicle, onPrint, cloud, currentUser, currentUserId, technicians, canApproveReview, canAssignTechnician, canEditPricing, canViewFinancials, canPrintDocuments }: Props) {
+export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, workOrders, parts, settings, nextNumber, onSave, onCancel, onCreateVehicle, onPrint, cloud, currentUser, currentUserId, technicians, canApproveReview, canAssignTechnician, canEditPricing, canViewFinancials, canPrintDocuments }: Props) {
   const [order, setOrder] = useState<WorkOrder>(() => recalculateWorkOrder(value || {
     id: uid(), number: nextNumber, date: today(), customer: '', vehicle: '', status: '等待检查',
     technician: canAssignTechnician ? '' : currentUser, technicianUserId: canAssignTechnician ? '' : currentUserId,
@@ -116,6 +116,18 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, p
   const latestOrder = useRef(order);
   latestOrder.current = order;
   const calculated = useMemo(() => recalculateWorkOrder(order), [order]);
+  const laborPriceHistory = useMemo(() => {
+    const remembered = new Map<string, LaborItem>();
+    [...workOrders]
+      .filter(item => item.id !== value?.id)
+      .sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')))
+      .forEach(savedOrder => (savedOrder.laborItems || []).forEach(item => {
+        const key = item.description.trim().toLocaleLowerCase();
+        if (key && !remembered.has(key)) remembered.set(key, item);
+      }));
+    return remembered;
+  }, [workOrders, value?.id]);
+  const laborHistoryNames = useMemo(() => [...new Set([...laborPriceHistory.values()].map(item => item.description.trim()).filter(Boolean))], [laborPriceHistory]);
   const selectedVehicle = vehicles.find(v => v.id === order.vehicleId);
   const selectedAccountValue = order.fleetId ? `fleet:${order.fleetId}` : order.customerId ? `customer:${order.customerId}` : '';
   const availableVehicles = vehicles.filter(vehicle => !order.customerId && !order.fleetId || vehicle.ownerId === (order.fleetId || order.customerId));
@@ -294,6 +306,17 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, p
   const updateLabor = (id: string, changes: Partial<LaborItem>) => patch({
     laborItems: calculated.laborItems.map(item => item.id === id ? { ...item, ...changes } : item),
   });
+  const applyRememberedLaborPrice = (id: string, description: string) => {
+    const remembered = laborPriceHistory.get(description.trim().toLocaleLowerCase());
+    if (!remembered) return;
+    updateLabor(id, {
+      description: remembered.description,
+      billingMode: remembered.billingMode === 'flat' ? 'flat' : 'hourly',
+      hours: Number(remembered.hours || 0),
+      rate: Number(remembered.rate || 0),
+      flatAmount: Number(remembered.flatAmount || 0),
+    });
+  };
   const removeLabor = (id: string) => patch({ laborItems: calculated.laborItems.filter(item => item.id !== id) });
 
   const addPart = () => patch({ partItems: [...calculated.partItems, {
@@ -441,7 +464,8 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, p
     <section className="form-section"><div className="section-title"><div><h3>人工项目</h3><span className="muted">左右滚动选择常用维修项目，再根据实际情况修改工时和费率。</span></div><button onClick={addLabor}>＋ 自定义工时</button></div>
       <div className="quick-repair-scroll" aria-label="常用维修项目">{quickRepairItems.map(template => { const selected = calculated.laborItems.some(item => item.description === template.name); return <button key={template.name} type="button" className={selected ? 'selected' : ''} onClick={() => toggleQuickRepair(template)}><b>{selected ? '✓ ' : '＋ '}{template.name}</b><small>默认 {template.hours} 工时</small></button>; })}</div>
       <div className="line-table"><div className="line-head labor-grid"><span>项目</span><span>计费</span><span>工时 / 一口价</span><span>费率</span><span>技师</span><span>小计</span><span /></div>
-      {calculated.laborItems.map(item => { const flat = item.billingMode === 'flat'; return <div className="line-row labor-grid" key={item.id}><input value={item.description} onChange={e => updateLabor(item.id, { description: e.target.value })} placeholder="例如：更换水泵" /><select value={flat ? 'flat' : 'hourly'} onChange={e => updateLabor(item.id, { billingMode: e.target.value as 'hourly' | 'flat', flatAmount: e.target.value === 'flat' ? item.total : item.flatAmount })}><option value="hourly">按小时</option><option value="flat">一口价</option></select><input type="number" inputMode="decimal" step={flat ? '0.01' : '0.1'} value={editableNumber(flat ? item.flatAmount : item.hours)} onChange={e => updateLabor(item.id, flat ? { flatAmount: Number(e.target.value) } : { hours: Number(e.target.value) })} aria-label={flat ? '一口价金额' : '工时'} /><input type="number" inputMode="decimal" step="0.01" value={editableNumber(item.rate)} disabled={flat} onChange={e => updateLabor(item.id, { rate: Number(e.target.value) })} /><input value={item.technician || ''} onChange={e => updateLabor(item.id, { technician: e.target.value })} /><b>{canViewFinancials ? money(item.total) : '—'}</b><button className="danger-link" onClick={() => removeLabor(item.id)}>删除</button></div> })}
+      <datalist id="labor-price-history">{laborHistoryNames.map(name => <option key={name} value={name} />)}</datalist>
+      {calculated.laborItems.map(item => { const flat = item.billingMode === 'flat'; return <div className="line-row labor-grid" key={item.id}><input list="labor-price-history" value={item.description} onChange={e => updateLabor(item.id, { description: e.target.value })} onBlur={e => applyRememberedLaborPrice(item.id, e.target.value)} placeholder="例如：更换水泵（同名项目自动带入上次价格）" /><select value={flat ? 'flat' : 'hourly'} onChange={e => updateLabor(item.id, { billingMode: e.target.value as 'hourly' | 'flat', flatAmount: e.target.value === 'flat' ? item.total : item.flatAmount })}><option value="hourly">按小时</option><option value="flat">一口价</option></select><input type="number" inputMode="decimal" step={flat ? '0.01' : '0.1'} value={editableNumber(flat ? item.flatAmount : item.hours)} onChange={e => updateLabor(item.id, flat ? { flatAmount: Number(e.target.value) } : { hours: Number(e.target.value) })} aria-label={flat ? '一口价金额' : '工时'} /><input type="number" inputMode="decimal" step="0.01" value={editableNumber(item.rate)} disabled={flat} onChange={e => updateLabor(item.id, { rate: Number(e.target.value) })} /><input value={item.technician || ''} onChange={e => updateLabor(item.id, { technician: e.target.value })} /><b>{canViewFinancials ? money(item.total) : '—'}</b><button className="danger-link" onClick={() => removeLabor(item.id)}>删除</button></div> })}
       {!calculated.laborItems.length && <div className="empty-line">尚未添加人工项目</div>}</div>
     </section>
 
