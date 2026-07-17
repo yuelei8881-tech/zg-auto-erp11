@@ -42,7 +42,7 @@ export function CustomerApprovalPage({ token }: { token: string }) {
   const finished = data.status === 'approved' || data.status === 'rejected';
   return <main className="approval-public">
     <section className="approval-card">
-      <header><div><strong>Z&amp;G AUTO REPAIR</strong><small>319 Agostino Rd, San Gabriel, CA 91776 · 626-508-0888</small></div><b>{order.number || '维修确认单'}</b></header>
+      <header><div><strong>Z&amp;G AUTO REPAIR</strong><small>319 Agostino Rd, San Gabriel, CA 91776</small><small style={{ whiteSpace: 'nowrap' }}>Tel / 电话：626-508-0888</small></div><b>{order.number || '维修确认单'}</b></header>
       <h1>维修项目在线确认 <small>REPAIR AUTHORIZATION</small></h1>
       <div className="approval-grid"><p><b>客户</b>{order.customer || data.customer_name || '-'}</p><p><b>车辆</b>{order.vehicle || '-'}</p><p><b>车牌</b>{order.plate || '-'}</p><p><b>VIN</b>{order.vin || '-'}</p></div>
       <article><h2>客户描述 / Concern</h2><p>{order.complaint || '-'}</p><h2>检查与建议 / Diagnosis</h2><p>{order.diagnosis || '-'}</p><h2>计划维修 / Proposed Work</h2><p>{order.workPerformed || '-'}</p></article>
