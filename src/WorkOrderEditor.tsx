@@ -443,10 +443,19 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, w
     setEvidenceSaving(true);
     try {
       const additions: EvidencePhoto[] = [];
+      const failedFiles: string[] = [];
       for (const file of Array.from(files)) {
         if (!file.type.startsWith('image/')) continue;
-        additions.push({ id: uid(), category: forcedCategory || evidenceCategory, dataUrl: await compressEvidence(file), fileName: file.name, capturedAt: new Date().toISOString(), capturedBy: currentUser });
+        const id = uid();
+        try {
+          const compressed = await compressEvidence(file);
+          const blob = await (await fetch(compressed)).blob();
+          const uploaded = await cloud.uploadEvidencePhoto(order.id, id, blob);
+          additions.push({ id, category: forcedCategory || evidenceCategory, dataUrl: uploaded.dataUrl, storagePath: uploaded.storagePath, fileName: file.name, capturedAt: new Date().toISOString(), capturedBy: currentUser });
+        } catch { failedFiles.push(file.name); }
       }
+      if (failedFiles.length) alert(`${failedFiles.length} 张照片上传失败，未写入工单。请检查网络后重新选择：\n${failedFiles.join('\n')}`);
+      if (!additions.length) return;
       const evidencePhotos = [...(order.evidencePhotos || []), ...additions];
       const category = forcedCategory || evidenceCategory;
       const exteriorCategories: EvidencePhoto['category'][] = [...requiredViews, '左前', '右前', '左后', '右后', '已有损伤'];

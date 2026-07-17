@@ -49,6 +49,7 @@ export type EvidencePhoto = {
   id: string;
   category: '车牌' | '正前' | '正后' | '左侧' | '右侧' | '左前' | '右前' | '左后' | '右后' | '仪表里程' | '已有损伤' | '故障扫描' | '维修中' | '维修完成' | '其他';
   dataUrl: string;
+  storagePath?: string;
   fileName: string;
   note?: string;
   capturedAt: string;

@@ -20,6 +20,7 @@ export type CloudSession = {
   deleteRecord: (module: string, id: string) => Promise<void>;
   subscribe: (refresh: () => void) => () => void;
   invokeFunction: <T = unknown>(name: string, body: Record<string, unknown>) => Promise<T>;
+  uploadEvidencePhoto: (workOrderId: string, photoId: string, blob: Blob) => Promise<{ storagePath: string; dataUrl: string }>;
   createCustomerApproval: (workOrderId: string, customerEmail: string, customerName: string, snapshot: Record<string, unknown>) => Promise<{ token: string }>;
   listStaff: () => Promise<{ members: StaffMember[]; invites: StaffInvite[] }>;
   createStaffInvite: (email: string, role: string) => Promise<{ activationCode: string }>;
@@ -92,6 +93,18 @@ export async function openCloudSession(user: User): Promise<CloudSession> {
       const payload = (item.payload || {}) as Omit<CloudRow, 'id'>;
       (store[module] ||= []).push({ ...payload, id: String(item.record_id) });
     }
+    const storedPhotos = (store.workOrders || []).flatMap(row => {
+      const photos = Array.isArray(row.evidencePhotos) ? row.evidencePhotos : [];
+      return photos.filter(photo => photo && typeof photo === 'object' && 'storagePath' in photo) as Array<Record<string, JsonValue>>;
+    });
+    const paths = [...new Set(storedPhotos.map(photo => String(photo.storagePath || '')).filter(Boolean))];
+    if (paths.length) {
+      const { data: signedRows, error: signedError } = await client.storage.from('zg-evidence').createSignedUrls(paths, 3600);
+      if (!signedError) {
+        const signedByPath = new Map((signedRows || []).map(item => [String(item.path), String(item.signedUrl || '')]));
+        storedPhotos.forEach(photo => { photo.dataUrl = signedByPath.get(String(photo.storagePath)) || ''; });
+      }
+    }
     return store;
   };
 
@@ -161,6 +174,17 @@ export async function openCloudSession(user: User): Promise<CloudSession> {
       throw new Error(message || `Cloud function ${name} failed (${response.status})`);
     }
     return payload as T;
+  };
+
+  const uploadEvidencePhoto = async (workOrderId: string, photoId: string, blob: Blob) => {
+    const safeWorkOrderId = workOrderId.replace(/[^a-zA-Z0-9_-]/g, '');
+    const safePhotoId = photoId.replace(/[^a-zA-Z0-9_-]/g, '');
+    const storagePath = `${organizationId}/${safeWorkOrderId}/${safePhotoId}.jpg`;
+    const { error } = await client.storage.from('zg-evidence').upload(storagePath, blob, { contentType: 'image/jpeg', upsert: true, cacheControl: '3600' });
+    if (error) throw error;
+    const { data, error: signedError } = await client.storage.from('zg-evidence').createSignedUrl(storagePath, 3600);
+    if (signedError || !data?.signedUrl) throw signedError || new Error('无法读取已上传的证据照片。');
+    return { storagePath, dataUrl: data.signedUrl };
   };
 
   const createCustomerApproval = async (workOrderId: string, customerEmail: string, customerName: string, snapshot: Record<string, unknown>) => {
@@ -234,7 +258,7 @@ export async function openCloudSession(user: User): Promise<CloudSession> {
     organizationName: organization?.name || 'Z&G AUTO REPAIR',
     role: String(membership.role),
     permissions: (membership.permissions || {}) as Record<string, boolean>,
-    loadStore, upsertRecord, deleteRecord, subscribe, invokeFunction, createCustomerApproval, listStaff, createStaffInvite, updateStaff, updateOwnProfile, cancelStaffInvite, deleteStaffByEmail,
+    loadStore, upsertRecord, deleteRecord, subscribe, invokeFunction, uploadEvidencePhoto, createCustomerApproval, listStaff, createStaffInvite, updateStaff, updateOwnProfile, cancelStaffInvite, deleteStaffByEmail,
     signOut: async () => { await client.auth.signOut(); },
   };
 }

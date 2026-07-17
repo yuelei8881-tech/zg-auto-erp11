@@ -61,6 +61,16 @@ function compactWorkOrderSnapshot(value?: WorkOrder) {
   return { ...value, evidencePhotos: [] };
 }
 
+async function evidenceContent(value: string) {
+  if (value.startsWith('data:')) return value.split(',')[1] || '';
+  const response = await fetch(value);
+  if (!response.ok) throw new Error('无法读取证据照片附件。');
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  let binary = '';
+  for (let offset = 0; offset < bytes.length; offset += 0x8000) binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
+  return btoa(binary);
+}
+
 function App({ cloud }: { cloud: CloudSession }) {
   const [store, setStore] = useState<AppStore>(emptyStore);
   const [page, setPage] = useState<Page>('dashboard');
@@ -663,7 +673,7 @@ function SendMenu({ order, settings, store, cloud }: { order: WorkOrder; setting
       ? `<tr><td>Payment Method / 支付方式</td><td style="text-align:right">${escapeHtml(order.paymentMethod)}</td></tr>`
       : '';
     const customerPhotos = (order.evidencePhotos || []).filter(photo => photo.customerVisible && !photo.archivedAt).slice(0, 8);
-    const attachments = customerPhotos.map((photo, index) => ({ filename: `${order.number}-${photo.category}-${index + 1}.jpg`, content: photo.dataUrl.split(',')[1] || '', contentId: `evidence-${index + 1}` }));
+    const attachments = await Promise.all(customerPhotos.map(async (photo, index) => ({ filename: `${order.number}-${photo.category}-${index + 1}.jpg`, content: await evidenceContent(photo.dataUrl), contentId: `evidence-${index + 1}` })));
     const evidenceHtml = customerPhotos.length ? `<h3>Evidence Photos / 证据照片</h3><div>${customerPhotos.map((photo, index) => `<div style="margin:0 0 18px"><img src="cid:evidence-${index + 1}" alt="${escapeHtml(photo.category)}" style="max-width:100%;height:auto;border:1px solid #ccd3df"><p><b>${escapeHtml(photo.category)}</b> · ${escapeHtml(photo.note || '')}<br><small>${escapeHtml(new Date(photo.capturedAt).toLocaleString())}</small></p></div>`).join('')}</div>` : '';
     const baseHtml = `<div style="max-width:760px;margin:auto;font-family:Arial,sans-serif;color:#172033"><div style="text-align:center;border-bottom:3px solid #155eef;padding:18px"><h1 style="margin:0">Z&amp;G AUTO REPAIR</h1><p style="margin:14px 0 4px">${escapeHtml(settings.address)}</p><p style="margin:4px 0;white-space:nowrap">Tel / 电话：${escapeHtml(settings.phone)}</p><h2>${title}</h2><b>${escapeHtml(order.number)}</b></div><table style="width:100%;margin:18px 0;border-collapse:collapse"><tr><td><b>Customer / 客户</b><br>${escapeHtml(order.customer)}</td><td><b>Vehicle / 车辆</b><br>${escapeHtml(order.vehicle)} · ${escapeHtml(order.plate)}</td></tr><tr><td><b>Phone / 电话</b><br>${escapeHtml(order.phone)}</td><td><b>VIN</b><br>${escapeHtml(order.vin)}</td></tr></table><h3>Customer Concern / 客户描述</h3><p>${escapeHtml(order.complaint || '—')}</p><h3>Diagnosis &amp; Work / 检查与维修</h3><p>${escapeHtml(order.diagnosis || '—')}<br>${escapeHtml(order.workPerformed || '')}</p>${laborRows ? `<h3>Labor / 人工</h3><table style="width:100%;border-collapse:collapse" border="1" cellpadding="7"><tr><th>项目</th><th>工时/方式</th><th>金额</th></tr>${laborRows}</table>` : ''}${partRows ? `<h3>Parts / 配件</h3><table style="width:100%;border-collapse:collapse" border="1" cellpadding="7"><tr><th>编号</th><th>名称</th><th>数量</th><th>销售价</th><th>金额</th></tr>${partRows}</table>` : ''}<table style="width:360px;margin:20px 0 20px auto;border-collapse:collapse" border="1" cellpadding="8"><tr><td>Labor / 人工</td><td style="text-align:right">${money(order.laborTotal)}</td></tr><tr><td>Parts / 配件</td><td style="text-align:right">${money(order.partsTotal)}</td></tr><tr><td>Tax / 税</td><td style="text-align:right">${money(order.tax)}</td></tr><tr><td><b>${amountLabel}</b></td><td style="text-align:right"><b>${money(amount)}</b></td></tr>${kind === 'receipt' ? '' : `<tr><td>Balance Due / 欠款</td><td style="text-align:right">${money(order.balance)}</td></tr>`}</table><p style="text-align:center;color:#667085">${escapeHtml(settings.invoiceTerms || 'Thank you for your business.')}</p></div>`;
     const html = baseHtml
