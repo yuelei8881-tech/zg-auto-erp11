@@ -156,3 +156,34 @@
   .focused-editor>.workflow-strip{margin-bottom:10px}
   .focused-editor>.form-section{padding:16px;border-radius:16px}
 }
+
+/* Mobile six-step repair order: one task per screen, with thumb controls. */
+.mobile-workflow-nav,.mobile-editor-actions{display:none}
+@media(max-width:760px){
+  .focused-editor{padding-bottom:170px}
+  .focused-editor>.workflow-strip,.focused-editor>.editor-section-nav{display:none}
+  .mobile-workflow-nav{position:sticky;top:86px;z-index:6;display:grid;grid-template-columns:repeat(6,1fr);gap:3px;margin:0 -4px 12px;padding:5px;border:1px solid #dbe3ef;border-radius:15px;background:rgba(255,255,255,.96);box-shadow:0 7px 20px rgba(15,23,42,.09);backdrop-filter:blur(12px)}
+  .mobile-workflow-nav button{display:grid;justify-items:center;gap:3px;min-width:0;min-height:50px;padding:5px 1px;border:0;border-radius:10px;background:transparent;color:#64748b}
+  .mobile-workflow-nav button span{width:21px;height:21px;display:grid;place-items:center;border-radius:50%;background:#e8edf5;font-size:10px;font-weight:800}
+  .mobile-workflow-nav button b{font-size:10px;white-space:nowrap}
+  .mobile-workflow-nav button.active{background:linear-gradient(145deg,#155eef,#3975ee);color:#fff;box-shadow:0 4px 12px rgba(21,94,239,.22)}
+  .mobile-workflow-nav button.active span{background:#fff;color:#155eef}
+  .focused-editor>.form-section{display:none!important}
+  .focused-editor[data-mobile-step="account"]>.panel-intake:not(:has(.voice-fields)),
+  .focused-editor[data-mobile-step="inspection"]>.panel-intake:has(.voice-fields),
+  .focused-editor[data-mobile-step="inspection"]>.review-section,
+  .focused-editor[data-mobile-step="quote"]>.form-section:has(.labor-grid),
+  .focused-editor[data-mobile-step="quote"]>.form-section:has(.parts-grid),
+  .focused-editor[data-mobile-step="quote"]>.totals-section,
+  .focused-editor[data-mobile-step="approval"]>.signature-section,
+  .focused-editor[data-mobile-step="approval"]>.review-section,
+  .focused-editor[data-mobile-step="repair"]>.panel-intake:has(.voice-fields),
+  .focused-editor[data-mobile-step="repair"]>.evidence-section,
+  .focused-editor[data-mobile-step="checkout"]>.totals-section{display:block!important}
+  .focused-editor[data-mobile-step="quote"]>.totals-section,
+  .focused-editor[data-mobile-step="checkout"]>.totals-section{display:grid!important}
+  .mobile-editor-actions{position:fixed;left:10px;right:10px;bottom:calc(70px + env(safe-area-inset-bottom));z-index:45;display:grid;grid-template-columns:1fr 1.1fr 1fr;align-items:center;gap:8px;padding:9px;border:1px solid #d7e0ed;border-radius:17px;background:rgba(255,255,255,.97);box-shadow:0 12px 34px rgba(15,23,42,.2);backdrop-filter:blur(14px)}
+  .mobile-editor-actions>div{display:grid;justify-items:center;line-height:1.25}.mobile-editor-actions small{font-size:10px;color:#718096}.mobile-editor-actions b{font-size:12px;color:#172b4d}
+  .mobile-editor-actions button{min-width:0;padding:8px 5px;font-size:13px}
+  .editor-head .toolbar{grid-template-columns:1fr 1fr}.editor-head .toolbar .primary{display:none}
+}

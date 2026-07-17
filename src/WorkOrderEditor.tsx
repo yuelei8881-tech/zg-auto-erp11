@@ -21,6 +21,16 @@ type Props = {
 type TranslationSource = 'complaint' | 'diagnosis' | 'workPerformed';
 type TranslationTarget = 'complaintEn' | 'diagnosisEn' | 'workPerformedEn';
 type TranslationStatus = 'idle' | 'translating' | 'done' | 'error';
+type MobileStep = 'account' | 'inspection' | 'quote' | 'approval' | 'repair' | 'checkout';
+
+const mobileSteps: Array<{ key: MobileStep; label: string; short: string }> = [
+  { key: 'account', label: '客户车辆', short: '接车' },
+  { key: 'inspection', label: '检查诊断', short: '检查' },
+  { key: 'quote', label: '报价明细', short: '报价' },
+  { key: 'approval', label: '客户批准', short: '批准' },
+  { key: 'repair', label: '维修证据', short: '维修' },
+  { key: 'checkout', label: '结账交车', short: '结账' },
+];
 
 const translationDefinitions: Array<{ source: TranslationSource; target: TranslationTarget; context: string }> = [
   { source: 'complaint', target: 'complaintEn', context: 'customer concern' },
@@ -100,6 +110,7 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, w
   const [saving, setSaving] = useState(false);
   const [partSearch, setPartSearch] = useState('');
   const [activePanel, setActivePanel] = useState<'intake' | 'evidence' | 'pricing'>('intake');
+  const [mobileStep, setMobileStep] = useState<MobileStep>('account');
   const [addingVehicle, setAddingVehicle] = useState(false);
   const [vehicleSaving, setVehicleSaving] = useState(false);
   const [vinScanning, setVinScanning] = useState(false);
@@ -392,7 +403,18 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, w
     try { await onSave(calculated); } finally { setSaving(false); }
   };
 
-  return <div className="editor-screen focused-editor" data-panel={activePanel}>
+  const selectMobileStep = (step: MobileStep) => {
+    setMobileStep(step);
+    setActivePanel(step === 'account' || step === 'inspection' ? 'intake' : step === 'quote' || step === 'checkout' ? 'pricing' : 'evidence');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+  const mobileStepIndex = mobileSteps.findIndex(item => item.key === mobileStep);
+  const moveMobileStep = (direction: -1 | 1) => {
+    const next = mobileSteps[Math.max(0, Math.min(mobileSteps.length - 1, mobileStepIndex + direction))];
+    if (next) selectMobileStep(next.key);
+  };
+
+  return <div className="editor-screen focused-editor" data-panel={activePanel} data-mobile-step={mobileStep}>
     <div className="editor-head"><div><p className="eyebrow">维修工单 / Repair Order</p><h2>{value ? `编辑 ${order.number}` : '新建维修工单'}</h2></div><div className="toolbar">{canPrintDocuments && <button type="button" onClick={() => onPrint(calculated, 'Repair Order')}>打印工单</button>}<button type="button" onClick={onCancel}>取消</button><button type="button" className="primary" onClick={submit} disabled={saving}>{saving ? '保存中…' : '保存工单'}</button></div></div>
     <div className="workflow-strip">{workflowStages.map((stage, index) => <div key={stage} className={`workflow-step ${workflowStages.indexOf(workflowStage) >= index ? 'done' : ''} ${workflowStage === stage ? 'active' : ''}`}><span className="step-number">{index + 1}</span><strong>{stage}</strong><small>{['前两项即可保存','员工领取并诊断','配件工时与确认','施工及证据留存','收款与交车','流程完成'][index]}</small></div>)}</div>
 
@@ -400,6 +422,10 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, w
       <button type="button" className={activePanel === 'intake' ? 'active' : ''} onClick={() => setActivePanel('intake')}><span>1</span><b>接车资料</b><small>客户、车辆与描述</small></button>
       <button type="button" className={activePanel === 'evidence' ? 'active' : ''} onClick={() => setActivePanel('evidence')}><span>2</span><b>维修与证据</b><small>照片、签字与检查</small></button>
       <button type="button" className={activePanel === 'pricing' ? 'active' : ''} onClick={() => setActivePanel('pricing')}><span>3</span><b>费用结算</b><small>人工、配件与总价</small></button>
+    </nav>
+
+    <nav className="mobile-workflow-nav" aria-label="手机工单流程">
+      {mobileSteps.map((step, index) => <button type="button" key={step.key} className={mobileStep === step.key ? 'active' : ''} onClick={() => selectMobileStep(step.key)}><span>{index + 1}</span><b>{step.short}</b></button>)}
     </nav>
 
     <section className="form-section editor-panel panel-intake"><h3>客户与车辆</h3><div className="form-grid four">
@@ -486,5 +512,6 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, w
       <label>客户支付方式<select value={order.paymentMethod || '未记录'} onChange={e => patch({ paymentMethod: e.target.value === '未记录' ? '' : e.target.value })}>{paymentMethods.map(method => <option key={method}>{method}</option>)}</select></label>
       <label>实际结账金额（仅手动改价需双人授权）<input type="number" step="0.01" placeholder={`自动计算 ${money(calculated.laborTotal + calculated.partsTotal + calculated.outsource + calculated.tax - calculated.discount)}`} value={order.settlementTotal ?? ''} onChange={e => patch({ settlementTotal: e.target.value === '' ? undefined : Number(e.target.value) })} /></label>
     </div><p className="tax-guidance">加州默认规则：系统仅对配件销售额计算销售税；单独列示的维修/安装人工通常不计销售税。制造加工人工等例外请由会计确认。参考：<a href="https://www.cdtfa.ca.gov/formspubs/pub25.pdf" target="_blank" rel="noreferrer">CDTFA Publication 25</a>、<a href="https://www.cdtfa.ca.gov/lawguides/vol1/sutr/1546.html" target="_blank" rel="noreferrer">Regulation 1546</a>。</p></div><div className="totals-card"><div><span>人工（免销售税）</span><b>{money(calculated.laborTotal)}</b></div><div><span>配件</span><b>{money(calculated.partsTotal)}</b></div><div><span>配件销售税</span><b>{money(calculated.tax)}</b></div><div className="grand"><span>总价</span><b>{money(calculated.total)}</b></div><div className="balance"><span>欠款</span><b>{money(calculated.balance)}</b></div></div></section>}
+    <div className="mobile-editor-actions"><button type="button" onClick={() => moveMobileStep(-1)} disabled={mobileStepIndex === 0}>上一步</button><div><small>{mobileStepIndex + 1} / {mobileSteps.length}</small><b>{mobileSteps[mobileStepIndex]?.label}</b></div>{mobileStepIndex < mobileSteps.length - 1 ? <button type="button" className="primary" onClick={() => moveMobileStep(1)}>下一步</button> : <button type="button" className="primary" onClick={submit} disabled={saving}>{saving ? '保存中…' : '保存工单'}</button>}</div>
   </div>;
 }
