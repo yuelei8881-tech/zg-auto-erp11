@@ -77,6 +77,7 @@ export async function openCloudSession(user: User): Promise<CloudSession> {
   if (!membership) throw new Error('无法建立修理厂账号，请联系系统管理员。');
 
   const organizationId = String(membership.organization_id);
+  const evidenceUrlCache = new Map<string, { url: string; expiresAt: number }>();
   const { data: organization, error: organizationError } = await client
     .from('zg_organizations').select('name').eq('id', organizationId).single();
   if (organizationError) throw organizationError;
@@ -98,13 +99,15 @@ export async function openCloudSession(user: User): Promise<CloudSession> {
       return photos.filter(photo => photo && typeof photo === 'object' && 'storagePath' in photo) as Array<Record<string, JsonValue>>;
     });
     const paths = [...new Set(storedPhotos.map(photo => String(photo.storagePath || '')).filter(Boolean))];
-    if (paths.length) {
-      const { data: signedRows, error: signedError } = await client.storage.from('zg-evidence').createSignedUrls(paths, 3600);
+    const now = Date.now();
+    const missingPaths = paths.filter(path => !evidenceUrlCache.has(path) || (evidenceUrlCache.get(path)?.expiresAt || 0) <= now);
+    if (missingPaths.length) {
+      const { data: signedRows, error: signedError } = await client.storage.from('zg-evidence').createSignedUrls(missingPaths, 3600);
       if (!signedError) {
-        const signedByPath = new Map((signedRows || []).map(item => [String(item.path), String(item.signedUrl || '')]));
-        storedPhotos.forEach(photo => { photo.dataUrl = signedByPath.get(String(photo.storagePath)) || ''; });
+        (signedRows || []).forEach(item => evidenceUrlCache.set(String(item.path), { url: String(item.signedUrl || ''), expiresAt: now + 50 * 60 * 1000 }));
       }
     }
+    storedPhotos.forEach(photo => { photo.dataUrl = evidenceUrlCache.get(String(photo.storagePath))?.url || ''; });
     return store;
   };
 
@@ -126,15 +129,26 @@ export async function openCloudSession(user: User): Promise<CloudSession> {
   };
 
   const subscribe = (refresh: () => void) => {
+    let refreshTimer: ReturnType<typeof setTimeout> | undefined;
+    let lastRefreshAt = Date.now();
+    const queueRefresh = () => {
+      if (refreshTimer) clearTimeout(refreshTimer);
+      refreshTimer = setTimeout(() => {
+        refreshTimer = undefined;
+        lastRefreshAt = Date.now();
+        refresh();
+      }, 350);
+    };
     const channel = client.channel(`zg-v075-${organizationId}`)
       .on('postgres_changes', {
         event: '*', schema: 'public', table: 'zg_erp_records',
         filter: `organization_id=eq.${organizationId}`,
-      }, refresh).subscribe();
-    const onFocus = () => refresh();
+      }, queueRefresh).subscribe();
+    const onFocus = () => { if (Date.now() - lastRefreshAt > 30_000) queueRefresh(); };
     window.addEventListener('focus', onFocus);
     return () => {
       window.removeEventListener('focus', onFocus);
+      if (refreshTimer) clearTimeout(refreshTimer);
       void client.removeChannel(channel);
     };
   };
