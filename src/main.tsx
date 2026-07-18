@@ -609,6 +609,29 @@ function Finance({ store, openModal, persist }: ContentProps) {
   return <div className="page"><div className="page-title"><div><p className="eyebrow">Finance Center</p><h2>财务、收款与支出</h2></div><div className="title-actions"><button className="primary-soft" onClick={recordIncome}>＋ 记录收入</button><button className="primary" onClick={() => openModal('expense')}>＋ 记录支出</button></div></div><div className="kpi-grid"><Kpi label="今日实收" value={money(metrics.todayReceived)} tone="green" /><Kpi label="本月实收" value={money(metrics.monthReceived)} /><Kpi label="本月支出" value={money(metrics.monthExpenses)} tone="orange" /><Kpi label="本月净经营收益" value={money(metrics.monthNet)} tone="purple" /></div><div className="split-panels"><section className="panel"><h3>最近收款</h3><table><thead><tr><th>日期/工单</th><th>客户</th><th>方式</th><th>金额</th></tr></thead><tbody>{[...store.payments].sort((a, b) => b.date.localeCompare(a.date)).map(item => <tr key={item.id}><td>{new Date(item.date).toLocaleDateString()}<small>{item.workOrderNumber}</small></td><td>{item.customer}</td><td>{item.method}</td><td className="success-text"><b>{money(item.amount)}</b></td></tr>)}</tbody></table></section><section className="panel"><h3>最近支出</h3><table><thead><tr><th>日期</th><th>类别/收款方</th><th>方式</th><th>金额</th></tr></thead><tbody>{[...store.expenses].sort((a, b) => b.date.localeCompare(a.date)).map(item => <tr key={item.id}><td>{item.date}</td><td>{item.category}<small>{item.vendor}</small></td><td>{item.method || '—'}</td><td className="warning-text"><b>{money(item.amount)}</b></td></tr>)}</tbody></table></section></div></div>;
 }
 
+async function prepareReceiptImage(file: File) {
+  const bitmap = await createImageBitmap(file);
+  const maxSize = 1600;
+  const scale = Math.min(1, maxSize / Math.max(bitmap.width, bitmap.height));
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+  canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+  canvas.getContext('2d')?.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+  bitmap.close();
+  return canvas.toDataURL('image/jpeg', 0.76);
+}
+
+async function detectReceiptBarcode(file: File) {
+  const Detector = (window as unknown as { BarcodeDetector?: new (options?: { formats?: string[] }) => { detect: (source: ImageBitmap) => Promise<Array<{ rawValue?: string }>> } }).BarcodeDetector;
+  if (!Detector) return '';
+  try {
+    const bitmap = await createImageBitmap(file);
+    const results = await new Detector().detect(bitmap);
+    bitmap.close();
+    return results.map(item => item.rawValue || '').find(Boolean) || '';
+  } catch { return ''; }
+}
+
 function SettingsPage({ settings, openModal, store }: ContentProps) {
   const downloadBackup = () => {
     const payload = JSON.stringify({ product: 'Z&G AUTO ERP', version: '0.79.6', exportedAt: new Date().toISOString(), settings, data: store }, null, 2);
@@ -625,6 +648,7 @@ function EntityModal({ state, store, settings, cloud, onClose, onSave }: { state
   const [saving, setSaving] = useState(false);
   const [vinBusy, setVinBusy] = useState(false);
   const [ocrBusy, setOcrBusy] = useState<'plate' | 'vin' | ''>('');
+  const [receiptBusy, setReceiptBusy] = useState(false);
   const fields = formFields(state.type, store);
   const patch = (key: string, value: unknown) => setData(current => {
     const next = { ...current, [key]: value };
@@ -654,9 +678,33 @@ function EntityModal({ state, store, settings, cloud, onClose, onSave }: { state
     } catch (error) { alert(error instanceof Error ? error.message : String(error)); }
     finally { setOcrBusy(''); }
   };
+  const recognizeReceipt = async (file?: File) => {
+    if (!file) return;
+    setReceiptBusy(true);
+    try {
+      const [image, detectedBarcode] = await Promise.all([prepareReceiptImage(file), detectReceiptBarcode(file)]);
+      const result = await cloud.invokeFunction<{ answer?: string }>('zg-ai', {
+        type: 'photo', image,
+        prompt: `Analyze this US business purchase receipt for bookkeeping. Return ONLY valid JSON with this exact shape: {"vendor":"","date":"YYYY-MM-DD","total":0,"tax":0,"paymentMethod":"现金|银行卡|Zelle|支票|ACH|其他","receiptNumber":"","barcode":"","category":"配件采购|工具设备|外包加工|拖车|广告|其他","items":"short Chinese summary","confidence":0}. Use the final charged total, not subtotal. Never invent unreadable values. A barcode detected by the device, if any, is: ${detectedBarcode || 'none'}.`,
+      });
+      const raw = String(result.answer || '').trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '');
+      const parsed = JSON.parse(raw) as { vendor?: string; date?: string; total?: number; tax?: number; paymentMethod?: string; receiptNumber?: string; barcode?: string; category?: string; items?: string; confidence?: number };
+      const total = Number(parsed.total || 0);
+      if (!Number.isFinite(total) || total <= 0) throw new Error('没有可靠识别到小票总金额，请重新拍摄完整、清晰的小票。');
+      const barcode = detectedBarcode || parsed.barcode || '';
+      const receiptNumber = parsed.receiptNumber || '';
+      const duplicateKey = receiptNumber || barcode;
+      if (duplicateKey && store.expenses.some(expense => String(expense.note || '').includes(duplicateKey))) throw new Error(`这张小票可能已经录入（编号 ${duplicateKey}），为避免重复支出，本次没有自动填写。`);
+      const note = [`AI小票识别`, parsed.items && `商品：${parsed.items}`, Number(parsed.tax || 0) > 0 && `税额：${money(Number(parsed.tax))}`, receiptNumber && `收据编号：${receiptNumber}`, barcode && `条码：${barcode}`, `识别可信度：${Math.round(Number(parsed.confidence || 0) * 100)}%`].filter(Boolean).join('\n');
+      setData(current => ({ ...current, vendor: parsed.vendor || current.vendor || '', date: /^\d{4}-\d{2}-\d{2}$/.test(parsed.date || '') ? parsed.date : current.date, amount: total, method: parsed.paymentMethod || current.method || '银行卡', category: parsed.category || current.category || '其他', note }));
+      alert(`小票识别完成：${parsed.vendor || '未识别商家'} · ${money(total)}。\n请检查自动填写内容，确认无误后再点击保存。`);
+    } catch (error) { alert(`小票识别失败：${error instanceof Error ? error.message : String(error)}`); }
+    finally { setReceiptBusy(false); }
+  };
   const submit = async (event: React.FormEvent) => { event.preventDefault(); setSaving(true); try { await onSave(state.type, data); } finally { setSaving(false); } };
   return <div className="modal-backdrop" onMouseDown={event => event.target === event.currentTarget && onClose()}><form className="modal" onSubmit={submit}><div className="modal-head"><div><p className="eyebrow">Z&G AUTO ERP</p><h2>{modalTitle(state.type, Boolean(state.value))}</h2></div><button type="button" onClick={onClose}>×</button></div><div className="form-grid two">{fields.map(field => {
     const photoField = state.type === 'vehicle' && (field.key === 'plate' || field.key === 'vin');
+    if (field.type === 'receiptScan') return <label key={field.key} className="span-2 receipt-scanner"><span>AI购物小票识别</span><strong>{receiptBusy ? '正在读取商家、金额、日期、支付方式和条码…' : '拍摄完整小票或从相册选择；识别后请核对再保存'}</strong><input type="file" accept="image/*" capture="environment" disabled={receiptBusy} onChange={event => { void recognizeReceipt(event.target.files?.[0]); event.currentTarget.value = ''; }} /></label>;
     const fieldValue = field.type === 'number' && Number(data[field.key]) === 0 ? '' : String(data[field.key] ?? '');
     return <label key={field.key} className={field.wide ? 'span-2' : ''}><span>{field.label}</span>{field.type === 'select' ? <select required={field.required} value={String(data[field.key] ?? '')} onChange={e => patch(field.key, e.target.value)}><option value="">请选择</option>{field.options?.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}</select> : field.type === 'textarea' ? <textarea value={String(data[field.key] ?? '')} onChange={e => patch(field.key, e.target.value)} /> : field.type === 'checkbox' ? <input type="checkbox" checked={Boolean(data[field.key])} onChange={e => patch(field.key, e.target.checked)} /> : <div className={field.key === 'vin' || photoField ? 'input-action' : ''}><input required={field.required} type={field.type || 'text'} inputMode={field.type === 'number' ? 'decimal' : undefined} step={field.step} value={fieldValue} onChange={e => patch(field.key, field.type === 'number' ? Number(e.target.value) : e.target.value)} />{field.key === 'vin' && <button type="button" onClick={runVin}>{vinBusy ? '解析中…' : '联网解析'}</button>}{photoField && <span className="ocr-upload"><span>{ocrBusy === field.key ? '识别中…' : field.key === 'plate' ? '📷 拍照识别车牌' : '📷 拍照识别 VIN'}</span><input type="file" accept="image/*" capture="environment" disabled={Boolean(ocrBusy)} onChange={event => { void recognizePhoto(field.key as 'plate' | 'vin', event.target.files?.[0]); event.currentTarget.value = ''; }} /></span>}</div>}</label>;
   })}</div><div className="modal-foot"><button type="button" onClick={onClose}>取消</button><button className="primary" disabled={saving}>{saving ? '保存中…' : '保存'}</button></div></form></div>;
@@ -672,7 +720,7 @@ function formFields(type: NonNullable<ModalState>['type'], store: AppStore): Fie
   if (type === 'driver') return [{ key: 'fleetId', label: '所属公司', type: 'select', options: fleetOptions }, { key: 'company', label: '公司名称' }, { key: 'name', label: '司机姓名', required: true }, { key: 'phone', label: '司机电话', required: true }, { key: 'licenseLast4', label: '驾照后四位' }, { key: 'authorized', label: '允许签字/批准', type: 'checkbox' }, { key: 'notes', label: '备注', type: 'textarea', wide: true }];
   if (type === 'vehicle') return [{ key: 'ownerType', label: '客户类型', type: 'select', required: true, options: ['个人','公司','车队'].map(v => ({ value: v, label: v })) }, { key: 'ownerId', label: '所属客户/公司', type: 'select', options: ownerOptions }, { key: 'ownerName', label: '客户/公司名称', required: true }, { key: 'unit', label: 'Unit Number' }, { key: 'plate', label: '车牌', required: true }, { key: 'state', label: '州' }, { key: 'vin', label: 'VIN（17位）' }, { key: 'year', label: '年份', required: true }, { key: 'make', label: '品牌', required: true }, { key: 'model', label: '车型', required: true }, { key: 'engine', label: '发动机' }, { key: 'color', label: '颜色' }, { key: 'mileage', label: '当前里程', type: 'number' }, { key: 'driverId', label: '常用司机', type: 'select', options: driverOptions }, { key: 'driverName', label: '司机姓名' }, { key: 'driverPhone', label: '司机电话' }, { key: 'notes', label: '车辆备注', type: 'textarea', wide: true }];
   if (type === 'part') return [{ key: 'partNo', label: '配件编号/SKU', required: true }, { key: 'oemNo', label: 'OEM 编号' }, { key: 'name', label: '配件名称', required: true }, { key: 'brand', label: '品牌' }, { key: 'supplier', label: '供应商' }, { key: 'location', label: '货架位置' }, { key: 'cost', label: '真实采购单价（仅内部）', type: 'number', step: '0.01', required: true }, { key: 'markupPercent', label: '销售加价百分比 %（自动算售价）', type: 'number', step: '0.01', required: true }, { key: 'price', label: '客户销售单价（可手动修改）', type: 'number', step: '0.01', required: true }, { key: 'qty', label: '当前库存', type: 'number', required: true }, { key: 'minimum', label: '最低库存', type: 'number', required: true }, { key: 'notes', label: '备注', type: 'textarea', wide: true }];
-  if (type === 'expense') return [{ key: 'date', label: '日期', type: 'date', required: true }, { key: 'category', label: '支出类别', type: 'select', required: true, options: ['配件采购','房租','水电','工资','工具设备','外包加工','拖车','保险','广告','退款','其他'].map(v => ({ value: v, label: v })) }, { key: 'vendor', label: '收款方' }, { key: 'amount', label: '金额', type: 'number', step: '0.01', required: true }, { key: 'method', label: '付款方式', type: 'select', options: ['现金','银行卡','Zelle','支票','ACH'].map(v => ({ value: v, label: v })) }, { key: 'note', label: '备注/收据号', type: 'textarea', wide: true }];
+  if (type === 'expense') return [{ key: 'receiptScan', label: 'AI购物小票识别', type: 'receiptScan', wide: true }, { key: 'date', label: '日期', type: 'date', required: true }, { key: 'category', label: '支出类别', type: 'select', required: true, options: ['配件采购','房租','水电','工资','工具设备','外包加工','拖车','保险','广告','退款','其他'].map(v => ({ value: v, label: v })) }, { key: 'vendor', label: '收款方' }, { key: 'amount', label: '金额', type: 'number', step: '0.01', required: true }, { key: 'method', label: '付款方式', type: 'select', options: ['现金','银行卡','Zelle','支票','ACH','其他'].map(v => ({ value: v, label: v })) }, { key: 'note', label: '备注/收据号', type: 'textarea', wide: true }];
   if (type === 'campaign') return [{ key: 'name', label: '活动名称', required: true }, { key: 'status', label: '状态', type: 'select', required: true, options: ['启用','停用'].map(v => ({ value: v, label: v })) }, { key: 'start', label: '开始日期', type: 'date', required: true }, { key: 'end', label: '结束日期', type: 'date', required: true }, { key: 'benefit', label: '活动权益', type: 'textarea', wide: true, required: true }, { key: 'warrantyMonths', label: '保修月数', type: 'number' }, { key: 'warrantyMiles', label: '保修里程', type: 'number' }, { key: 'partsFree', label: '配件免费', type: 'checkbox' }, { key: 'laborFree', label: '人工免费', type: 'checkbox' }, { key: 'terms', label: '活动与保修条款', type: 'textarea', wide: true }];
   if (type === 'warranty') return [{ key: 'vehicleId', label: '车辆', type: 'select', required: true, options: store.vehicles.map(item => ({ value: item.id, label: `${item.plate || '无车牌'} · ${item.year} ${item.make} ${item.model}` })) }, { key: 'item', label: '保修项目', required: true }, { key: 'originalRO', label: '原始工单号' }, { key: 'start', label: '开始日期', type: 'date', required: true }, { key: 'end', label: '到期日期', type: 'date', required: true }, { key: 'mileageLimit', label: '里程上限', type: 'number' }, { key: 'coverage', label: '保障范围', type: 'select', required: true, options: ['仅配件','仅人工','配件和人工'].map(v => ({ value: v, label: v })) }, { key: 'status', label: '状态', type: 'select', required: true, options: ['有效','已使用','已到期','作废'].map(v => ({ value: v, label: v })) }, { key: 'notes', label: '保修说明', type: 'textarea', wide: true }];
   return [{ key: 'shopName', label: '修理厂名称', required: true }, { key: 'phone', label: '电话' }, { key: 'email', label: 'Email' }, { key: 'address', label: '地址', wide: true }, { key: 'defaultLaborRate', label: '默认工时费率', type: 'number', step: '0.01' }, { key: 'defaultTaxRate', label: '默认配件税率 %', type: 'number', step: '0.01' }, { key: 'invoiceTerms', label: '发票条款', type: 'textarea', wide: true }];
