@@ -4,7 +4,13 @@ export const money = (value: number | undefined) => new Intl.NumberFormat('en-US
   style: 'currency', currency: 'USD', minimumFractionDigits: 2,
 }).format(Number(value || 0));
 
-export const today = () => new Date().toISOString().slice(0, 10);
+export const today = () => {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/Los_Angeles', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).formatToParts(new Date());
+  const part = (type: string) => parts.find(item => item.type === type)?.value || '';
+  return `${part('year')}-${part('month')}-${part('day')}`;
+};
 export const uid = () => crypto.randomUUID();
 export const num = (value: unknown) => Number(value || 0);
 
