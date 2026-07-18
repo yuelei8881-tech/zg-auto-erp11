@@ -318,14 +318,14 @@ function App({ cloud }: { cloud: CloudSession }) {
     }
   };
 
-  const receiveStock = async (part: Part) => {
-    const raw = prompt(`${part.partNo} ${part.name}\n当前库存：${part.qty}\n请输入入库数量：`, '1');
+  const receiveStock = async (part: Part, entry?: { qty: number; unitCost: number; reference: string }) => {
+    const raw = entry ? String(entry.qty) : prompt(`${part.partNo} ${part.name}\n当前库存：${part.qty}\n请输入入库数量：`, '1');
     if (!raw) return; const qty = Number(raw); if (!qty || qty <= 0) return alert('请输入正确数量。');
-    const rawCost = prompt(`请输入本次真实采购单价（仅内部可见）：`, String(part.cost || 0));
+    const rawCost = entry ? String(entry.unitCost) : prompt(`请输入本次真实采购单价（仅内部可见）：`, String(part.cost || 0));
     if (rawCost === null) return;
     const unitCost = Number(rawCost);
     if (!Number.isFinite(unitCost) || unitCost < 0) return alert('请输入正确的采购单价。');
-    const reference = prompt('请输入采购单/收据号码（可选）：', '') || '';
+    const reference = entry ? entry.reference : prompt('请输入采购单/收据号码（可选）：', '') || '';
     const next = part.qty + qty;
     await persist('parts', { ...part, qty: next, cost: unitCost });
     await persist('inventoryLogs', { id: uid(), date: new Date().toISOString(), partId: part.id, partNo: part.partNo, partName: part.name, type: '采购入库', change: qty, before: part.qty, after: next, reference, unitCost, totalCost: qty * unitCost } as InventoryLog);
@@ -409,7 +409,7 @@ type ContentProps = {
   setPage: (page: Page) => void; openModal: (type: NonNullable<ModalState>['type'], value?: object) => void;
   setEditingOrder: (value: WorkOrder | 'new' | null) => void;
   persist: <T extends { id: string }>(module: keyof AppStore, row: T) => Promise<void>;
-  remove: (module: keyof AppStore, id: string) => Promise<void>; receiveStock: (part: Part) => Promise<void>;
+  remove: (module: keyof AppStore, id: string) => Promise<void>; receiveStock: (part: Part, entry?: { qty: number; unitCost: number; reference: string }) => Promise<void>;
   addPayment: (order: WorkOrder) => Promise<void>; deleteWorkOrder: (order: WorkOrder) => Promise<void>;
   approveRequest: (request: ApprovalRequest) => Promise<void>; rejectRequest: (request: ApprovalRequest) => Promise<void>;
   claimWorkOrder: (order: WorkOrder) => Promise<void>; completeWorkOrder: (order: WorkOrder) => Promise<void>;
@@ -533,6 +533,20 @@ function Inventory({ store, search, openModal, remove, receiveStock }: ContentPr
   const rows = filterRows(store.parts, combinedQuery);
   const low = rows.filter(item => item.qty <= item.minimum).length;
   const runQuery = () => setPartQuery(draft.trim());
+  useEffect(() => {
+    const body = document.querySelector('.inventory-query-bar')?.closest('section')?.querySelector('tbody');
+    if (!body) return;
+    const quickReceive = (event: Event) => {
+      const target = event.target as HTMLElement;
+      if (target.closest('button, input, select, a, .actions')) return;
+      const row = target.closest('tr');
+      if (!row) return;
+      const index = Array.from(body.children).indexOf(row);
+      if (index >= 0 && rows[index]) void receiveStock(rows[index]);
+    };
+    body.addEventListener('click', quickReceive);
+    return () => body.removeEventListener('click', quickReceive);
+  }, [receiveStock, rows]);
   return <div className="page"><div className="page-title"><div><p className="eyebrow">Parts & Inventory</p><h2>库存管理</h2><p>{rows.length} 种配件 · {low} 项低库存 · 成本 {money(rows.reduce((sum, item) => sum + item.qty * item.cost, 0))}</p><p className="muted">采购价和采购成本仅在内部库存/财务中使用；客户工单、报价单、发票和收据只显示销售价。</p></div><button className="primary" onClick={() => openModal('part')}>＋ 添加配件</button></div><section className="panel"><div className="inventory-query-bar"><input value={draft} onChange={event => setDraft(event.target.value)} onKeyDown={event => event.key === 'Enter' && runQuery()} placeholder="输入配件编号、OEM、名称、品牌、供应商或库位" /><button className="primary" onClick={runQuery}>查询配件</button>{(draft || partQuery) && <button onClick={() => { setDraft(''); setPartQuery(''); }}>清除</button>}</div><table><thead><tr><th>配件编号/名称</th><th>品牌/供应商</th><th>采购成本（内部）</th><th>客户销售价</th><th>库存</th><th>位置</th><th /></tr></thead><tbody>{rows.map(item => <tr className={item.qty <= item.minimum ? 'low-stock' : ''} key={item.id}><td><b>{item.partNo}</b><small>{item.oemNo ? `OEM ${item.oemNo} · ` : ''}{item.name}</small></td><td>{item.brand || '—'}<small>{item.supplier}</small></td><td>{money(item.cost)}</td><td>{money(item.price)}</td><td><b>{item.qty}</b><small>最低 {item.minimum}</small></td><td>{item.location || '—'}</td><td className="actions"><button className="primary-soft" onClick={() => receiveStock(item)}>采购入库</button><button onClick={() => openModal('part', item)}>编辑</button><button className="danger-link" onClick={() => confirm('确定删除配件？') && remove('parts', item.id)}>删除</button></td></tr>)}</tbody></table>{!rows.length && <Empty text="没有找到匹配的库存配件。" />}</section><section className="panel"><h3>最近库存流水</h3><table><thead><tr><th>时间</th><th>配件</th><th>类型</th><th>变化</th><th>结存</th><th>采购成本（内部）</th><th>关联</th></tr></thead><tbody>{[...store.inventoryLogs].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 30).map(log => <tr key={log.id}><td>{new Date(log.date).toLocaleString()}</td><td>{log.partNo}<small>{log.partName}</small></td><td>{log.type}</td><td className={log.change >= 0 ? 'success-text' : 'warning-text'}>{log.change > 0 ? '+' : ''}{log.change}</td><td>{log.after}</td><td>{log.unitCost === undefined ? '—' : <><b>{money(log.unitCost)} / 件</b><small>合计 {money(log.totalCost || 0)}</small></>}</td><td>{log.reference || '—'}</td></tr>)}</tbody></table></section></div>;
 }
 
