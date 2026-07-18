@@ -23,6 +23,7 @@ type TranslationSource = 'complaint' | 'diagnosis' | 'workPerformed';
 type TranslationTarget = 'complaintEn' | 'diagnosisEn' | 'workPerformedEn';
 type TranslationStatus = 'idle' | 'translating' | 'done' | 'error';
 type MobileStep = 'account' | 'inspection' | 'quote' | 'approval' | 'repair' | 'checkout';
+type RepairLibraryItem = { name: string; labor: LaborItem; parts: PartItem[]; total: number; lastUsed: string };
 
 const mobileSteps: Array<{ key: MobileStep; label: string; short: string }> = [
   { key: 'account', label: '接车与照片', short: '接车' },
@@ -155,6 +156,7 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, w
   const [vehicleDraft, setVehicleDraft] = useState({ plate: '', vin: '', year: String(new Date().getFullYear()), make: '', model: '', engine: '', mileage: 0 });
   const [translationStatus, setTranslationStatus] = useState<Record<TranslationSource, TranslationStatus>>({ complaint: 'idle', diagnosis: 'idle', workPerformed: 'idle' });
   const [translationError, setTranslationError] = useState<Record<TranslationSource, string>>({ complaint: '', diagnosis: '', workPerformed: '' });
+  const [repairLibrarySearch, setRepairLibrarySearch] = useState('');
   const lastAutomaticTranslation = useRef<Record<TranslationSource, { source: string; translation: string }>>({
     complaint: { source: '', translation: '' }, diagnosis: { source: '', translation: '' }, workPerformed: { source: '', translation: '' },
   });
@@ -190,6 +192,29 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, w
       });
     return remembered;
   }, [workOrders, value?.id]);
+  const repairLibrary = useMemo(() => {
+    const remembered = new Map<string, RepairLibraryItem>();
+    [...workOrders]
+      .filter(item => item.id !== value?.id && item.status !== '已取消' && !item.archivedAt)
+      .sort((a, b) => `${b.date || ''}-${b.number || ''}`.localeCompare(`${a.date || ''}-${a.number || ''}`))
+      .forEach(savedOrder => (savedOrder.laborItems || []).forEach(labor => {
+        const name = labor.description.trim();
+        const key = name.toLocaleLowerCase();
+        if (!key || remembered.has(key)) return;
+        const linkedParts = labor.linkedPartItemId
+          ? (savedOrder.partItems || []).filter(part => part.id === labor.linkedPartItemId && !!(part.partId || part.partNo?.trim() || part.name?.trim()))
+          : (savedOrder.laborItems || []).filter(item => item.description.trim()).length === 1
+            ? (savedOrder.partItems || []).filter(part => !!(part.partId || part.partNo?.trim() || part.name?.trim()))
+            : [];
+        remembered.set(key, {
+          name, labor, parts: linkedParts,
+          total: Number(labor.total || 0) + linkedParts.reduce((sum, part) => sum + Number(part.total || 0), 0),
+          lastUsed: savedOrder.date || '',
+        });
+      }));
+    const query = repairLibrarySearch.trim().toLocaleLowerCase();
+    return [...remembered.values()].filter(item => !query || [item.name, ...item.parts.flatMap(part => [part.partNo, part.name])].some(text => String(text || '').toLocaleLowerCase().includes(query))).slice(0, 30);
+  }, [repairLibrarySearch, value?.id, workOrders]);
   const selectedVehicle = vehicles.find(v => v.id === order.vehicleId);
   const selectedAccountValue = order.fleetId ? `fleet:${order.fleetId}` : order.customerId ? `customer:${order.customerId}` : '';
   const availableVehicles = vehicles.filter(vehicle => !order.customerId && !order.fleetId || vehicle.ownerId === (order.fleetId || order.customerId));
@@ -423,6 +448,19 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, w
       laborItems: [...calculated.laborItems, { id: uid(), linkedPartItemId: lineId, description: '', hours: 1, rate: settings.defaultLaborRate, technician: order.technician || '', total: settings.defaultLaborRate, billingMode: 'hourly', flatAmount: 0 }],
     });
   };
+  const addRepairLibraryItem = (template: RepairLibraryItem) => {
+    const sourceParts = template.parts.length ? template.parts : [{
+      id: '', partId: '', partNo: '', name: '', qty: 1, cost: 0, price: 0, total: 0, costTotal: 0, serviceOnly: true,
+    } as PartItem];
+    const addedParts = sourceParts.map(source => ({ ...source, id: uid(), serviceOnly: !source.partId && !source.partNo?.trim() && !source.name?.trim() }));
+    const firstLineId = addedParts[0].id;
+    const addedLabor: LaborItem = {
+      ...template.labor, id: uid(), linkedPartItemId: firstLineId, technician: order.technician || template.labor.technician || '',
+      billingMode: template.labor.billingMode === 'flat' ? 'flat' : 'hourly',
+      hours: Number(template.labor.hours || 0), rate: Number(template.labor.rate || 0), flatAmount: Number(template.labor.flatAmount || 0),
+    };
+    patch({ partItems: [...calculated.partItems, ...addedParts], laborItems: [...calculated.laborItems, addedLabor] });
+  };
   const inventoryMatches = useMemo(() => {
     const query = partSearch.trim().toLowerCase();
     if (!query) return [];
@@ -620,6 +658,11 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, w
       <div className="review-actions"><button type="button" onClick={submitReview} disabled={reviewStatus === '待审查'}>完成检查并提交审查</button>{reviewStatus === '待审查' && canApproveReview && <><button type="button" className="primary" onClick={approveReview}>批准并开始维修</button><button type="button" className="danger-soft" onClick={returnReview}>退回补充</button></>}{reviewStatus === '待审查' && !canApproveReview && <span className="muted">已提交，等待经理或老板审查</span>}</div>
       {(order.submittedForReviewAt || order.reviewedAt) && <div className="review-meta">{order.submittedForReviewAt && <span>提交：{new Date(order.submittedForReviewAt).toLocaleString()}</span>}{order.reviewedAt && <span>审查：{order.reviewedBy} · {new Date(order.reviewedAt).toLocaleString()}</span>}</div>}
       {!!order.reviewHistory?.length && <div className="review-history"><b>审查记录</b>{[...order.reviewHistory].reverse().map(item => <div key={item.id}><span>{item.action}</span><small>{item.by} · {new Date(item.at).toLocaleString()}{item.note ? ` · ${item.note}` : ''}</small></div>)}</div>}
+    </section>
+
+    <section className="form-section repair-library-section"><div className="section-title"><div><h3>维修项目资料库</h3><span className="muted">系统从已保存工单自动学习配件、数量、工时和价格；点击项目即可整套带入。</span></div><b>{repairLibrary.length} 个可用项目</b></div>
+      <div className="repair-library-search"><input value={repairLibrarySearch} onChange={event => setRepairLibrarySearch(event.target.value)} placeholder="搜索维修项目或配件，例如：刹车片、机油、火花塞" />{repairLibrarySearch && <button type="button" onClick={() => setRepairLibrarySearch('')}>清除</button>}</div>
+      <div className="repair-library-list">{repairLibrary.map(template => <button type="button" key={template.name.toLocaleLowerCase()} onClick={() => addRepairLibraryItem(template)}><span><b>＋ {template.name}</b><small>{template.parts.length ? template.parts.map(part => `${part.name || part.partNo} ×${part.qty}`).join('、') : '仅人工，无配件'}</small></span><span><b>{money(template.total)}</b><small>{template.labor.billingMode === 'flat' ? '一口价' : `${template.labor.hours} 工时 × ${money(template.labor.rate)}`}</small></span></button>)}{!repairLibrary.length && <div className="empty-line">保存第一张包含人工项目的工单后，项目会自动出现在这里。</div>}</div>
     </section>
 
     <section className="form-section"><div className="section-title"><div><h3>人工项目</h3><span className="muted">左右滚动选择常用维修项目，再根据实际情况修改工时和费率。</span></div><button onClick={addLabor}>＋ 自定义工时</button></div>
