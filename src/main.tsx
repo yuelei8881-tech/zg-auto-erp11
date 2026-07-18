@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { FormalGate } from './FormalGate';
 import type { CloudRow, CloudSession, CloudStore, StaffMember } from './lib/cloud';
 import { decodeVin, escapeHtml, money, recalculateWorkOrder, today, uid } from './lib/erp';
+import { MONTHLY_BILLING_TERM, MONTHLY_PAYMENT_METHOD, nextMonthlyBillingDate } from './lib/billing';
 import type { AppStore, ApprovalRequest, Campaign, ChangeLog, Customer, Driver, Expense, Fleet, InventoryLog, Part, Payment, ShopSettings, Vehicle, Warranty, WorkOrder } from './types';
 import { WorkOrderEditor } from './WorkOrderEditor';
 import { SmartTools } from './SmartTools';
@@ -278,8 +279,9 @@ function App({ cloud }: { cloud: CloudSession }) {
     if (paymentChoice === null) return;
     const choice = paymentChoice.trim();
     if (choice === '3' || choice === '月结') {
-      await persist('workOrders', recalculateWorkOrder({ ...order, paymentMethod: '月结' }));
-      return alert(`已设为月结。\n今日收入不增加，剩余欠款仍为 ${money(order.balance)}。`);
+      const billingDueDate = nextMonthlyBillingDate();
+      await persist('workOrders', recalculateWorkOrder({ ...order, paymentMethod: MONTHLY_PAYMENT_METHOD, billingDueDate }));
+      return alert(`已设为月结，结账日为 ${billingDueDate}。\n今日收入不增加，剩余欠款仍为 ${money(order.balance)}。`);
     }
     if (!['1', '2', '全额付款', '部分付款'].includes(choice)) return alert('请选择 1、2 或 3。');
     let amount = order.balance;
@@ -290,7 +292,7 @@ function App({ cloud }: { cloud: CloudSession }) {
       amount = Number(raw);
       if (!amount || amount <= 0 || amount >= order.balance - 0.009) return alert('部分付款金额必须大于 0，并且小于当前欠款。若已付清请选择“全额付款”。');
     }
-    const method = prompt('实际付款方式：现金 / 刷卡 / 银行转账或 ACH / 支票 / Zelle / 扫码支付 / 在线付款 / 其他', order.paymentMethod === '月结' ? '现金' : order.paymentMethod || '现金') || '现金';
+    const method = prompt('实际付款方式：现金 / 刷卡 / 银行转账或 ACH / 支票 / Zelle / 扫码支付 / 在线付款 / 其他', order.paymentMethod?.startsWith('月结') ? '现金' : order.paymentMethod || '现金') || '现金';
     const payment: Payment = { id: uid(), date: new Date().toISOString(), workOrderId: order.id, workOrderNumber: order.number, customer: order.customer, amount, method, note: paymentType };
     paymentInFlight.current.add(order.id);
     setSyncing(true);
@@ -450,7 +452,7 @@ function Dashboard({ store, setPage, setEditingOrder, cloud, actorName, editOwnP
 
 function Customers({ store, search, openModal, remove }: ContentProps) {
   const rows = filterRows(store.customers, search);
-  return <ListPage title="客户管理" subtitle="个人、公司和车队客户统一管理" action="＋ 添加客户" onAction={() => openModal('customer')}><table><thead><tr><th>客户</th><th>类型</th><th>电话</th><th>邮箱/地址</th><th>车辆</th><th /></tr></thead><tbody>{rows.map(item => <tr key={item.id}><td><b>{item.name}</b><small>{item.membership || '普通客户'}</small></td><td>{item.type}</td><td>{item.phone}<small>{item.secondaryPhone}</small></td><td>{item.email || '—'}<small>{item.address}</small></td><td>{store.vehicles.filter(vehicle => vehicle.ownerId === item.id).length}</td><td className="actions"><button onClick={() => openModal('customer', item)}>编辑</button><button className="danger-link" onClick={() => confirm('确定删除客户？') && remove('customers', item.id)}>删除</button></td></tr>)}</tbody></table>{!rows.length && <Empty text="没有找到客户。" />}</ListPage>;
+  return <ListPage title="客户管理" subtitle="个人、公司和车队客户统一管理" action="＋ 添加客户" onAction={() => openModal('customer')}><table><thead><tr><th>客户</th><th>类型</th><th>电话</th><th>邮箱/地址</th><th>车辆</th><th /></tr></thead><tbody>{rows.map(item => <tr key={item.id}><td><b>{item.name}</b><small>{item.billingTerms || item.membership || '普通客户'}</small></td><td>{item.type}</td><td>{item.phone}<small>{item.secondaryPhone}</small></td><td>{item.email || '—'}<small>{item.address}</small></td><td>{store.vehicles.filter(vehicle => vehicle.ownerId === item.id).length}</td><td className="actions"><button onClick={() => openModal('customer', item)}>编辑</button><button className="danger-link" onClick={() => confirm('确定删除客户？') && remove('customers', item.id)}>删除</button></td></tr>)}</tbody></table>{!rows.length && <Empty text="没有找到客户。" />}</ListPage>;
 }
 
 function Fleets({ store, search, openModal, remove }: ContentProps) {
@@ -576,8 +578,8 @@ function formFields(type: NonNullable<ModalState>['type'], store: AppStore): Fie
   const fleetOptions = store.fleets.map(item => ({ value: item.id, label: item.company }));
   const ownerOptions = [...store.customers.map(item => ({ value: item.id, label: `${item.name}（${item.type}）` })), ...store.fleets.map(item => ({ value: item.id, label: `${item.company}（车队）` }))];
   const driverOptions = store.drivers.map(item => ({ value: item.id, label: `${item.name} · ${item.phone}` }));
-  if (type === 'customer') return [{ key: 'type', label: '客户类型', type: 'select', required: true, options: ['个人','公司','车队'].map(v => ({ value: v, label: v })) }, { key: 'name', label: '客户/公司名称', required: true }, { key: 'phone', label: '手机号码', required: true }, { key: 'secondaryPhone', label: '备用电话' }, { key: 'email', label: 'Email', type: 'email' }, { key: 'address', label: '地址', wide: true }, { key: 'membership', label: '会员等级', type: 'select', options: ['普通会员','银卡会员','金卡会员','VIP会员'].map(v => ({ value: v, label: v })) }, { key: 'notes', label: '备注', type: 'textarea', wide: true }];
-  if (type === 'fleet') return [{ key: 'company', label: '公司名称', required: true }, { key: 'contact', label: '主要联系人', required: true }, { key: 'phone', label: '联系电话', required: true }, { key: 'billingEmail', label: '账单邮箱', type: 'email' }, { key: 'terms', label: '付款条款', type: 'select', options: ['现场付款','Net 15','Net 30','Net 45'].map(v => ({ value: v, label: v })) }, { key: 'creditLimit', label: '信用额度', type: 'number', step: '0.01' }, { key: 'notes', label: '车队备注', type: 'textarea', wide: true }];
+  if (type === 'customer') return [{ key: 'type', label: '客户类型', type: 'select', required: true, options: ['个人','公司','车队'].map(v => ({ value: v, label: v })) }, { key: 'name', label: '客户/公司名称', required: true }, { key: 'phone', label: '手机号码', required: true }, { key: 'secondaryPhone', label: '备用电话' }, { key: 'email', label: 'Email', type: 'email' }, { key: 'address', label: '地址', wide: true }, { key: 'membership', label: '会员等级', type: 'select', options: ['普通会员','银卡会员','金卡会员','VIP会员'].map(v => ({ value: v, label: v })) }, { key: 'billingTerms', label: '结账方式', type: 'select', options: ['现场付款', MONTHLY_BILLING_TERM].map(v => ({ value: v, label: v })) }, { key: 'notes', label: '备注', type: 'textarea', wide: true }];
+  if (type === 'fleet') return [{ key: 'company', label: '公司名称', required: true }, { key: 'contact', label: '主要联系人', required: true }, { key: 'phone', label: '联系电话', required: true }, { key: 'billingEmail', label: '账单邮箱', type: 'email' }, { key: 'terms', label: '付款条款', type: 'select', options: ['现场付款', MONTHLY_BILLING_TERM,'Net 15','Net 30','Net 45'].map(v => ({ value: v, label: v })) }, { key: 'creditLimit', label: '信用额度', type: 'number', step: '0.01' }, { key: 'notes', label: '车队备注', type: 'textarea', wide: true }];
   if (type === 'driver') return [{ key: 'fleetId', label: '所属公司', type: 'select', options: fleetOptions }, { key: 'company', label: '公司名称' }, { key: 'name', label: '司机姓名', required: true }, { key: 'phone', label: '司机电话', required: true }, { key: 'licenseLast4', label: '驾照后四位' }, { key: 'authorized', label: '允许签字/批准', type: 'checkbox' }, { key: 'notes', label: '备注', type: 'textarea', wide: true }];
   if (type === 'vehicle') return [{ key: 'ownerType', label: '客户类型', type: 'select', required: true, options: ['个人','公司','车队'].map(v => ({ value: v, label: v })) }, { key: 'ownerId', label: '所属客户/公司', type: 'select', options: ownerOptions }, { key: 'ownerName', label: '客户/公司名称', required: true }, { key: 'unit', label: 'Unit Number' }, { key: 'plate', label: '车牌', required: true }, { key: 'state', label: '州' }, { key: 'vin', label: 'VIN（17位）' }, { key: 'year', label: '年份', required: true }, { key: 'make', label: '品牌', required: true }, { key: 'model', label: '车型', required: true }, { key: 'engine', label: '发动机' }, { key: 'color', label: '颜色' }, { key: 'mileage', label: '当前里程', type: 'number' }, { key: 'driverId', label: '常用司机', type: 'select', options: driverOptions }, { key: 'driverName', label: '司机姓名' }, { key: 'driverPhone', label: '司机电话' }, { key: 'notes', label: '车辆备注', type: 'textarea', wide: true }];
   if (type === 'part') return [{ key: 'partNo', label: '配件编号/SKU', required: true }, { key: 'oemNo', label: 'OEM 编号' }, { key: 'name', label: '配件名称', required: true }, { key: 'brand', label: '品牌' }, { key: 'supplier', label: '供应商' }, { key: 'location', label: '货架位置' }, { key: 'cost', label: '真实采购单价（仅内部）', type: 'number', step: '0.01', required: true }, { key: 'markupPercent', label: '销售加价百分比 %（自动算售价）', type: 'number', step: '0.01', required: true }, { key: 'price', label: '客户销售单价（可手动修改）', type: 'number', step: '0.01', required: true }, { key: 'qty', label: '当前库存', type: 'number', required: true }, { key: 'minimum', label: '最低库存', type: 'number', required: true }, { key: 'notes', label: '备注', type: 'textarea', wide: true }];

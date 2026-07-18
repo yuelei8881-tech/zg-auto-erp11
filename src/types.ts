@@ -1,6 +1,6 @@
 export type Customer = {
   id: string; type: '个人' | '公司' | '车队'; name: string; phone: string;
-  secondaryPhone?: string; email?: string; address?: string; membership?: string; notes?: string;
+  secondaryPhone?: string; email?: string; address?: string; membership?: string; billingTerms?: string; notes?: string;
 };
 
 export type Fleet = {
@@ -68,7 +68,7 @@ export type WorkOrder = {
   technician?: string; status: WorkOrderStatus; laborItems: LaborItem[]; partItems: PartItem[];
   outsource: number; discount: number; taxRate: number; taxOverride?: number; laborTotal: number; partsTotal: number;
   partsCost: number; tax: number; total: number; paid: number; balance: number; grossProfit: number;
-  paymentMethod?: string; inventoryCommitted?: boolean; notes?: string;
+  paymentMethod?: string; billingDueDate?: string; inventoryCommitted?: boolean; notes?: string;
   technicianUserId?: string;
   claimedAt?: string; claimedBy?: string;
   technicianCompletedAt?: string; completedBy?: string; completedByUserId?: string;

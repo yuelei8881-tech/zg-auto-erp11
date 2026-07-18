@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Customer, Driver, EvidencePhoto, Fleet, InspectionChecklist, LaborItem, Part, PartItem, ShopSettings, Vehicle, WorkOrder, WorkOrderStatus } from './types';
 import { decodeVin, money, recalculateWorkOrder, today, uid } from './lib/erp';
+import { MONTHLY_BILLING_TERM, MONTHLY_PAYMENT_METHOD, nextMonthlyBillingDate } from './lib/billing';
 import { recognizeVehiclePhoto } from './lib/ocr';
 import { SignaturePad } from './SignaturePad';
 import type { CloudSession, StaffMember } from './lib/cloud';
@@ -75,7 +76,7 @@ const quickRepairItems: Array<{ name: string; hours: number }> = [
   { name: '全车安全检查', hours: 1 },
   { name: '路试和故障确认', hours: 0.5 },
 ];
-const paymentMethods = ['未记录', '现金', '刷卡', '银行转账 / ACH', '支票', 'Zelle', '扫码支付', '在线付款', '月结', '其他'];
+const paymentMethods = ['未记录', '现金', '刷卡', '银行转账 / ACH', '支票', 'Zelle', '扫码支付', '在线付款', MONTHLY_PAYMENT_METHOD, '其他'];
 
 async function compressEvidence(file: File): Promise<string> {
   const source = await new Promise<string>((resolve, reject) => {
@@ -298,10 +299,13 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, w
     const [kind, id = ''] = value.split(':');
     const fleet = kind === 'fleet' ? fleets.find(item => item.id === id) : undefined;
     const customer = kind === 'customer' ? customers.find(item => item.id === id) : undefined;
+    const monthlyBilling = customer?.billingTerms === MONTHLY_BILLING_TERM || fleet?.terms === MONTHLY_BILLING_TERM;
     patch({
       customerId: customer?.id || '', customer: customer?.name || fleet?.company || '', phone: customer?.phone || fleet?.phone || '',
       fleetId: fleet?.id || '', company: fleet?.company || '', driverId: '', driver: '', driverPhone: '',
       vehicleId: '', vehicle: '', plate: '', vin: '', mileage: 0,
+      paymentMethod: monthlyBilling ? MONTHLY_PAYMENT_METHOD : '',
+      billingDueDate: monthlyBilling ? nextMonthlyBillingDate() : undefined,
     });
   };
 
@@ -592,7 +596,8 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, w
       <label>配件销售税率 %（人工不计税）<input type="number" inputMode="decimal" step="0.01" value={editableNumber(order.taxRate)} onChange={e => patch({ taxRate: Number(e.target.value) })} /></label>
       <label>手动税额（留空自动计算）<input type="number" inputMode="decimal" min="0" step="0.01" placeholder={`自动 ${money(calculated.partsTotal * calculated.taxRate / 100)}`} value={order.taxOverride ?? ''} onChange={e => patch({ taxOverride: e.target.value === '' ? undefined : Math.max(0, Number(e.target.value)) })} /></label>
       <label>累计已付款（请使用工单列表“收款”记录流水）<input type="number" inputMode="decimal" step="0.01" value={editableNumber(order.paid)} disabled title="为确保今日收入准确，请保存工单后使用工单列表中的收款按钮。" /></label>
-      <label>客户支付方式<select value={order.paymentMethod || '未记录'} onChange={e => patch({ paymentMethod: e.target.value === '未记录' ? '' : e.target.value })}>{paymentMethods.map(method => <option key={method}>{method}</option>)}</select></label>
+      <label>客户支付方式<select value={order.paymentMethod === '月结' ? MONTHLY_PAYMENT_METHOD : (order.paymentMethod || '未记录')} onChange={e => { const paymentMethod = e.target.value === '未记录' ? '' : e.target.value; patch({ paymentMethod, billingDueDate: paymentMethod === MONTHLY_PAYMENT_METHOD ? (order.billingDueDate || nextMonthlyBillingDate()) : undefined }); }}>{paymentMethods.map(method => <option key={method}>{method}</option>)}</select></label>
+      {(order.paymentMethod === MONTHLY_PAYMENT_METHOD || order.paymentMethod === '月结') && <label>月结结账日<input type="date" value={order.billingDueDate || nextMonthlyBillingDate()} onChange={e => patch({ billingDueDate: e.target.value })} /></label>}
       <label>实际结账金额（仅手动改价需双人授权）<input type="number" step="0.01" placeholder={`自动计算 ${money(calculated.laborTotal + calculated.partsTotal + calculated.outsource + calculated.tax - calculated.discount)}`} value={order.settlementTotal ?? ''} onChange={e => patch({ settlementTotal: e.target.value === '' ? undefined : Number(e.target.value) })} /></label>
     </div><p className="tax-guidance">加州默认规则：系统仅对配件销售额计算销售税；单独列示的维修/安装人工通常不计销售税。制造加工人工等例外请由会计确认。参考：<a href="https://www.cdtfa.ca.gov/formspubs/pub25.pdf" target="_blank" rel="noreferrer">CDTFA Publication 25</a>、<a href="https://www.cdtfa.ca.gov/lawguides/vol1/sutr/1546.html" target="_blank" rel="noreferrer">Regulation 1546</a>。</p></div><div className="totals-card"><div><span>人工（免销售税）</span><b>{money(calculated.laborTotal)}</b></div><div><span>配件</span><b>{money(calculated.partsTotal)}</b></div><div><span>配件销售税</span><b>{money(calculated.tax)}</b></div><div className="grand"><span>总价</span><b>{money(calculated.total)}</b></div><div className="balance"><span>欠款</span><b>{money(calculated.balance)}</b></div></div></section>}
     <div className="mobile-editor-actions"><div><small>{mobileStepIndex + 1} / {mobileSteps.length} · {draftStatus === 'saving' ? '正在自动保存…' : draftStatus === 'saved' ? '草稿已保存在本机' : draftStatus === 'error' ? '本机草稿保存失败' : '自动保存已开启'}</small><b>{mobileSteps[mobileStepIndex]?.label}</b></div><button type="button" onClick={() => moveMobileStep(-1)} disabled={mobileStepIndex === 0}>上一步</button><button type="button" className="primary" onClick={saveProgress} disabled={saving}>{saving ? '保存中…' : '保存进度'}</button><button type="button" onClick={() => moveMobileStep(1)} disabled={mobileStepIndex === mobileSteps.length - 1}>下一步</button></div>
