@@ -175,6 +175,21 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, w
     return remembered;
   }, [workOrders, value?.id]);
   const laborHistoryNames = useMemo(() => [...new Set([...laborPriceHistory.values()].map(item => item.description.trim()).filter(Boolean))], [laborPriceHistory]);
+  const partLaborHistory = useMemo(() => {
+    const remembered = new Map<string, LaborItem[]>();
+    [...workOrders]
+      .filter(item => item.id !== value?.id)
+      .sort((a, b) => `${b.date || ''}-${b.number || ''}`.localeCompare(`${a.date || ''}-${a.number || ''}`))
+      .forEach(savedOrder => {
+        const laborItems = (savedOrder.laborItems || []).filter(item => item.description.trim());
+        if (!laborItems.length) return;
+        (savedOrder.partItems || []).forEach(partItem => {
+          const keys = [partItem.partId && `id:${partItem.partId}`, partItem.partNo && `no:${partItem.partNo.trim().toLocaleLowerCase()}`].filter(Boolean) as string[];
+          keys.forEach(key => { if (!remembered.has(key)) remembered.set(key, laborItems); });
+        });
+      });
+    return remembered;
+  }, [workOrders, value?.id]);
   const selectedVehicle = vehicles.find(v => v.id === order.vehicleId);
   const selectedAccountValue = order.fleetId ? `fleet:${order.fleetId}` : order.customerId ? `customer:${order.customerId}` : '';
   const availableVehicles = vehicles.filter(vehicle => !order.customerId && !order.fleetId || vehicle.ownerId === (order.fleetId || order.customerId));
@@ -411,15 +426,33 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, w
       .some(value => String(value || '').toLowerCase().includes(query))).slice(0, 12);
   }, [partSearch, parts]);
   const addInventoryPart = (part: Part) => {
-    patch({ partItems: [...calculated.partItems, {
+    const nextParts = [...calculated.partItems, {
       id: uid(), partId: part.id, partNo: part.partNo, name: part.name, qty: 1,
       cost: part.cost || 0, price: part.price || 0, total: part.price || 0, costTotal: part.cost || 0,
-    }] });
+    }];
+    patch({ partItems: nextParts, laborItems: laborItemsForPart(part) });
     setPartSearch('');
   };
   const choosePart = (lineId: string, partId: string) => {
     const part = parts.find(item => item.id === partId);
-    updatePart(lineId, { partId, partNo: part?.partNo || '', name: part?.name || '', cost: part?.cost || 0, price: part?.price || 0 });
+    const nextParts = calculated.partItems.map(item => item.id === lineId ? { ...item, partId, partNo: part?.partNo || '', name: part?.name || '', cost: part?.cost || 0, price: part?.price || 0 } : item);
+    patch({ partItems: nextParts, laborItems: part ? laborItemsForPart(part) : calculated.laborItems });
+  };
+  const laborItemsForPart = (part: Part) => {
+    const remembered = partLaborHistory.get(`id:${part.id}`)
+      || partLaborHistory.get(`no:${part.partNo.trim().toLocaleLowerCase()}`)
+      || [];
+    const existing = new Set(calculated.laborItems.map(item => item.description.trim().toLocaleLowerCase()).filter(Boolean));
+    const additions = remembered
+      .filter(item => !existing.has(item.description.trim().toLocaleLowerCase()))
+      .map(item => ({
+        ...item,
+        id: uid(),
+        technician: order.technician || item.technician || '',
+        billingMode: item.billingMode === 'flat' ? 'flat' as const : 'hourly' as const,
+        hours: Number(item.hours || 0), rate: Number(item.rate || 0), flatAmount: Number(item.flatAmount || 0),
+      }));
+    return [...calculated.laborItems, ...additions];
   };
   const updatePart = (id: string, changes: Partial<PartItem>) => patch({
     partItems: calculated.partItems.map(item => item.id === id ? { ...item, ...changes } : item),
@@ -582,7 +615,7 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, w
       {!calculated.laborItems.length && <div className="empty-line">尚未添加人工项目</div>}</div>
     </section>
 
-    <section className="form-section"><div className="section-title"><h3>配件项目</h3><button onClick={addPart}>＋ 手动配件</button></div>
+    <section className="form-section"><div className="section-title"><div><h3>配件项目</h3><span className="muted">选择库存配件时，自动带入该配件上次使用的人工项目和工时费。</span></div><button onClick={addPart}>＋ 手动配件</button></div>
       <div className="work-order-part-search"><input value={partSearch} onChange={event => setPartSearch(event.target.value)} placeholder="搜索仓库库存：配件编号、OEM、名称、品牌或供应商" />{partSearch && <button type="button" onClick={() => setPartSearch('')}>清除</button>}</div>
       {partSearch && <div className="inventory-search-results">{inventoryMatches.map(part => <button type="button" key={part.id} onClick={() => addInventoryPart(part)}><span><b>{part.partNo}</b><small>{part.name}{part.brand ? ` · ${part.brand}` : ''}</small></span><span><b>库存 {part.qty}</b><small>售价 {money(part.price)}</small></span></button>)}{!inventoryMatches.length && <p>没有找到匹配的库存配件，可以点击“手动配件”录入。</p>}</div>}
       <div className="line-table"><div className="line-head parts-grid"><span>库存配件</span><span>编号/名称</span><span>数量</span><span>售价</span><span>小计</span><span /></div>
