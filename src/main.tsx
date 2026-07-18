@@ -579,6 +579,23 @@ function Inventory({ store, search, openModal, remove, receiveStock }: ContentPr
 
 function Finance({ store, openModal, persist }: ContentProps) {
   const metrics = dashboardMetrics(store);
+  const expenseRows = useMemo(() => [...store.expenses].sort((a, b) => b.date.localeCompare(a.date)), [store.expenses]);
+  useEffect(() => {
+    const body = document.querySelector<HTMLTableSectionElement>('.split-panels section:nth-child(2) tbody');
+    if (!body) return;
+    const showExpenseNote = (event: Event) => {
+      const target = event.target as HTMLElement;
+      if (target.closest('button, input, select, a')) return;
+      const row = target.closest('tr');
+      if (!row) return;
+      const index = Array.from(body.children).indexOf(row);
+      const expense = expenseRows[index];
+      if (!expense) return;
+      alert(`支出详情\n\n日期：${expense.date}\n项目：${expense.category}\n收款方：${expense.vendor || '未填写'}\n金额：${money(expense.amount)}\n支付方式：${expense.method || '未记录'}\n备注：${expense.note?.trim() || '未填写备注'}`);
+    };
+    body.addEventListener('click', showExpenseNote);
+    return () => body.removeEventListener('click', showExpenseNote);
+  }, [expenseRows]);
   const recordIncome = async () => {
     const customer = prompt('收入来源或客户名称：', '其他收入');
     if (customer === null) return;

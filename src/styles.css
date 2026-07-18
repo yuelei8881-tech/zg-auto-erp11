@@ -23,3 +23,4 @@
 .top-status>b::after{content:"v0.83.0"}
 .checkout-delivery-action{grid-column:span 2;border:1px solid #b7d5c5;background:#f0fbf5;border-radius:12px;padding:12px;display:flex;align-items:center;justify-content:space-between;gap:12px}.checkout-delivery-action span{color:#35624a;font-size:12px}.top-status>b::after{content:"v0.83.1"}
 @media(max-width:760px){.checkout-delivery-action{grid-column:auto;align-items:stretch;flex-direction:column}.checkout-delivery-action button{width:100%}}
+.split-panels section:nth-child(2) tbody tr{cursor:pointer}.split-panels section:nth-child(2) tbody tr:hover td{background:#fff8ef}.top-status>b::after{content:"v0.83.2"}
