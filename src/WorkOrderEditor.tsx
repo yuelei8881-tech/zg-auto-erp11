@@ -512,6 +512,33 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, w
   const updatePart = (id: string, changes: Partial<PartItem>) => patch({
     partItems: calculated.partItems.map(item => item.id === id ? { ...item, ...changes } : item),
   });
+  const translateLineItem = async (kind: 'labor' | 'part', id: string, source: string, currentEnglish = '') => {
+    const chinese = source.trim();
+    if (!chinese || !containsChinese(chinese) || currentEnglish.trim()) return;
+    try {
+      const result = await cloud.invokeFunction<{ answer?: string }>('zg-ai', {
+        type: 'translation',
+        prompt: chinese,
+        context: kind === 'labor' ? 'Translate into a short, professional automotive labor description. Return English only.' : 'Translate into a short, professional automotive part name. Return English only.',
+      });
+      const english = String(result.answer || '').trim();
+      if (!english) return;
+      if (kind === 'labor') updateLabor(id, { descriptionEn: english });
+      else updatePart(id, { nameEn: english });
+    } catch {
+      // Translation is optional; the Chinese description and the work order still save normally.
+    }
+  };
+  useEffect(() => {
+    const labor = calculated.laborItems.find(item => containsChinese(item.description) && !item.descriptionEn?.trim());
+    const part = calculated.partItems.find(item => containsChinese(item.name) && !item.nameEn?.trim());
+    if (!labor && !part) return;
+    const timer = window.setTimeout(() => {
+      if (labor) void translateLineItem('labor', labor.id, labor.description, labor.descriptionEn);
+      else if (part) void translateLineItem('part', part.id, part.name, part.nameEn);
+    }, 900);
+    return () => window.clearTimeout(timer);
+  }, [calculated.laborItems, calculated.partItems]);
   const removePart = (id: string) => patch({
     partItems: calculated.partItems.filter(item => item.id !== id),
     laborItems: calculated.laborItems.filter(item => item.linkedPartItemId !== id),

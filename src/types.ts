@@ -27,12 +27,14 @@ export type Part = {
 
 export type LaborItem = {
   id: string; description: string; hours: number; rate: number; technician?: string; total: number;
+  descriptionEn?: string;
   billingMode?: 'hourly' | 'flat'; flatAmount?: number;
   linkedPartItemId?: string;
 };
 
 export type PartItem = {
   id: string; partId?: string; partNo: string; name: string; qty: number;
+  nameEn?: string;
   cost: number; price: number; total: number; costTotal: number;
   serviceOnly?: boolean;
 };
