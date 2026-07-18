@@ -579,7 +579,39 @@ function Inventory({ store, search, openModal, remove, receiveStock }: ContentPr
 
 function Finance({ store, openModal, persist }: ContentProps) {
   const metrics = dashboardMetrics(store);
+  const paymentRows = useMemo(() => [...store.payments].sort((a, b) => b.date.localeCompare(a.date)), [store.payments]);
   const expenseRows = useMemo(() => [...store.expenses].sort((a, b) => b.date.localeCompare(a.date)), [store.expenses]);
+  useEffect(() => {
+    const body = document.querySelector<HTMLTableSectionElement>('.split-panels section:first-child tbody');
+    if (!body) return;
+    const editPaymentMethods = async (event: Event) => {
+      const target = event.target as HTMLElement;
+      if (target.closest('button, input, select, a')) return;
+      const row = target.closest('tr');
+      if (!row) return;
+      const payment = paymentRows[Array.from(body.children).indexOf(row)];
+      if (!payment) return;
+      const existing = payment.splits?.length ? payment.splits.map(item => `${item.method} ${item.amount}`).join(', ') : `${payment.method || '现金'} ${payment.amount}`;
+      const raw = prompt(`修改收款方式组合（不会改变已付总额）\n工单：${payment.workOrderNumber}\n总额：${money(payment.amount)}\n\n格式示例：现金 1600, 刷卡 1030, 支票 1240`, existing);
+      if (raw === null) return;
+      const splits = raw.split(/[,，;+＋\n]+/).map(item => item.trim()).filter(Boolean).map(item => {
+        const match = item.match(/^(.+?)\s*\$?\s*(\d+(?:\.\d{1,2})?)$/);
+        return match ? { method: match[1].trim(), amount: Math.round(Number(match[2]) * 100) / 100 } : null;
+      });
+      if (!splits.length || splits.some(item => !item)) return alert('格式无法识别。请按照：现金 1600, 刷卡 1030, 支票 1240');
+      const validSplits = splits as Array<{ method: string; amount: number }>;
+      const splitTotal = Math.round(validSplits.reduce((sum, item) => sum + item.amount, 0) * 100) / 100;
+      if (Math.abs(splitTotal - Number(payment.amount)) > 0.009) return alert(`各方式合计 ${money(splitTotal)}，必须等于原收款总额 ${money(payment.amount)}。`);
+      const method = validSplits.map(item => `${item.method} ${money(item.amount)}`).join(' ＋ ');
+      if (!confirm(`确认只修改支付方式？\n${method}\n\n已付总额仍为 ${money(payment.amount)}。`)) return;
+      await persist('payments', { ...payment, method, splits: validSplits, note: `${payment.note || ''}${payment.note ? ' · ' : ''}支付方式已更正` });
+      const order = store.workOrders.find(item => item.id === payment.workOrderId);
+      if (order) await persist('workOrders', recalculateWorkOrder({ ...order, paymentMethod: method }));
+      alert('支付方式组合已修改，已付总额和欠款没有改变。');
+    };
+    body.addEventListener('click', editPaymentMethods);
+    return () => body.removeEventListener('click', editPaymentMethods);
+  }, [paymentRows, persist, store.workOrders]);
   useEffect(() => {
     const body = document.querySelector<HTMLTableSectionElement>('.split-panels section:nth-child(2) tbody');
     if (!body) return;
