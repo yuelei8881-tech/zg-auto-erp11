@@ -281,7 +281,7 @@ function App({ cloud }: { cloud: CloudSession }) {
   const addPayment = async (order: WorkOrder) => {
     if (paymentInFlight.current.has(order.id)) return alert('这张工单的收款正在处理中，请不要重复点击。');
     if (order.balance <= 0.009) return alert('这张工单已经没有欠款。');
-    const paymentChoice = prompt(`工单 ${order.number}\n当前欠款：${money(order.balance)}\n\n请选择结账方式：\n1 = 全额付款\n2 = 部分付款\n3 = 月结（今日暂不收款）`, '1');
+    const paymentChoice = prompt(`工单 ${order.number}\n当前欠款：${money(order.balance)}\n\n请选择结账方式：\n1 = 全额付款\n2 = 部分付款\n3 = 月结（今日暂不收款）\n4 = 多种支付方式组合付款`, '1');
     if (paymentChoice === null) return;
     const choice = paymentChoice.trim();
     if (choice === '3' || choice === '月结') {
@@ -289,17 +289,37 @@ function App({ cloud }: { cloud: CloudSession }) {
       await persist('workOrders', recalculateWorkOrder({ ...order, paymentMethod: MONTHLY_PAYMENT_METHOD, billingDueDate }));
       return alert(`已设为月结，结账日为 ${billingDueDate}。\n今日收入不增加，剩余欠款仍为 ${money(order.balance)}。`);
     }
-    if (!['1', '2', '全额付款', '部分付款'].includes(choice)) return alert('请选择 1、2 或 3。');
+    if (!['1', '2', '4', '全额付款', '部分付款', '组合付款'].includes(choice)) return alert('请选择 1、2、3 或 4。');
     let amount = order.balance;
-    const paymentType = choice === '2' || choice === '部分付款' ? '部分付款' : '全额付款';
+    const mixedPayment = choice === '4' || choice === '组合付款';
+    let paymentType = choice === '2' || choice === '部分付款' ? '部分付款' : '全额付款';
     if (paymentType === '部分付款') {
       const raw = prompt(`当前欠款 ${money(order.balance)}\n请输入本次实际收到的金额：`, '');
       if (raw === null) return;
       amount = Number(raw);
       if (!amount || amount <= 0 || amount >= order.balance - 0.009) return alert('部分付款金额必须大于 0，并且小于当前欠款。若已付清请选择“全额付款”。');
     }
-    const method = prompt('实际付款方式：现金 / 刷卡 / 银行转账或 ACH / 支票 / Zelle / 扫码支付 / 在线付款 / 其他', order.paymentMethod?.startsWith('月结') ? '现金' : order.paymentMethod || '现金') || '现金';
-    const payment: Payment = { id: uid(), date: new Date().toISOString(), workOrderId: order.id, workOrderNumber: order.number, customer: order.customer, amount, method, note: paymentType };
+    const splits: Array<{ method: string; amount: number }> = [];
+    if (mixedPayment) {
+      const rawTotal = prompt(`当前欠款 ${money(order.balance)}\n请输入本次组合付款总金额；留空表示全部付清：`, '');
+      if (rawTotal === null) return;
+      amount = rawTotal.trim() ? Number(rawTotal) : order.balance;
+      if (!Number.isFinite(amount) || amount <= 0 || amount > order.balance + 0.009) return alert('组合付款总额必须大于 0，并且不能超过当前欠款。');
+      paymentType = amount >= order.balance - 0.009 ? '全额付款' : '部分付款';
+      let remaining = Math.round(amount * 100) / 100;
+      while (remaining > 0.009) {
+        const method = prompt(`组合付款剩余 ${money(remaining)}\n请输入付款方式：现金 / 刷卡 / 银行转账或 ACH / 支票 / Zelle / 扫码支付 / 在线付款 / 其他`, splits.length ? '银行转账 / ACH' : '现金');
+        if (method === null) return;
+        const rawSplit = prompt(`${method || '未记录'} 本次金额：`, String(remaining));
+        if (rawSplit === null) return;
+        const splitAmount = Math.round(Number(rawSplit) * 100) / 100;
+        if (!Number.isFinite(splitAmount) || splitAmount <= 0 || splitAmount > remaining + 0.009) return alert('请输入正确金额，不能超过组合付款剩余金额。');
+        splits.push({ method: method.trim() || '未记录', amount: splitAmount });
+        remaining = Math.round((remaining - splitAmount) * 100) / 100;
+      }
+    }
+    const method = mixedPayment ? splits.map(item => `${item.method} ${money(item.amount)}`).join(' ＋ ') : prompt('实际付款方式：现金 / 刷卡 / 银行转账或 ACH / 支票 / Zelle / 扫码支付 / 在线付款 / 其他', order.paymentMethod?.startsWith('月结') ? '现金' : order.paymentMethod || '现金') || '现金';
+    const payment: Payment = { id: uid(), date: new Date().toISOString(), workOrderId: order.id, workOrderNumber: order.number, customer: order.customer, amount, method, note: mixedPayment ? `${paymentType} · 组合付款` : paymentType, splits: mixedPayment ? splits : undefined };
     paymentInFlight.current.add(order.id);
     setSyncing(true);
     try {
@@ -446,8 +466,8 @@ function Dashboard({ store, setPage, setEditingOrder, cloud, actorName, editOwnP
     .filter(item => losAngelesDateKey(item.date) === losAngelesDateKey(new Date().toISOString()))
     .sort((a, b) => b.date.localeCompare(a.date)), [store.payments]);
   const todayPaymentGroups = useMemo(() => Object.entries(todayPayments.reduce<Record<string, number>>((groups, payment) => {
-    const method = payment.method?.trim() || '未记录';
-    groups[method] = (groups[method] || 0) + Number(payment.amount || 0);
+    const entries = payment.splits?.length ? payment.splits : [{ method: payment.method?.trim() || '未记录', amount: Number(payment.amount || 0) }];
+    entries.forEach(entry => { const method = entry.method?.trim() || '未记录'; groups[method] = (groups[method] || 0) + Number(entry.amount || 0); });
     return groups;
   }, {})).sort((a, b) => b[1] - a[1]), [todayPayments]);
   const isTechnician = cloud.role === 'technician' && !can(cloud, 'workOrders');
