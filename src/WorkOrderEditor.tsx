@@ -43,7 +43,7 @@ const translationDefinitions: Array<{ source: TranslationSource; target: Transla
 const containsChinese = (value: string) => /[\u3400-\u9fff]/.test(value);
 const editableNumber = (value: number | undefined) => value === 0 || value === undefined ? '' : value;
 
-const statuses: WorkOrderStatus[] = ['等待检查', '等待批准', '等待配件', '维修中', '已完成', '已交车'];
+const statuses: WorkOrderStatus[] = ['等待检查', '等待批准', '等待配件', '维修中', '已完成'];
 const inspectionItems: Array<[keyof InspectionChecklist, string]> = [
   ['intake', '接车资料、里程和客户描述已确认'],
   ['exterior', '车辆外观、已有损伤和照片已记录'],
@@ -165,6 +165,16 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, w
   latestOrder.current = order;
   const draftKey = `work-order:${value?.id || 'new'}`;
   const calculated = useMemo(() => recalculateWorkOrder(order), [order]);
+  const serverOrder = value ? workOrders.find(item => item.id === value.id) : undefined;
+  useEffect(() => {
+    if (!serverOrder) return;
+    setOrder(current => {
+      const paymentChanged = Number(current.paid || 0) !== Number(serverOrder.paid || 0) || current.paymentMethod !== serverOrder.paymentMethod || current.billingDueDate !== serverOrder.billingDueDate;
+      const deliveredChanged = serverOrder.status === '已交车' && current.status !== '已交车';
+      if (!paymentChanged && !deliveredChanged) return current;
+      return recalculateWorkOrder({ ...current, paid: serverOrder.paid, paymentMethod: serverOrder.paymentMethod, billingDueDate: serverOrder.billingDueDate, status: deliveredChanged ? '已交车' : current.status, workflowStage: deliveredChanged ? '已结账' : current.workflowStage });
+    });
+  }, [serverOrder?.paid, serverOrder?.paymentMethod, serverOrder?.billingDueDate, serverOrder?.status]);
   const laborPriceHistory = useMemo(() => {
     const remembered = new Map<string, LaborItem>();
     [...workOrders]
@@ -575,6 +585,15 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, w
       await onSave(recalculateWorkOrder({ ...calculated, inspectionChecklist: { ...checklist, intake: true } }), true);
     } finally { setSaving(false); }
   };
+  const finalizeDelivery = async () => {
+    const monthlyBilling = order.paymentMethod === MONTHLY_PAYMENT_METHOD || order.paymentMethod === '月结';
+    if (calculated.status !== '已完成' && calculated.status !== '已交车') return alert('请先由技师把维修状态设为“已完成”，再结账交车。');
+    if (calculated.balance > 0.009 && !monthlyBilling) return alert(`当前仍欠 ${money(calculated.balance)}。请先在工单列表完成收款，或将客户设为月结。`);
+    if (!confirm(`确认工单 ${calculated.number} 已完成结账并交车？`)) return;
+    setSaving(true);
+    try { await onSave(recalculateWorkOrder({ ...calculated, status: '已交车', workflowStage: '已结账' })); }
+    finally { setSaving(false); }
+  };
 
   const selectMobileStep = (step: MobileStep) => {
     setMobileStep(step);
@@ -604,7 +623,7 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, w
     <section className="form-section editor-panel panel-intake"><h3>客户与车辆</h3><div className="form-grid four">
       <label>工单号<input value={order.number} onChange={e => patch({ number: e.target.value })} /></label>
       <label>日期<input type="date" value={order.date} onChange={e => patch({ date: e.target.value })} /></label>
-      <label>状态<select value={order.status} disabled={!!order.archivedAt} onChange={e => patch({ status: e.target.value as WorkOrderStatus })}>{order.archivedAt && <option>已取消</option>}{statuses.map(item => <option key={item}>{item}</option>)}</select></label>
+      <label>状态<select value={order.status} disabled={!!order.archivedAt || order.status === '已交车'} onChange={e => patch({ status: e.target.value as WorkOrderStatus })}>{order.archivedAt && <option>已取消</option>}{order.status === '已交车' && <option value="已交车">已交车（结账完成）</option>}{statuses.map(item => <option key={item}>{item}</option>)}</select></label>
       <label>负责技师{canAssignTechnician ? <select value={order.technicianUserId || ''} onChange={e => { const member = technicians.find(item => item.userId === e.target.value); patch({ technicianUserId: member?.userId || '', technician: member?.displayName || '' }); }}><option value="">未分配</option>{technicians.filter(item => item.role === 'technician' || item.role === 'manager').map(item => <option key={item.userId} value={item.userId}>{item.displayName || item.userId.slice(0, 8)}</option>)}</select> : <input value={order.technician || currentUser} readOnly />}</label>
       <label>客户 / 公司 / 车队<select value={selectedAccountValue} onChange={e => selectCustomer(e.target.value)}><option value="">请选择</option><optgroup label="个人与普通公司客户">{customers.map(item => <option key={item.id} value={`customer:${item.id}`}>{item.name} · {item.phone}</option>)}</optgroup><optgroup label="车队与公司账户">{fleets.map(item => <option key={item.id} value={`fleet:${item.id}`}>{item.company} · {item.contact} · {item.phone}</option>)}</optgroup></select></label>
       <label>联系电话<input value={order.phone || ''} onChange={e => patch({ phone: e.target.value })} /></label>
@@ -687,9 +706,10 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, w
       <label>配件销售税率 %（人工不计税）<input type="number" inputMode="decimal" step="0.01" value={editableNumber(order.taxRate)} onChange={e => patch({ taxRate: Number(e.target.value) })} /></label>
       <label>手动税额（留空自动计算）<input type="number" inputMode="decimal" min="0" step="0.01" placeholder={`自动 ${money(calculated.partsTotal * calculated.taxRate / 100)}`} value={order.taxOverride ?? ''} onChange={e => patch({ taxOverride: e.target.value === '' ? undefined : Math.max(0, Number(e.target.value)) })} /></label>
       <label>累计已付款（请使用工单列表“收款”记录流水）<input type="number" inputMode="decimal" step="0.01" value={editableNumber(order.paid)} disabled title="为确保今日收入准确，请保存工单后使用工单列表中的收款按钮。" /></label>
-      <label>客户支付方式<select value={order.paymentMethod === '月结' ? MONTHLY_PAYMENT_METHOD : (order.paymentMethod || '未记录')} onChange={e => { const paymentMethod = e.target.value === '未记录' ? '' : e.target.value; patch({ paymentMethod, billingDueDate: paymentMethod === MONTHLY_PAYMENT_METHOD ? (order.billingDueDate || nextMonthlyBillingDate()) : undefined }); }}>{paymentMethods.map(method => <option key={method}>{method}</option>)}</select></label>
+      <label>结账方式（收款后自动同步）{order.paid > 0 ? <input value={order.paymentMethod || '已收款，方式未记录'} readOnly /> : <select value={order.paymentMethod === '月结' ? MONTHLY_PAYMENT_METHOD : (order.paymentMethod || '未记录')} onChange={e => { const paymentMethod = e.target.value === '未记录' ? '' : e.target.value; patch({ paymentMethod, billingDueDate: paymentMethod === MONTHLY_PAYMENT_METHOD ? (order.billingDueDate || nextMonthlyBillingDate()) : undefined }); }}>{paymentMethods.map(method => <option key={method}>{method}</option>)}</select>}</label>
       {(order.paymentMethod === MONTHLY_PAYMENT_METHOD || order.paymentMethod === '月结') && <label>月结结账日<input type="date" value={order.billingDueDate || nextMonthlyBillingDate()} onChange={e => patch({ billingDueDate: e.target.value })} /></label>}
       <label>实际结账金额（仅手动改价需双人授权）<input type="number" step="0.01" placeholder={`自动计算 ${money(calculated.laborTotal + calculated.partsTotal + calculated.outsource + calculated.tax - calculated.discount)}`} value={order.settlementTotal ?? ''} onChange={e => patch({ settlementTotal: e.target.value === '' ? undefined : Number(e.target.value) })} /></label>
+      <div className="checkout-delivery-action"><span>{calculated.status === '已交车' ? '已经结账并交车' : calculated.balance <= 0.009 ? '款项已结清，可以交车' : order.paymentMethod === MONTHLY_PAYMENT_METHOD || order.paymentMethod === '月结' ? '月结客户，可以确认交车' : `欠款 ${money(calculated.balance)}，请先收款`}</span><button type="button" className="primary" onClick={finalizeDelivery} disabled={saving || calculated.status === '已交车'}>{calculated.status === '已交车' ? '已交车' : '确认结账并交车'}</button></div>
     </div><p className="tax-guidance">加州默认规则：系统仅对配件销售额计算销售税；单独列示的维修/安装人工通常不计销售税。制造加工人工等例外请由会计确认。参考：<a href="https://www.cdtfa.ca.gov/formspubs/pub25.pdf" target="_blank" rel="noreferrer">CDTFA Publication 25</a>、<a href="https://www.cdtfa.ca.gov/lawguides/vol1/sutr/1546.html" target="_blank" rel="noreferrer">Regulation 1546</a>。</p></div><div className="totals-card"><div><span>人工（免销售税）</span><b>{money(calculated.laborTotal)}</b></div><div><span>配件</span><b>{money(calculated.partsTotal)}</b></div><div><span>配件销售税</span><b>{money(calculated.tax)}</b></div><div className="grand"><span>总价</span><b>{money(calculated.total)}</b></div><div className="balance"><span>欠款</span><b>{money(calculated.balance)}</b></div></div></section>}
     <div className="mobile-editor-actions"><div><small>{mobileStepIndex + 1} / {mobileSteps.length} · {draftStatus === 'saving' ? '正在自动保存…' : draftStatus === 'saved' ? '草稿已保存在本机' : draftStatus === 'error' ? '本机草稿保存失败' : '自动保存已开启'}</small><b>{mobileSteps[mobileStepIndex]?.label}</b></div><button type="button" onClick={() => moveMobileStep(-1)} disabled={mobileStepIndex === 0}>上一步</button><button type="button" className="primary" onClick={saveProgress} disabled={saving}>{saving ? '保存中…' : '保存进度'}</button><button type="button" onClick={() => moveMobileStep(1)} disabled={mobileStepIndex === mobileSteps.length - 1}>下一步</button></div>
   </div>;

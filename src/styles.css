@@ -21,3 +21,5 @@
 @media(max-width:760px){.repair-library-list{grid-template-columns:1fr}.repair-library-list>button{padding:13px 12px}.repair-library-section .section-title{align-items:flex-start}}
 .inventory-query-bar~table tbody tr{cursor:pointer}.inventory-query-bar~table tbody tr:hover td{background:#f3f8ff}.inventory-query-bar~table tbody tr td:not(.actions):active{background:#e8f1ff}.top-status>b::after{content:"v0.82.9"}
 .top-status>b::after{content:"v0.83.0"}
+.checkout-delivery-action{grid-column:span 2;border:1px solid #b7d5c5;background:#f0fbf5;border-radius:12px;padding:12px;display:flex;align-items:center;justify-content:space-between;gap:12px}.checkout-delivery-action span{color:#35624a;font-size:12px}.top-status>b::after{content:"v0.83.1"}
+@media(max-width:760px){.checkout-delivery-action{grid-column:auto;align-items:stretch;flex-direction:column}.checkout-delivery-action button{width:100%}}

@@ -199,7 +199,14 @@ function App({ cloud }: { cloud: CloudSession }) {
     // opened before a payment must never be allowed to write an older `paid`
     // value back over the settled work order.
     const authoritativePaid = old ? Number(old.paid || 0) : Number(order.paid || 0);
-    const currentOrder = recalculateWorkOrder({ ...order, paid: authoritativePaid });
+    const hasPaymentLedger = store.payments.some(payment => payment.workOrderId === order.id && !payment.archivedAt);
+    const authoritativePaymentMethod = old && hasPaymentLedger ? old.paymentMethod : order.paymentMethod;
+    const authoritativeBillingDueDate = old && hasPaymentLedger ? old.billingDueDate : order.billingDueDate;
+    const deliveredOnServer = old?.status === '已交车';
+    const currentOrder = recalculateWorkOrder({
+      ...order, paid: authoritativePaid, paymentMethod: authoritativePaymentMethod, billingDueDate: authoritativeBillingDueDate,
+      status: deliveredOnServer ? '已交车' : order.status, workflowStage: deliveredOnServer ? '已结账' : order.workflowStage,
+    });
     const safeOrder = recalculateWorkOrder({ ...currentOrder, discount: old?.discount || 0, settlementTotal: oldHasOverride ? old?.settlementTotal : undefined });
     const oldUsage = usageMap(old && old.status !== '已取消' ? old : undefined);
     const newUsage = usageMap(order.status !== '已取消' ? order : undefined);
@@ -367,7 +374,7 @@ function App({ cloud }: { cloud: CloudSession }) {
     if (!assignedToMe && !can(cloud, 'assignTechnician')) return alert('请先领取这张工单，或由经理分配后再完成维修。');
     if (!confirm(`确认工单 ${order.number} 的维修已经完成？\n系统会永久记录完成人和完成时间。`)) return;
     const now = new Date().toISOString();
-    const updated = recalculateWorkOrder({ ...order, technicianUserId: order.technicianUserId || cloud.user.id, technician: order.technician || actorName, status: '已完成', technicianCompletedAt: now, completedBy: actorName, completedByUserId: cloud.user.id });
+    const updated = recalculateWorkOrder({ ...order, technicianUserId: order.technicianUserId || cloud.user.id, technician: order.technician || actorName, status: '已完成', workflowStage: '完工待结账', technicianCompletedAt: now, completedBy: actorName, completedByUserId: cloud.user.id });
     await persist('workOrders', updated);
     await writeChangeLog(updated, '维修完成', `${actorName} 标记维修完成。`, order, updated);
   };
