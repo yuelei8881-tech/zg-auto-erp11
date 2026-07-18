@@ -118,6 +118,7 @@ export type InventoryLog = {
 export type Payment = {
   id: string; date: string; workOrderId: string; workOrderNumber: string; customer: string;
   amount: number; method: string; reference?: string; note?: string;
+  archivedAt?: string;
 };
 
 export type Expense = { id: string; date: string; category: string; vendor?: string; amount: number; method?: string; note?: string };

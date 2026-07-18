@@ -195,7 +195,12 @@ function App({ cloud }: { cloud: CloudSession }) {
     const newHasOverride = rawOrder.settlementTotal !== undefined && Math.abs(Number(rawOrder.settlementTotal) - computedOrder.total) > 0.009;
     const oldHasOverride = !!old && old.settlementTotal !== undefined && Math.abs(Number(old.settlementTotal) - Number(oldComputed?.total || 0)) > 0.009;
     const settlementNeedsApproval = newHasOverride && (!oldHasOverride || Number(rawOrder.settlementTotal) !== Number(old?.settlementTotal));
-    const safeOrder = recalculateWorkOrder({ ...order, discount: old?.discount || 0, settlementTotal: oldHasOverride ? old?.settlementTotal : undefined });
+    // Payment totals are controlled by the payment ledger. An editor that was
+    // opened before a payment must never be allowed to write an older `paid`
+    // value back over the settled work order.
+    const authoritativePaid = old ? Number(old.paid || 0) : Number(order.paid || 0);
+    const currentOrder = recalculateWorkOrder({ ...order, paid: authoritativePaid });
+    const safeOrder = recalculateWorkOrder({ ...currentOrder, discount: old?.discount || 0, settlementTotal: oldHasOverride ? old?.settlementTotal : undefined });
     const oldUsage = usageMap(old && old.status !== '已取消' ? old : undefined);
     const newUsage = usageMap(order.status !== '已取消' ? order : undefined);
     const partChanges: Array<{ part: Part; nextQty: number; delta: number }> = [];
@@ -213,7 +218,7 @@ function App({ cloud }: { cloud: CloudSession }) {
         const log: InventoryLog = { id: uid(), date: new Date().toISOString(), partId: change.part.id, partNo: change.part.partNo, partName: change.part.name, type: change.delta > 0 ? '工单领用' : '工单退回', change: -change.delta, before: change.part.qty, after: change.nextQty, reference: order.number };
         await persist('inventoryLogs', log);
       }
-      const savedOrder = discountNeedsApproval || settlementNeedsApproval ? safeOrder : order;
+      const savedOrder = discountNeedsApproval || settlementNeedsApproval ? safeOrder : currentOrder;
       await persist('workOrders', { ...savedOrder, inventoryCommitted: savedOrder.status !== '已取消' });
       await writeChangeLog(savedOrder, old ? '修改工单' : '新建工单', old ? '工单内容已更新并保存到服务器' : '工单已建立并保存到服务器', old, savedOrder);
       if (discountNeedsApproval) await requestApproval({ workOrderId: order.id, workOrderNumber: order.number, type: '工单折扣', reason: `折扣由 ${money(old?.discount || 0)} 调整为 ${money(order.discount)}`, oldValue: old?.discount || 0, newValue: order.discount, proposedOrder: savedOrder });
@@ -392,7 +397,7 @@ function App({ cloud }: { cloud: CloudSession }) {
       <nav>{nav.filter(item => canOpenPage(cloud, item.id)).map(item => <button key={item.id} className={page === item.id ? 'active' : ''} onClick={() => { setPage(item.id); setSearch(''); setSearchDraft(''); }}><span>{item.icon}</span>{item.label}</button>)}</nav>
       <div className="side-foot"><small>{cloud.organizationName}</small><b>{actorName}</b><span>{cloud.user.email}</span><button onClick={() => confirm('确定退出当前账号？') && void cloud.signOut()}>退出登录</button></div>
     </aside>
-    <main className="main"><header className="topbar"><div className="global-search">⌕<input value={searchDraft} onChange={e => setSearchDraft(e.target.value)} onKeyDown={e => e.key === 'Enter' && runGlobalSearch()} placeholder="搜索客户、电话、VIN、车牌、工单、司机…" /><button type="button" onClick={runGlobalSearch}>搜索</button>{searchSuggestions.length > 0 && <div className="search-suggestions">{searchSuggestions.map((item, index) => <button type="button" key={`${item.page}-${item.label}-${index}`} onClick={() => { setSearchDraft(item.query); setSearch(item.query); setPage(item.page); }}><b>{item.label}</b><small>{item.meta}</small></button>)}</div>}</div><div className="top-status"><span className={syncing ? 'syncing' : ''}>{syncing ? '正在同步…' : '● 云端已同步'}</span><span>{actorName}</span><b>v0.82.1</b><button type="button" className="topbar-logout" onClick={() => confirm('确定退出当前账号？') && void cloud.signOut()}>退出</button></div></header>
+    <main className="main"><header className="topbar"><div className="global-search">⌕<input value={searchDraft} onChange={e => setSearchDraft(e.target.value)} onKeyDown={e => e.key === 'Enter' && runGlobalSearch()} placeholder="搜索客户、电话、VIN、车牌、工单、司机…" /><button type="button" onClick={runGlobalSearch}>搜索</button>{searchSuggestions.length > 0 && <div className="search-suggestions">{searchSuggestions.map((item, index) => <button type="button" key={`${item.page}-${item.label}-${index}`} onClick={() => { setSearchDraft(item.query); setSearch(item.query); setPage(item.page); }}><b>{item.label}</b><small>{item.meta}</small></button>)}</div>}</div><div className="top-status"><span className={syncing ? 'syncing' : ''}>{syncing ? '正在同步…' : '● 云端已同步'}</span><span>{actorName}</span><b>v0.82.2</b><button type="button" className="topbar-logout" onClick={() => confirm('确定退出当前账号？') && void cloud.signOut()}>退出</button></div></header>
       {loading ? <div className="loading">正在读取正式服务器数据…</div> : <PageContent page={page} search={search} store={store} settings={settings} cloud={cloud} setPage={setPage} openModal={openModal} setEditingOrder={setEditingOrder} persist={persist} remove={remove} receiveStock={receiveStock} addPayment={addPayment} deleteWorkOrder={deleteWorkOrder} approveRequest={approveRequest} rejectRequest={rejectRequest} claimWorkOrder={claimWorkOrder} completeWorkOrder={completeWorkOrder} actorName={actorName} editOwnProfile={editOwnProfile} />}
     </main>
     {modal && <EntityModal state={modal} store={store} settings={settings} cloud={cloud} onClose={closeModal} onSave={saveModal} />}
@@ -794,7 +799,20 @@ function printDocument(order: WorkOrder, settings: ShopSettings, documentType: s
 function normalizeStore(raw: CloudStore): AppStore {
   const result = { ...emptyStore } as AppStore;
   for (const key of Object.keys(emptyStore)) result[key] = (raw[key] || []) as unknown[];
-  result.workOrders = result.workOrders.map(item => recalculateWorkOrder({ ...item, laborItems: Array.isArray(item.laborItems) ? item.laborItems : legacyLabor(item), partItems: Array.isArray(item.partItems) ? item.partItems : legacyParts(item) }));
+  // Reconcile settled amounts from immutable payment rows on every cloud load.
+  // This repairs a stale work-order balance after a later edit and keeps paid
+  // orders settled across midnight, refreshes and other devices.
+  const ledgerByOrder = new Map<string, number>();
+  const ledgerOrderIds = new Set<string>();
+  for (const payment of result.payments) {
+    if (!payment.workOrderId || payment.archivedAt) continue;
+    ledgerOrderIds.add(payment.workOrderId);
+    ledgerByOrder.set(payment.workOrderId, (ledgerByOrder.get(payment.workOrderId) || 0) + Number(payment.amount || 0));
+  }
+  result.workOrders = result.workOrders.map(item => {
+    const paid = ledgerOrderIds.has(item.id) ? Number((ledgerByOrder.get(item.id) || 0).toFixed(2)) : Number(item.paid || 0);
+    return recalculateWorkOrder({ ...item, paid, laborItems: Array.isArray(item.laborItems) ? item.laborItems : legacyLabor(item), partItems: Array.isArray(item.partItems) ? item.partItems : legacyParts(item) });
+  });
   result.parts = result.parts.map(item => ({ ...item, cost: Number(item.cost || 0), price: Number(item.price || 0), qty: Number(item.qty || 0), minimum: Number(item.minimum || 0) }));
   return result;
 }
