@@ -15,6 +15,7 @@ import { registerPwa } from './pwa';
 import { recognizeVehiclePhoto } from './lib/ocr';
 import { CustomerApprovalPage } from './CustomerApprovalPage';
 import { printDocumentV077 } from './printDocument';
+import { PublicWebsite } from './PublicWebsite';
 import './styles.css';
 import './v0763.css';
 import './extra.css';
@@ -823,4 +824,7 @@ function sum<T extends object>(rows: T[], key: keyof T) { return rows.reduce((to
 
 registerPwa();
 const approvalToken = new URLSearchParams(window.location.search).get('approval');
-createRoot(document.getElementById('root')!).render(<React.StrictMode>{approvalToken ? <CustomerApprovalPage token={approvalToken} /> : <><PwaInstall /><FormalGate>{cloud => <App cloud={cloud} />}</FormalGate></>}</React.StrictMode>);
+const publicHost = ['zgautorepair.com', 'www.zgautorepair.com'].includes(window.location.hostname);
+const publicPreview = window.location.pathname === '/website' || window.location.pathname.startsWith('/website/');
+const publicPath = publicPreview ? (window.location.pathname.replace(/^\/website/, '') || '/') : window.location.pathname;
+createRoot(document.getElementById('root')!).render(<React.StrictMode>{publicHost || publicPreview ? <PublicWebsite path={publicPath} /> : approvalToken ? <CustomerApprovalPage token={approvalToken} /> : <><PwaInstall /><FormalGate>{cloud => <App cloud={cloud} />}</FormalGate></>}</React.StrictMode>);
