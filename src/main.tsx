@@ -503,6 +503,21 @@ function WorkOrders({ store, search, settings, cloud, setEditingOrder, addPaymen
   const canEdit = can(cloud, 'workOrders') || can(cloud, 'diagnosis');
   const canPrint = can(cloud, 'printDocuments');
   const canSend = can(cloud, 'customerContact') || can(cloud, 'workOrders');
+  useEffect(() => {
+    if (!canEdit) return;
+    const body = document.querySelector<HTMLTableSectionElement>('.work-order-table tbody');
+    if (!body) return;
+    const openRow = (event: Event) => {
+      const target = event.target as HTMLElement;
+      if (target.closest('button, select, input, a, .actions')) return;
+      const row = target.closest('tr');
+      if (!row) return;
+      const index = Array.from(body.children).indexOf(row);
+      if (index >= 0 && rows[index]) setEditingOrder(rows[index]);
+    };
+    body.addEventListener('click', openRow);
+    return () => body.removeEventListener('click', openRow);
+  }, [canEdit, rows, setEditingOrder]);
   const visibleLogs = store.changeLogs.filter(log => visible.some(order => order.id === log.workOrderId));
   return <div className="page"><div className="page-title"><div><p className="eyebrow">Z&G AUTO ERP</p><h2>{assignedOnly ? '我的维修任务' : '维修工单'}</h2></div>{can(cloud, 'createWorkOrders') && <button className="primary" onClick={() => setEditingOrder('new')}>＋ 新建工单</button>}</div>
     {!!pending.length && <section className="panel approval-panel"><div className="section-title"><div><h3>待双人授权</h3><span>申请人与批准人必须是两个不同账号；所有决定永久记入日志</span></div><b>{pending.length} 项</b></div>{pending.map(item => <article className="approval-row" key={item.id}><div><b>{item.type === '删除工单' ? '作废/归档工单' : item.type} · {item.workOrderNumber}</b><small>申请人 {item.requestedBy} · {new Date(item.requestedAt).toLocaleString()}</small><p>{item.reason}</p></div><div className="actions">{canApprove && item.requestedById !== cloud.user.id ? <><button className="primary" onClick={() => void approveRequest(item)}>批准并执行</button><button onClick={() => void rejectRequest(item)}>拒绝</button></> : <span className="muted">{item.requestedById === cloud.user.id ? '等待另一账号批准' : '需要审批权限'}</span>}</div></article>)}</section>}
