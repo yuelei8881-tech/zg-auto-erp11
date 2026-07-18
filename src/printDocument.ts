@@ -1,6 +1,6 @@
 import { BRAND_LOGO_SVG } from './brandLogo';
 import { escapeHtml, money } from './lib/erp';
-import type { ShopSettings, WorkOrder } from './types';
+import type { Payment, ShopSettings, WorkOrder } from './types';
 
 const labels: Record<string, string> = {
   Estimate: 'ESTIMATE / 报价单',
@@ -9,7 +9,7 @@ const labels: Record<string, string> = {
   Receipt: 'RECEIPT / 收据',
 };
 
-export function printDocumentV077(order: WorkOrder, settings: ShopSettings, kind: string) {
+export function printDocumentV077(order: WorkOrder, settings: ShopSettings, kind: string, payments: Payment[] = []) {
   const title = labels[kind] || kind;
   const receipt = kind === 'Receipt';
   const showPaymentMethod = (kind === 'Invoice' || receipt) && Boolean(order.paymentMethod);
@@ -23,6 +23,11 @@ export function printDocumentV077(order: WorkOrder, settings: ShopSettings, kind
   };
   const laborRows = (order.laborItems || []).map(item => { const flat = item.billingMode === 'flat'; return `<tr><td>${escapeHtml(item.description)}${item.descriptionEn ? `<br><em>${escapeHtml(item.descriptionEn)}</em>` : ''}</td><td class="n">${flat ? 'Flat' : Number(item.hours).toFixed(1)}</td><td class="n">${flat ? '—' : money(item.rate)}</td><td class="n">${money(item.total)}</td></tr>`; }).join('');
   const partRows = (order.partItems || []).filter(item => !!(item.partId || item.partNo?.trim() || item.name?.trim())).map(item => `<tr><td>${escapeHtml(item.partNo)}</td><td>${escapeHtml(item.name)}${item.nameEn ? `<br><em>${escapeHtml(item.nameEn)}</em>` : ''}</td><td class="n">${item.qty}</td><td class="n">${money(item.price)}</td><td class="n">${money(item.total)}</td></tr>`).join('');
+  const paymentRows = payments.filter(item => !item.archivedAt && (item.workOrderId === order.id || item.workOrderNumber === order.number)).sort((a, b) => a.date.localeCompare(b.date)).map(item => {
+    const time = new Intl.DateTimeFormat('en-US', { timeZone: 'America/Los_Angeles', month: '2-digit', day: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }).format(new Date(item.date));
+    const method = item.splits?.length ? item.splits.map(split => `${split.method} ${money(split.amount)}`).join(' + ') : item.method || 'Not recorded';
+    return `<tr><td>${escapeHtml(time)}</td><td>${escapeHtml(method)}</td><td class="n">${money(item.amount)}</td></tr>`;
+  }).join('');
   const signed = order.customerSignature
     ? `<div class="signed"><img src="${escapeHtml(order.customerSignature)}"><span>${escapeHtml(order.customerSignedBy || order.customer)}${order.customerSignedAt ? ` · ${escapeHtml(new Date(order.customerSignedAt).toLocaleString())}` : ''}</span></div>`
     : '';
@@ -39,7 +44,7 @@ export function printDocumentV077(order: WorkOrder, settings: ShopSettings, kind
 ${laborRows ? `<div class="section"><div class="line-title">Labor / 人工</div><table><thead><tr><th>Description / 项目</th><th class="n">Hours</th><th class="n">Rate</th><th class="n">Amount</th></tr></thead><tbody>${laborRows}</tbody></table></div>` : ''}
 ${partRows ? `<div class="section"><div class="line-title">Parts / 配件</div><table><thead><tr><th>Part #</th><th>Description / 名称</th><th class="n">Qty</th><th class="n">Price</th><th class="n">Amount</th></tr></thead><tbody>${partRows}</tbody></table></div>` : ''}
 <table class="totals"><tr><td>Labor</td><td class="n">${money(order.laborTotal)}</td></tr><tr><td>Parts</td><td class="n">${money(order.partsTotal)}</td></tr><tr><td>Outsource</td><td class="n">${money(order.outsource)}</td></tr><tr><td>Parts Sales Tax / 配件销售税</td><td class="n">${money(order.tax)}</td></tr><tr><td>Discount</td><td class="n">-${money(order.discount)}</td></tr><tr class="total"><td>${receipt ? 'Amount Paid' : 'Total'}</td><td class="n">${money(receipt ? order.paid : order.total)}</td></tr>${receipt ? '' : `<tr><td>Paid</td><td class="n">${money(order.paid)}</td></tr><tr><td>Balance Due</td><td class="n">${money(order.balance)}</td></tr>`}${showPaymentMethod ? `<tr><td>Payment Method / 支付方式</td><td class="n">${escapeHtml(order.paymentMethod || 'Not recorded / 未记录')}</td></tr>` : ''}</table>
-<div class="signatures"><div class="sig">${signed}<b>Customer Signature / Date · 客户签字/日期</b></div><div class="sig"><b>Authorized By / Date · 授权人/日期</b></div></div><div class="footer">${escapeHtml(settings.invoiceTerms || 'Thank you for your business.')}</div><div class="document-footer"><span>zgautorepair.com</span><span>Page 1 of 1</span></div>
+${paymentRows ? `<div class="section"><div class="line-title">Payment History / 付款记录（Los Angeles Time）</div><table><thead><tr><th>Date & Time / 支付时间</th><th>Method / 方式</th><th class="n">Amount / 金额</th></tr></thead><tbody>${paymentRows}</tbody></table></div>` : ''}<div class="signatures"><div class="sig">${signed}<b>Customer Signature / Date · 客户签字/日期</b></div><div class="sig"><b>Authorized By / Date · 授权人/日期</b></div></div><div class="footer">${escapeHtml(settings.invoiceTerms || 'Thank you for your business.')}</div><div class="document-footer"><span>zgautorepair.com</span><span>Page 1 of 1</span></div>
 <script>function returnToOrder(){if(window.opener&&!window.opener.closed){window.close();return}if(history.length>1){history.back();return}location.replace('/')}</script></body></html>`;
   const win = window.open('', '_blank');
   if (!win) return alert('浏览器阻止了打印窗口，请允许弹出窗口后重试。');
