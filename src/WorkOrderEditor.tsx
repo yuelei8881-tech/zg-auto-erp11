@@ -416,9 +416,13 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, w
   };
   const removeLabor = (id: string) => patch({ laborItems: calculated.laborItems.filter(item => item.id !== id) });
 
-  const addPart = () => patch({ partItems: [...calculated.partItems, {
-    id: uid(), partId: '', partNo: '', name: '', qty: 1, cost: 0, price: 0, total: 0, costTotal: 0,
-  }] });
+  const addPart = () => {
+    const lineId = uid();
+    patch({
+      partItems: [...calculated.partItems, { id: lineId, partId: '', partNo: '', name: '', qty: 1, cost: 0, price: 0, total: 0, costTotal: 0, serviceOnly: true }],
+      laborItems: [...calculated.laborItems, { id: uid(), linkedPartItemId: lineId, description: '', hours: 1, rate: settings.defaultLaborRate, technician: order.technician || '', total: settings.defaultLaborRate, billingMode: 'hourly', flatAmount: 0 }],
+    });
+  };
   const inventoryMatches = useMemo(() => {
     const query = partSearch.trim().toLowerCase();
     if (!query) return [];
@@ -426,38 +430,44 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, w
       .some(value => String(value || '').toLowerCase().includes(query))).slice(0, 12);
   }, [partSearch, parts]);
   const addInventoryPart = (part: Part) => {
+    const lineId = uid();
     const nextParts = [...calculated.partItems, {
-      id: uid(), partId: part.id, partNo: part.partNo, name: part.name, qty: 1,
+      id: lineId, partId: part.id, partNo: part.partNo, name: part.name, qty: 1,
       cost: part.cost || 0, price: part.price || 0, total: part.price || 0, costTotal: part.cost || 0,
     }];
-    patch({ partItems: nextParts, laborItems: laborItemsForPart(part) });
+    patch({ partItems: nextParts, laborItems: laborItemsForPart(part, lineId) });
     setPartSearch('');
   };
   const choosePart = (lineId: string, partId: string) => {
     const part = parts.find(item => item.id === partId);
     const nextParts = calculated.partItems.map(item => item.id === lineId ? { ...item, partId, partNo: part?.partNo || '', name: part?.name || '', cost: part?.cost || 0, price: part?.price || 0 } : item);
-    patch({ partItems: nextParts, laborItems: part ? laborItemsForPart(part) : calculated.laborItems });
+    patch({ partItems: nextParts, laborItems: part ? laborItemsForPart(part, lineId) : calculated.laborItems });
   };
-  const laborItemsForPart = (part: Part) => {
+  const laborItemsForPart = (part: Part, lineId: string) => {
     const remembered = partLaborHistory.get(`id:${part.id}`)
       || partLaborHistory.get(`no:${part.partNo.trim().toLocaleLowerCase()}`)
       || [];
-    const existing = new Set(calculated.laborItems.map(item => item.description.trim().toLocaleLowerCase()).filter(Boolean));
-    const additions = remembered
-      .filter(item => !existing.has(item.description.trim().toLocaleLowerCase()))
-      .map(item => ({
-        ...item,
-        id: uid(),
-        technician: order.technician || item.technician || '',
-        billingMode: item.billingMode === 'flat' ? 'flat' as const : 'hourly' as const,
-        hours: Number(item.hours || 0), rate: Number(item.rate || 0), flatAmount: Number(item.flatAmount || 0),
-      }));
-    return [...calculated.laborItems, ...additions];
+    const previous = calculated.laborItems.find(item => item.linkedPartItemId === lineId);
+    const source = remembered[0] || previous;
+    const linked: LaborItem = source ? {
+      ...source, id: previous?.id || uid(), linkedPartItemId: lineId,
+      description: source.description || `${part.name} 工时`, technician: order.technician || source.technician || '',
+      billingMode: source.billingMode === 'flat' ? 'flat' : 'hourly', hours: Number(source.hours || 0),
+      rate: Number(source.rate || 0), flatAmount: Number(source.flatAmount || 0),
+    } : {
+      id: uid(), linkedPartItemId: lineId, description: `${part.name} 工时`, hours: 1,
+      rate: settings.defaultLaborRate, technician: order.technician || '', total: settings.defaultLaborRate,
+      billingMode: 'hourly', flatAmount: 0,
+    };
+    return [...calculated.laborItems.filter(item => item.linkedPartItemId !== lineId), linked];
   };
   const updatePart = (id: string, changes: Partial<PartItem>) => patch({
     partItems: calculated.partItems.map(item => item.id === id ? { ...item, ...changes } : item),
   });
-  const removePart = (id: string) => patch({ partItems: calculated.partItems.filter(item => item.id !== id) });
+  const removePart = (id: string) => patch({
+    partItems: calculated.partItems.filter(item => item.id !== id),
+    laborItems: calculated.laborItems.filter(item => item.linkedPartItemId !== id),
+  });
 
   const transitionReview = (action: '提交审查' | '批准维修' | '退回补充', changes: Partial<WorkOrder>) => {
     patch({ ...changes, reviewHistory: [...(order.reviewHistory || []), { id: uid(), action, by: currentUser, at: new Date().toISOString(), note: order.reviewNotes || '' }] });
@@ -511,7 +521,12 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, w
     if (!calculated.customer || !calculated.vehicle) { setActivePanel('intake'); return alert('请选择客户和车辆。'); }
     if (!checklist.intake || !checklist.exterior) { setActivePanel('evidence'); return alert('请先完成“接车资料”和“车辆外观”两项检查。'); }
     if (calculated.laborItems.some(item => !item.description)) { setActivePanel('pricing'); return alert('请填写所有人工项目名称。'); }
-    if (calculated.partItems.some(item => !item.name || item.qty <= 0)) { setActivePanel('pricing'); return alert('请检查配件名称和数量。'); }
+    const invalidServiceLine = calculated.partItems.some(item => {
+      const linkedLabor = calculated.laborItems.find(labor => labor.linkedPartItemId === item.id);
+      const hasPart = !!(item.partId || item.partNo.trim() || item.name.trim());
+      return hasPart ? (!item.name.trim() || item.qty <= 0) : !linkedLabor?.description.trim();
+    });
+    if (invalidServiceLine) { setActivePanel('pricing'); return alert('请填写人工项目；如有配件，请检查配件名称和数量。'); }
     setSaving(true);
     try { await onSave(calculated); await removeWorkOrderDraft(draftKey); } finally { setSaving(false); }
   };
@@ -611,16 +626,16 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, w
       <div className="quick-repair-scroll" aria-label="常用维修项目">{quickRepairItems.map(template => { const selected = calculated.laborItems.some(item => item.description === template.name); return <button key={template.name} type="button" className={selected ? 'selected' : ''} onClick={() => toggleQuickRepair(template)}><b>{selected ? '✓ ' : '＋ '}{template.name}</b><small>默认 {template.hours} 工时</small></button>; })}</div>
       <div className="line-table"><div className="line-head labor-grid"><span>项目</span><span>计费</span><span>工时 / 一口价</span><span>费率</span><span>技师</span><span>小计</span><span /></div>
       <datalist id="labor-price-history">{laborHistoryNames.map(name => <option key={name} value={name} />)}</datalist>
-      {calculated.laborItems.map(item => { const flat = item.billingMode === 'flat'; return <div className="line-row labor-grid" key={item.id}><input list="labor-price-history" value={item.description} onChange={e => updateLabor(item.id, { description: e.target.value })} onBlur={e => applyRememberedLaborPrice(item.id, e.target.value)} placeholder="例如：更换水泵（同名项目自动带入上次价格）" /><select value={flat ? 'flat' : 'hourly'} onChange={e => updateLabor(item.id, { billingMode: e.target.value as 'hourly' | 'flat', flatAmount: e.target.value === 'flat' ? item.total : item.flatAmount })}><option value="hourly">按小时</option><option value="flat">一口价</option></select><input type="number" inputMode="decimal" step={flat ? '0.01' : '0.1'} value={editableNumber(flat ? item.flatAmount : item.hours)} onChange={e => updateLabor(item.id, flat ? { flatAmount: Number(e.target.value) } : { hours: Number(e.target.value) })} aria-label={flat ? '一口价金额' : '工时'} /><input type="number" inputMode="decimal" step="0.01" value={editableNumber(item.rate)} disabled={flat} onChange={e => updateLabor(item.id, { rate: Number(e.target.value) })} /><input value={item.technician || ''} onChange={e => updateLabor(item.id, { technician: e.target.value })} /><b>{canViewFinancials ? money(item.total) : '—'}</b><button className="danger-link" onClick={() => removeLabor(item.id)}>删除</button></div> })}
-      {!calculated.laborItems.length && <div className="empty-line">尚未添加人工项目</div>}</div>
+      {calculated.laborItems.filter(item => !item.linkedPartItemId).map(item => { const flat = item.billingMode === 'flat'; return <div className="line-row labor-grid" key={item.id}><input list="labor-price-history" value={item.description} onChange={e => updateLabor(item.id, { description: e.target.value })} onBlur={e => applyRememberedLaborPrice(item.id, e.target.value)} placeholder="例如：更换水泵（同名项目自动带入上次价格）" /><select value={flat ? 'flat' : 'hourly'} onChange={e => updateLabor(item.id, { billingMode: e.target.value as 'hourly' | 'flat', flatAmount: e.target.value === 'flat' ? item.total : item.flatAmount })}><option value="hourly">按小时</option><option value="flat">一口价</option></select><input type="number" inputMode="decimal" step={flat ? '0.01' : '0.1'} value={editableNumber(flat ? item.flatAmount : item.hours)} onChange={e => updateLabor(item.id, flat ? { flatAmount: Number(e.target.value) } : { hours: Number(e.target.value) })} aria-label={flat ? '一口价金额' : '工时'} /><input type="number" inputMode="decimal" step="0.01" value={editableNumber(item.rate)} disabled={flat} onChange={e => updateLabor(item.id, { rate: Number(e.target.value) })} /><input value={item.technician || ''} onChange={e => updateLabor(item.id, { technician: e.target.value })} /><b>{canViewFinancials ? money(item.total) : '—'}</b><button className="danger-link" onClick={() => removeLabor(item.id)}>删除</button></div> })}
+      {!calculated.laborItems.some(item => !item.linkedPartItemId) && <div className="empty-line">常用维修项目也可以继续在这里单独添加</div>}</div>
     </section>
 
-    <section className="form-section"><div className="section-title"><div><h3>配件项目</h3><span className="muted">选择库存配件时，自动带入该配件上次使用的人工项目和工时费。</span></div><button onClick={addPart}>＋ 手动配件</button></div>
+    <section className="form-section"><div className="section-title"><div><h3>配件与工时项目</h3><span className="muted">配件和对应工时在同一行填写；没有配件时，配件部分可以留空，只填写人工。</span></div><button onClick={addPart}>＋ 新增项目</button></div>
       <div className="work-order-part-search"><input value={partSearch} onChange={event => setPartSearch(event.target.value)} placeholder="搜索仓库库存：配件编号、OEM、名称、品牌或供应商" />{partSearch && <button type="button" onClick={() => setPartSearch('')}>清除</button>}</div>
       {partSearch && <div className="inventory-search-results">{inventoryMatches.map(part => <button type="button" key={part.id} onClick={() => addInventoryPart(part)}><span><b>{part.partNo}</b><small>{part.name}{part.brand ? ` · ${part.brand}` : ''}</small></span><span><b>库存 {part.qty}</b><small>售价 {money(part.price)}</small></span></button>)}{!inventoryMatches.length && <p>没有找到匹配的库存配件，可以点击“手动配件”录入。</p>}</div>}
-      <div className="line-table"><div className="line-head parts-grid"><span>库存配件</span><span>编号/名称</span><span>数量</span><span>售价</span><span>小计</span><span /></div>
-      {calculated.partItems.map(item => <div className="line-row parts-grid" key={item.id}><select value={item.partId || ''} onChange={e => choosePart(item.id, e.target.value)}><option value="">手动项目</option>{parts.map(part => <option key={part.id} value={part.id}>{part.partNo} · {part.name}（库存 {part.qty}）</option>)}</select><div><input value={item.partNo} onChange={e => updatePart(item.id, { partNo: e.target.value })} placeholder="配件编号" /><input value={item.name} onChange={e => updatePart(item.id, { name: e.target.value })} placeholder="配件名称" /></div><input type="number" inputMode="numeric" step="1" value={editableNumber(item.qty)} onChange={e => updatePart(item.id, { qty: Number(e.target.value) })} /><input type="number" inputMode="decimal" step="0.01" value={editableNumber(item.price)} disabled={!canEditPricing} onChange={e => updatePart(item.id, { price: Number(e.target.value) })} /><b>{canViewFinancials ? money(item.total) : '—'}</b><button className="danger-link" onClick={() => removePart(item.id)}>删除</button></div>)}
-      {!calculated.partItems.length && <div className="empty-line">尚未添加配件</div>}</div>
+      <div className="line-table"><div className="line-head parts-grid service-grid"><span>库存配件</span><span>配件（可留空）</span><span>数量</span><span>售价</span><span>人工项目</span><span>计费</span><span>工时/一口价</span><span>费率</span><span>合计</span><span /></div>
+      {calculated.partItems.map(item => { const labor = calculated.laborItems.find(entry => entry.linkedPartItemId === item.id); const flat = labor?.billingMode === 'flat'; return <div className="line-row parts-grid service-grid" key={item.id}><select value={item.partId || ''} onChange={e => choosePart(item.id, e.target.value)}><option value="">无配件 / 手动填写</option>{parts.map(part => <option key={part.id} value={part.id}>{part.partNo} · {part.name}（库存 {part.qty}）</option>)}</select><div><input value={item.partNo} onChange={e => updatePart(item.id, { partNo: e.target.value })} placeholder="配件编号（可空）" /><input value={item.name} onChange={e => updatePart(item.id, { name: e.target.value })} placeholder="配件名称（可空）" /></div><input type="number" inputMode="numeric" step="1" value={editableNumber(item.qty)} onChange={e => updatePart(item.id, { qty: Number(e.target.value) })} /><input type="number" inputMode="decimal" step="0.01" value={editableNumber(item.price)} disabled={!canEditPricing} onChange={e => updatePart(item.id, { price: Number(e.target.value) })} />{labor ? <><input list="labor-price-history" value={labor.description} onChange={e => updateLabor(labor.id, { description: e.target.value })} onBlur={e => applyRememberedLaborPrice(labor.id, e.target.value)} placeholder="人工项目" /><select value={flat ? 'flat' : 'hourly'} onChange={e => updateLabor(labor.id, { billingMode: e.target.value as 'hourly' | 'flat', flatAmount: e.target.value === 'flat' ? labor.total : labor.flatAmount })}><option value="hourly">按小时</option><option value="flat">一口价</option></select><input type="number" inputMode="decimal" step={flat ? '0.01' : '0.1'} value={editableNumber(flat ? labor.flatAmount : labor.hours)} onChange={e => updateLabor(labor.id, flat ? { flatAmount: Number(e.target.value) } : { hours: Number(e.target.value) })} /><input type="number" inputMode="decimal" step="0.01" value={editableNumber(labor.rate)} disabled={flat} onChange={e => updateLabor(labor.id, { rate: Number(e.target.value) })} /></> : <><span>—</span><span>—</span><span>—</span><span>—</span></>}<b>{canViewFinancials ? money(item.total + (labor?.total || 0)) : '—'}</b><button className="danger-link" onClick={() => removePart(item.id)}>删除</button></div> })}
+      {!calculated.partItems.length && <div className="empty-line">点击“新增项目”，可填写配件＋工时，或只填写工时</div>}</div>
     </section>
 
     {canViewFinancials && <section className="form-section totals-section"><div><div className="form-grid four compact">

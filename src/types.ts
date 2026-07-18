@@ -28,11 +28,13 @@ export type Part = {
 export type LaborItem = {
   id: string; description: string; hours: number; rate: number; technician?: string; total: number;
   billingMode?: 'hourly' | 'flat'; flatAmount?: number;
+  linkedPartItemId?: string;
 };
 
 export type PartItem = {
   id: string; partId?: string; partNo: string; name: string; qty: number;
   cost: number; price: number; total: number; costTotal: number;
+  serviceOnly?: boolean;
 };
 
 export type WorkOrderStatus = '等待检查' | '等待批准' | '等待配件' | '维修中' | '已完成' | '已交车' | '已取消';

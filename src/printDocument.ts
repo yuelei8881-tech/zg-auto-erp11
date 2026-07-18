@@ -22,7 +22,7 @@ export function printDocumentV077(order: WorkOrder, settings: ShopSettings, kind
     return `<div>${escapeHtml(primary)}</div>${secondary && secondary.toLowerCase() !== primary.toLowerCase() ? `<div class="translation">${escapeHtml(secondary)}</div>` : ''}`;
   };
   const laborRows = (order.laborItems || []).map(item => { const flat = item.billingMode === 'flat'; return `<tr><td>${escapeHtml(item.description)}</td><td class="n">${flat ? 'Flat' : Number(item.hours).toFixed(1)}</td><td class="n">${flat ? '—' : money(item.rate)}</td><td class="n">${money(item.total)}</td></tr>`; }).join('');
-  const partRows = (order.partItems || []).map(item => `<tr><td>${escapeHtml(item.partNo)}</td><td>${escapeHtml(item.name)}</td><td class="n">${item.qty}</td><td class="n">${money(item.price)}</td><td class="n">${money(item.total)}</td></tr>`).join('');
+  const partRows = (order.partItems || []).filter(item => !!(item.partId || item.partNo?.trim() || item.name?.trim())).map(item => `<tr><td>${escapeHtml(item.partNo)}</td><td>${escapeHtml(item.name)}</td><td class="n">${item.qty}</td><td class="n">${money(item.price)}</td><td class="n">${money(item.total)}</td></tr>`).join('');
   const signed = order.customerSignature
     ? `<div class="signed"><img src="${escapeHtml(order.customerSignature)}"><span>${escapeHtml(order.customerSignedBy || order.customer)}${order.customerSignedAt ? ` · ${escapeHtml(new Date(order.customerSignedAt).toLocaleString())}` : ''}</span></div>`
     : '';
