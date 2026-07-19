@@ -25,6 +25,8 @@ type TranslationStatus = 'idle' | 'translating' | 'done' | 'error';
 type MobileStep = 'account' | 'inspection' | 'quote' | 'approval' | 'repair' | 'checkout';
 type RepairLibraryItem = { name: string; labor: LaborItem; parts: PartItem[]; total: number; lastUsed: string };
 
+const normalizeVehicleIdentifier = (value: unknown) => String(value || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+
 const mobileSteps: Array<{ key: MobileStep; label: string; short: string }> = [
   { key: 'account', label: '接车与照片', short: '接车' },
   { key: 'inspection', label: '检查诊断', short: '检查' },
@@ -364,11 +366,18 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, w
     const fleet = fleets.find(item => item.id === order.fleetId);
     if (!customer && !fleet) return alert('请先选择客户、公司或车队。');
     if (!vehicleDraft.plate.trim() || !vehicleDraft.year.trim() || !vehicleDraft.make.trim() || !vehicleDraft.model.trim()) return alert('请填写车牌、年份、品牌和车型。');
-    const duplicate = vehicles.find(item => item.plate.trim().toUpperCase() === vehicleDraft.plate.trim().toUpperCase());
-    if (duplicate) { selectVehicle(duplicate.id); setAddingVehicle(false); return alert('该车牌已存在，已经为您自动选中。'); }
+    const normalizedPlate = normalizeVehicleIdentifier(vehicleDraft.plate);
+    const normalizedVin = normalizeVehicleIdentifier(vehicleDraft.vin);
+    const duplicate = vehicles.find(item => (normalizedVin && normalizeVehicleIdentifier(item.vin) === normalizedVin) || (normalizedPlate && normalizeVehicleIdentifier(item.plate) === normalizedPlate));
+    if (duplicate) {
+      selectVehicle(duplicate.id);
+      setAddingVehicle(false);
+      const matchedBy = normalizedVin && normalizeVehicleIdentifier(duplicate.vin) === normalizedVin ? `VIN ${duplicate.vin}` : `车牌 ${duplicate.plate}`;
+      return alert(`车辆已经存在，不能重复添加。\n匹配信息：${matchedBy}\n现有车辆：${duplicate.year} ${duplicate.make} ${duplicate.model}\n所属客户：${duplicate.ownerName || '未记录'}\n系统已自动选中这辆车。`);
+    }
     const vehicle: Vehicle = {
       id: uid(), ownerType: fleet ? '车队' : customer!.type, ownerId: fleet?.id || customer!.id, ownerName: fleet?.company || customer!.name,
-      plate: vehicleDraft.plate.trim().toUpperCase(), vin: vehicleDraft.vin.trim().toUpperCase(),
+      plate: normalizedPlate, vin: normalizedVin,
       year: vehicleDraft.year.trim(), make: vehicleDraft.make.trim(), model: vehicleDraft.model.trim(), engine: vehicleDraft.engine.trim(), mileage: Number(vehicleDraft.mileage || 0),
     };
     setVehicleSaving(true);

@@ -384,6 +384,18 @@ function App({ cloud }: { cloud: CloudSession }) {
 
   const saveModal = async (type: NonNullable<ModalState>['type'], data: Record<string, unknown>) => {
     const row: Record<string, unknown> & { id: string } = { ...data, id: String(data.id || uid()) };
+    if (type === 'vehicle') {
+      const plate = normalizeVehicleIdentifier(row.plate);
+      const vin = normalizeVehicleIdentifier(row.vin);
+      const duplicate = store.vehicles.find(item => item.id !== row.id && ((vin && normalizeVehicleIdentifier(item.vin) === vin) || (plate && normalizeVehicleIdentifier(item.plate) === plate)));
+      if (duplicate) {
+        const matchedBy = vin && normalizeVehicleIdentifier(duplicate.vin) === vin ? `VIN ${duplicate.vin}` : `车牌 ${duplicate.plate}`;
+        alert(`车辆已经存在，不能重复添加。\n匹配信息：${matchedBy}\n现有车辆：${duplicate.year} ${duplicate.make} ${duplicate.model}\n所属客户：${duplicate.ownerName || '未记录'}`);
+        return;
+      }
+      row.plate = plate;
+      row.vin = vin;
+    }
     if (type === 'driver' && row.fleetId) {
       const fleet = store.fleets.find(item => item.id === row.fleetId);
       if (fleet) row.company = fleet.company;
@@ -779,6 +791,10 @@ function initialForm(type: NonNullable<ModalState>['type'], value: Record<string
 }
 
 function modalTitle(type: NonNullable<ModalState>['type'], editing: boolean) { const names = { customer: '客户', fleet: '车队公司', driver: '司机', vehicle: '车辆', part: '配件', expense: '支出', campaign: '优惠活动', warranty: '车辆保修', settings: '系统设置' }; return `${editing ? '编辑' : '添加'}${names[type]}`; }
+
+function normalizeVehicleIdentifier(value: unknown) {
+  return String(value || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+}
 
 function ListPage({ title, subtitle, action, onAction, children }: { title: string; subtitle: string; action: string; onAction: () => void; children: React.ReactNode }) { return <div className="page"><div className="page-title"><div><p className="eyebrow">Z&G AUTO ERP</p><h2>{title}</h2><p>{subtitle}</p></div><button className="primary" onClick={onAction}>{action}</button></div><section className="panel">{children}</section></div>; }
 function Kpi({ label, value, tone = '', onClick, hint }: { label: string; value: string; tone?: string; onClick?: () => void; hint?: string }) { const content = <><span>{label}</span><b>{value}</b>{hint && <small>{hint}</small>}</>; return onClick ? <button type="button" className={`kpi kpi-button ${tone}`} onClick={onClick}>{content}</button> : <div className={`kpi ${tone}`}>{content}</div>; }
