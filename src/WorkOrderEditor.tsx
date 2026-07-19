@@ -811,9 +811,29 @@ function ServicePackageEditor({ value, inventory, editing, saving, onChange, onC
       <label>人工计费方式<select value={value.billingMode} onChange={event => patchPackage({ billingMode: event.target.value as 'hourly' | 'flat' })}><option value="hourly">按小时</option><option value="flat">一口价</option></select></label>
       {value.billingMode === 'flat' ? <label>人工一口价<input type="number" inputMode="decimal" step="0.01" value={value.flatAmount || ''} onChange={event => patchPackage({ flatAmount: Number(event.target.value) })} /></label> : <><label>工时<input type="number" inputMode="decimal" step="0.1" value={value.hours || ''} onChange={event => patchPackage({ hours: Number(event.target.value) })} /></label><label>每小时费率<input type="number" inputMode="decimal" step="0.01" value={value.rate || ''} onChange={event => patchPackage({ rate: Number(event.target.value) })} /></label></>}
       <div className="span-2 package-parts-editor"><div className="section-title"><h3>套餐消耗配件</h3><button type="button" onClick={() => patchPackage({ parts: [...value.parts, { partId: '', qty: 1 }] })}>＋ 添加一种配件</button></div>
-        {value.parts.map((packagePart, index) => <div key={index}><select value={packagePart.partId} onChange={event => patchPart(index, { partId: event.target.value })}><option value="">选择库存配件</option>{inventory.map(part => <option key={part.id} value={part.id}>{part.partNo} · {part.name}（库存 {part.qty}）</option>)}</select><input type="number" inputMode="decimal" min="0.01" step="0.01" value={packagePart.qty || ''} onChange={event => patchPart(index, { qty: Number(event.target.value) })} placeholder="用量" /><button type="button" className="danger-link" onClick={() => patchPackage({ parts: value.parts.filter((_, itemIndex) => itemIndex !== index) })}>删除</button></div>)}
+        {value.parts.map((packagePart, index) => <div key={index}><PackagePartSearchInput inventory={inventory} partId={packagePart.partId} listId={`package-inventory-${index}`} onSelect={partId => patchPart(index, { partId })} /><input type="number" inputMode="decimal" min="0.01" step="0.01" value={packagePart.qty || ''} onChange={event => patchPart(index, { qty: Number(event.target.value) })} placeholder="用量" /><button type="button" className="danger-link" onClick={() => patchPackage({ parts: value.parts.filter((_, itemIndex) => itemIndex !== index) })}>删除</button></div>)}
       </div>
     </div>
     <div className="modal-foot"><button type="button" onClick={onCancel}>取消</button><button type="button" className="primary" disabled={saving} onClick={onSave}>{saving ? '保存中…' : '保存维修套餐'}</button></div>
   </div></div>;
+}
+
+function PackagePartSearchInput({ inventory, partId, listId, onSelect }: { inventory: Part[]; partId: string; listId: string; onSelect: (partId: string) => void }) {
+  const selected = inventory.find(part => part.id === partId);
+  const displayPart = (part: Part) => `${part.partNo} · ${part.name}${part.brand ? ` · ${part.brand}` : ''}（库存 ${part.qty}）`;
+  const [query, setQuery] = useState(selected ? displayPart(selected) : '');
+  useEffect(() => { setQuery(selected ? displayPart(selected) : ''); }, [partId, selected?.partNo, selected?.name, selected?.brand, selected?.qty]);
+  const searchable = (part: Part) => [part.partNo, part.oemNo, part.name, part.brand, part.supplier].filter(Boolean).join(' ').toLocaleLowerCase();
+  const findExact = (text: string) => {
+    const normalized = text.trim().toLocaleLowerCase();
+    return inventory.find(part => [part.id, part.partNo, part.oemNo, part.name, displayPart(part)].filter(Boolean).some(value => String(value).trim().toLocaleLowerCase() === normalized));
+  };
+  const chooseTypedPart = () => {
+    if (partId) return setQuery(selected ? displayPart(selected) : query);
+    const normalized = query.trim().toLocaleLowerCase();
+    if (!normalized) return;
+    const matches = inventory.filter(part => searchable(part).includes(normalized));
+    if (matches.length === 1) { onSelect(matches[0].id); setQuery(displayPart(matches[0])); }
+  };
+  return <label className="package-part-search"><input list={listId} value={query} placeholder="输入编号、名称、OEM 或品牌搜索" onChange={event => { const text = event.target.value; setQuery(text); onSelect(findExact(text)?.id || ''); }} onBlur={chooseTypedPart} autoComplete="off" /><datalist id={listId}>{inventory.map(part => <option key={part.id} value={displayPart(part)}>{part.oemNo ? `OEM ${part.oemNo}` : part.partNo}</option>)}</datalist><small>{selected ? `已选择：${selected.partNo} · ${selected.name}，当前库存 ${selected.qty}` : query ? '请从搜索建议中选择库存配件' : '可直接输入并搜索库存配件'}</small></label>;
 }
