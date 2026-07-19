@@ -149,6 +149,7 @@ export type ServicePackage = {
   id: string; name: string; laborDescription: string;
   billingMode: 'hourly' | 'flat'; hours: number; rate: number; flatAmount?: number;
   parts: Array<{ partId: string; qty: number }>;
+  archived?: boolean; archivedAt?: string; archivedBy?: string; archiveReason?: string;
 };
 
 export type AppStore = {
