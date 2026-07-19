@@ -384,6 +384,28 @@ function App({ cloud }: { cloud: CloudSession }) {
 
   const saveModal = async (type: NonNullable<ModalState>['type'], data: Record<string, unknown>) => {
     const row: Record<string, unknown> & { id: string } = { ...data, id: String(data.id || uid()) };
+    if (type === 'customer') {
+      const phone = normalizePhone(row.phone);
+      const email = normalizeText(row.email);
+      const name = normalizeText(row.name);
+      const duplicate = store.customers.find(item => item.id !== row.id && ((phone && normalizePhone(item.phone) === phone) || (email && normalizeText(item.email) === email) || (name && normalizeText(item.name) === name)));
+      if (duplicate) {
+        const matchedBy = phone && normalizePhone(duplicate.phone) === phone ? `手机号 ${duplicate.phone}` : email && normalizeText(duplicate.email) === email ? `邮箱 ${duplicate.email}` : `客户名称 ${duplicate.name}`;
+        alert(`客户已经存在，不能重复添加。\n匹配信息：${matchedBy}\n现有客户：${duplicate.name}\n联系电话：${duplicate.phone || '未记录'}`);
+        return;
+      }
+    }
+    if (type === 'fleet') {
+      const phone = normalizePhone(row.phone);
+      const email = normalizeText(row.billingEmail);
+      const company = normalizeText(row.company);
+      const duplicate = store.fleets.find(item => item.id !== row.id && ((phone && normalizePhone(item.phone) === phone) || (email && normalizeText(item.billingEmail) === email) || (company && normalizeText(item.company) === company)));
+      if (duplicate) {
+        const matchedBy = phone && normalizePhone(duplicate.phone) === phone ? `联系电话 ${duplicate.phone}` : email && normalizeText(duplicate.billingEmail) === email ? `账单邮箱 ${duplicate.billingEmail}` : `公司名称 ${duplicate.company}`;
+        alert(`车队/公司已经存在，不能重复添加。\n匹配信息：${matchedBy}\n现有公司：${duplicate.company}\n联系人：${duplicate.contact || '未记录'}`);
+        return;
+      }
+    }
     if (type === 'vehicle') {
       const plate = normalizeVehicleIdentifier(row.plate);
       const vin = normalizeVehicleIdentifier(row.vin);
@@ -794,6 +816,15 @@ function modalTitle(type: NonNullable<ModalState>['type'], editing: boolean) { c
 
 function normalizeVehicleIdentifier(value: unknown) {
   return String(value || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+}
+
+function normalizePhone(value: unknown) {
+  const digits = String(value || '').replace(/\D/g, '');
+  return digits.length === 11 && digits.startsWith('1') ? digits.slice(1) : digits;
+}
+
+function normalizeText(value: unknown) {
+  return String(value || '').trim().toLocaleLowerCase().replace(/\s+/g, ' ');
 }
 
 function ListPage({ title, subtitle, action, onAction, children }: { title: string; subtitle: string; action: string; onAction: () => void; children: React.ReactNode }) { return <div className="page"><div className="page-title"><div><p className="eyebrow">Z&G AUTO ERP</p><h2>{title}</h2><p>{subtitle}</p></div><button className="primary" onClick={onAction}>{action}</button></div><section className="panel">{children}</section></div>; }
