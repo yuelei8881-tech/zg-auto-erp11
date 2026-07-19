@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { Customer, Driver, EvidencePhoto, Fleet, InspectionChecklist, LaborItem, Part, PartItem, ShopSettings, Vehicle, WorkOrder, WorkOrderStatus } from './types';
+import type { Customer, Driver, EvidencePhoto, Fleet, InspectionChecklist, LaborItem, Part, PartItem, ServicePackage, ShopSettings, Vehicle, WorkOrder, WorkOrderStatus } from './types';
 import { decodeVin, money, recalculateWorkOrder, today, uid } from './lib/erp';
 import { MONTHLY_BILLING_TERM, MONTHLY_PAYMENT_METHOD, nextMonthlyBillingDate } from './lib/billing';
 import { recognizeVehiclePhoto } from './lib/ocr';
@@ -8,9 +8,11 @@ import type { CloudSession, StaffMember } from './lib/cloud';
 
 type Props = {
   value?: WorkOrder; customers: Customer[]; vehicles: Vehicle[]; fleets: Fleet[]; drivers: Driver[]; workOrders: WorkOrder[];
-  parts: Part[]; settings: ShopSettings; nextNumber: string;
+  parts: Part[]; servicePackages: ServicePackage[]; settings: ShopSettings; nextNumber: string;
   onSave: (order: WorkOrder, keepOpen?: boolean) => Promise<void>; onCancel: () => void;
     onCreateVehicle: (vehicle: Vehicle) => Promise<void>;
+    onSaveServicePackage: (item: ServicePackage) => Promise<void>;
+    onDeleteServicePackage: (id: string) => Promise<void>;
     onPrint: (order: WorkOrder, documentType: string) => void;
     canPrintDocuments: boolean;
   cloud: CloudSession;
@@ -137,7 +139,7 @@ async function removeWorkOrderDraft(key: string) {
   }).finally(() => database.close());
 }
 
-export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, workOrders, parts, settings, nextNumber, onSave, onCancel, onCreateVehicle, onPrint, cloud, currentUser, currentUserId, technicians, canApproveReview, canAssignTechnician, canEditPricing, canViewFinancials, canPrintDocuments }: Props) {
+export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, workOrders, parts, servicePackages, settings, nextNumber, onSave, onCancel, onCreateVehicle, onSaveServicePackage, onDeleteServicePackage, onPrint, cloud, currentUser, currentUserId, technicians, canApproveReview, canAssignTechnician, canEditPricing, canViewFinancials, canPrintDocuments }: Props) {
   const [order, setOrder] = useState<WorkOrder>(() => recalculateWorkOrder(value || {
     id: uid(), number: nextNumber, date: today(), customer: '', vehicle: '', status: '等待检查',
     technician: canAssignTechnician ? '' : currentUser, technicianUserId: canAssignTechnician ? '' : currentUserId,
@@ -159,6 +161,8 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, w
   const [translationStatus, setTranslationStatus] = useState<Record<TranslationSource, TranslationStatus>>({ complaint: 'idle', diagnosis: 'idle', workPerformed: 'idle' });
   const [translationError, setTranslationError] = useState<Record<TranslationSource, string>>({ complaint: '', diagnosis: '', workPerformed: '' });
   const [repairLibrarySearch, setRepairLibrarySearch] = useState('');
+  const [packageEditor, setPackageEditor] = useState<ServicePackage | null>(null);
+  const [packageSaving, setPackageSaving] = useState(false);
   const lastAutomaticTranslation = useRef<Record<TranslationSource, { source: string; translation: string }>>({
     complaint: { source: '', translation: '' }, diagnosis: { source: '', translation: '' }, workPerformed: { source: '', translation: '' },
   });
@@ -206,6 +210,14 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, w
   }, [workOrders, value?.id]);
   const repairLibrary = useMemo(() => {
     const remembered = new Map<string, RepairLibraryItem>();
+    servicePackages.forEach(savedPackage => {
+      const packageParts = savedPackage.parts.map(packagePart => {
+        const inventory = parts.find(part => part.id === packagePart.partId);
+        return inventory ? { id: uid(), partId: inventory.id, partNo: inventory.partNo, name: inventory.name, qty: packagePart.qty, cost: inventory.cost, price: inventory.price, total: inventory.price * packagePart.qty, costTotal: inventory.cost * packagePart.qty } as PartItem : undefined;
+      }).filter(Boolean) as PartItem[];
+      const labor: LaborItem = { id: uid(), description: savedPackage.laborDescription || savedPackage.name, billingMode: savedPackage.billingMode, hours: savedPackage.hours, rate: savedPackage.rate, flatAmount: savedPackage.flatAmount || 0, total: savedPackage.billingMode === 'flat' ? Number(savedPackage.flatAmount || 0) : savedPackage.hours * savedPackage.rate };
+      remembered.set(savedPackage.name.trim().toLocaleLowerCase(), { name: savedPackage.name, labor, parts: packageParts, total: labor.total + packageParts.reduce((sum, part) => sum + part.total, 0), lastUsed: '已保存套餐' });
+    });
     [...workOrders]
       .filter(item => item.id !== value?.id && item.status !== '已取消' && !item.archivedAt)
       .sort((a, b) => `${b.date || ''}-${b.number || ''}`.localeCompare(`${a.date || ''}-${a.number || ''}`))
@@ -226,7 +238,7 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, w
       }));
     const query = repairLibrarySearch.trim().toLocaleLowerCase();
     return [...remembered.values()].filter(item => !query || [item.name, ...item.parts.flatMap(part => [part.partNo, part.name])].some(text => String(text || '').toLocaleLowerCase().includes(query))).slice(0, 30);
-  }, [repairLibrarySearch, value?.id, workOrders]);
+  }, [parts, repairLibrarySearch, servicePackages, value?.id, workOrders]);
   const selectedVehicle = vehicles.find(v => v.id === order.vehicleId);
   const selectedAccountValue = order.fleetId ? `fleet:${order.fleetId}` : order.customerId ? `customer:${order.customerId}` : '';
   const availableVehicles = vehicles.filter(vehicle => !order.customerId && !order.fleetId || vehicle.ownerId === (order.fleetId || order.customerId));
@@ -497,6 +509,24 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, w
     };
     patch({ partItems: [...calculated.partItems, ...addedParts], laborItems: [...calculated.laborItems, addedLabor] });
   };
+  const openPackageEditor = (saved?: ServicePackage) => setPackageEditor(saved ? { ...saved, parts: saved.parts.map(item => ({ ...item })) } : {
+    id: uid(), name: '', laborDescription: '', billingMode: 'flat', hours: 1, rate: settings.defaultLaborRate, flatAmount: 0, parts: [{ partId: '', qty: 1 }],
+  });
+  const savePackage = async () => {
+    if (!packageEditor) return;
+    if (!packageEditor.name.trim() || !packageEditor.laborDescription.trim()) return alert('请填写套餐名称和人工项目名称。');
+    const validParts = packageEditor.parts.filter(item => item.partId && Number(item.qty) > 0);
+    if (!validParts.length) return alert('请至少选择一种库存配件并填写用量。');
+    setPackageSaving(true);
+    try {
+      await onSaveServicePackage({ ...packageEditor, name: packageEditor.name.trim(), laborDescription: packageEditor.laborDescription.trim(), parts: validParts, hours: Number(packageEditor.hours || 0), rate: Number(packageEditor.rate || 0), flatAmount: Number(packageEditor.flatAmount || 0) });
+      setPackageEditor(null);
+    } finally { setPackageSaving(false); }
+  };
+  const deletePackage = async (savedPackage: ServicePackage) => {
+    if (!confirm(`确定删除维修套餐“${savedPackage.name}”？`)) return;
+    await onDeleteServicePackage(savedPackage.id);
+  };
   const inventoryMatches = useMemo(() => {
     const query = partSearch.trim().toLowerCase();
     if (!query) return [];
@@ -732,7 +762,8 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, w
       {!!order.reviewHistory?.length && <div className="review-history"><b>审查记录</b>{[...order.reviewHistory].reverse().map(item => <div key={item.id}><span>{item.action}</span><small>{item.by} · {new Date(item.at).toLocaleString()}{item.note ? ` · ${item.note}` : ''}</small></div>)}</div>}
     </section>
 
-    <section className="form-section repair-library-section"><div className="section-title"><div><h3>维修项目资料库</h3><span className="muted">系统从已保存工单自动学习配件、数量、工时和价格；点击项目即可整套带入。</span></div><b>{repairLibrary.length} 个可用项目</b></div>
+    <section className="form-section repair-library-section"><div className="section-title"><div><h3>维修项目资料库</h3><span className="muted">每个套餐可绑定多种库存配件、用量和人工；点击项目即可整套带入。</span></div><div className="toolbar"><b>{repairLibrary.length} 个可用项目</b><button type="button" className="primary" onClick={() => openPackageEditor()}>＋ 新建维修套餐</button></div></div>
+      {!!servicePackages.length && <div className="service-package-admin">{servicePackages.map(savedPackage => <div key={savedPackage.id}><span><b>{savedPackage.name}</b><small>{savedPackage.parts.length} 种配件 · {savedPackage.billingMode === 'flat' ? `人工一口价 ${money(savedPackage.flatAmount || 0)}` : `${savedPackage.hours} 小时 × ${money(savedPackage.rate)}`}</small></span><button type="button" onClick={() => openPackageEditor(savedPackage)}>编辑</button><button type="button" className="danger-link" onClick={() => void deletePackage(savedPackage)}>删除</button></div>)}</div>}
       <div className="repair-library-search"><input value={repairLibrarySearch} onChange={event => setRepairLibrarySearch(event.target.value)} placeholder="搜索维修项目或配件，例如：刹车片、机油、火花塞" />{repairLibrarySearch && <button type="button" onClick={() => setRepairLibrarySearch('')}>清除</button>}</div>
       <div className="repair-library-list">{repairLibrary.map(template => <button type="button" key={template.name.toLocaleLowerCase()} onClick={() => addRepairLibraryItem(template)}><span><b>＋ {template.name}</b><small>{template.parts.length ? template.parts.map(part => `${part.name || part.partNo} ×${part.qty}`).join('、') : '仅人工，无配件'}</small></span><span><b>{money(template.total)}</b><small>{template.labor.billingMode === 'flat' ? '一口价' : `${template.labor.hours} 工时 × ${money(template.labor.rate)}`}</small></span></button>)}{!repairLibrary.length && <div className="empty-line">保存第一张包含人工项目的工单后，项目会自动出现在这里。</div>}</div>
     </section>
@@ -764,6 +795,25 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, w
       <label>实际结账金额（仅手动改价需双人授权）<input type="number" step="0.01" placeholder={`自动计算 ${money(calculated.laborTotal + calculated.partsTotal + calculated.outsource + calculated.tax - calculated.discount)}`} value={order.settlementTotal ?? ''} onChange={e => patch({ settlementTotal: e.target.value === '' ? undefined : Number(e.target.value) })} /></label>
       <div className="checkout-delivery-action"><span>{calculated.status === '已交车' ? '已经结账并交车' : calculated.balance <= 0.009 ? '款项已结清，可以交车' : order.paymentMethod === MONTHLY_PAYMENT_METHOD || order.paymentMethod === '月结' ? '月结客户，可以确认交车' : `欠款 ${money(calculated.balance)}，请先收款`}</span><button type="button" className="primary" onClick={finalizeDelivery} disabled={saving || calculated.status === '已交车'}>{calculated.status === '已交车' ? '已交车' : '确认结账并交车'}</button></div>
     </div><p className="tax-guidance">加州默认规则：系统仅对配件销售额计算销售税；单独列示的维修/安装人工通常不计销售税。制造加工人工等例外请由会计确认。参考：<a href="https://www.cdtfa.ca.gov/formspubs/pub25.pdf" target="_blank" rel="noreferrer">CDTFA Publication 25</a>、<a href="https://www.cdtfa.ca.gov/lawguides/vol1/sutr/1546.html" target="_blank" rel="noreferrer">Regulation 1546</a>。</p></div><div className="totals-card"><div><span>人工（免销售税）</span><b>{money(calculated.laborTotal)}</b></div><div><span>配件</span><b>{money(calculated.partsTotal)}</b></div><div><span>配件销售税</span><b>{money(calculated.tax)}</b></div><div className="grand"><span>总价</span><b>{money(calculated.total)}</b></div><div className="balance"><span>欠款</span><b>{money(calculated.balance)}</b></div></div></section>}
+    {packageEditor && <ServicePackageEditor value={packageEditor} inventory={parts} editing={servicePackages.some(item => item.id === packageEditor.id)} saving={packageSaving} onChange={setPackageEditor} onCancel={() => setPackageEditor(null)} onSave={() => void savePackage()} />}
     <div className="mobile-editor-actions"><div><small>{mobileStepIndex + 1} / {mobileSteps.length} · {draftStatus === 'saving' ? '正在自动保存…' : draftStatus === 'saved' ? '草稿已保存在本机' : draftStatus === 'error' ? '本机草稿保存失败' : '自动保存已开启'}</small><b>{mobileSteps[mobileStepIndex]?.label}</b></div><button type="button" onClick={() => moveMobileStep(-1)} disabled={mobileStepIndex === 0}>上一步</button><button type="button" className="primary" onClick={saveProgress} disabled={saving}>{saving ? '保存中…' : '保存进度'}</button><button type="button" onClick={() => moveMobileStep(1)} disabled={mobileStepIndex === mobileSteps.length - 1}>下一步</button></div>
   </div>;
+}
+
+function ServicePackageEditor({ value, inventory, editing, saving, onChange, onCancel, onSave }: { value: ServicePackage; inventory: Part[]; editing: boolean; saving: boolean; onChange: (value: ServicePackage | null) => void; onCancel: () => void; onSave: () => void }) {
+  const patchPackage = (changes: Partial<ServicePackage>) => onChange({ ...value, ...changes });
+  const patchPart = (index: number, changes: Partial<ServicePackage['parts'][number]>) => patchPackage({ parts: value.parts.map((item, itemIndex) => itemIndex === index ? { ...item, ...changes } : item) });
+  return <div className="modal-backdrop"><div className="modal service-package-modal">
+    <div className="modal-head"><div><p className="eyebrow">维修项目快捷设置</p><h2>{editing ? '编辑维修套餐' : '新建维修套餐'}</h2></div><button type="button" onClick={onCancel}>×</button></div>
+    <div className="form-grid two">
+      <label>套餐名称<input value={value.name} onChange={event => patchPackage({ name: event.target.value })} placeholder="例如：更换发动机机油和滤芯" /></label>
+      <label>人工项目名称<input value={value.laborDescription} onChange={event => patchPackage({ laborDescription: event.target.value })} placeholder="打印在工单上的人工名称" /></label>
+      <label>人工计费方式<select value={value.billingMode} onChange={event => patchPackage({ billingMode: event.target.value as 'hourly' | 'flat' })}><option value="hourly">按小时</option><option value="flat">一口价</option></select></label>
+      {value.billingMode === 'flat' ? <label>人工一口价<input type="number" inputMode="decimal" step="0.01" value={value.flatAmount || ''} onChange={event => patchPackage({ flatAmount: Number(event.target.value) })} /></label> : <><label>工时<input type="number" inputMode="decimal" step="0.1" value={value.hours || ''} onChange={event => patchPackage({ hours: Number(event.target.value) })} /></label><label>每小时费率<input type="number" inputMode="decimal" step="0.01" value={value.rate || ''} onChange={event => patchPackage({ rate: Number(event.target.value) })} /></label></>}
+      <div className="span-2 package-parts-editor"><div className="section-title"><h3>套餐消耗配件</h3><button type="button" onClick={() => patchPackage({ parts: [...value.parts, { partId: '', qty: 1 }] })}>＋ 添加一种配件</button></div>
+        {value.parts.map((packagePart, index) => <div key={index}><select value={packagePart.partId} onChange={event => patchPart(index, { partId: event.target.value })}><option value="">选择库存配件</option>{inventory.map(part => <option key={part.id} value={part.id}>{part.partNo} · {part.name}（库存 {part.qty}）</option>)}</select><input type="number" inputMode="decimal" min="0.01" step="0.01" value={packagePart.qty || ''} onChange={event => patchPart(index, { qty: Number(event.target.value) })} placeholder="用量" /><button type="button" className="danger-link" onClick={() => patchPackage({ parts: value.parts.filter((_, itemIndex) => itemIndex !== index) })}>删除</button></div>)}
+      </div>
+    </div>
+    <div className="modal-foot"><button type="button" onClick={onCancel}>取消</button><button type="button" className="primary" disabled={saving} onClick={onSave}>{saving ? '保存中…' : '保存维修套餐'}</button></div>
+  </div></div>;
 }

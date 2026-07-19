@@ -145,11 +145,17 @@ export type ShopSettings = {
   defaultLaborRate: number; defaultTaxRate: number; invoiceTerms?: string;
 };
 
+export type ServicePackage = {
+  id: string; name: string; laborDescription: string;
+  billingMode: 'hourly' | 'flat'; hours: number; rate: number; flatAmount?: number;
+  parts: Array<{ partId: string; qty: number }>;
+};
+
 export type AppStore = {
   customers: Customer[]; fleets: Fleet[]; drivers: Driver[]; vehicles: Vehicle[];
   workOrders: WorkOrder[]; parts: Part[]; inventoryLogs: InventoryLog[];
   payments: Payment[]; expenses: Expense[]; settings: ShopSettings[];
-  campaigns: Campaign[]; warranties: Warranty[];
+  campaigns: Campaign[]; warranties: Warranty[]; servicePackages: ServicePackage[];
   approvalRequests: ApprovalRequest[]; changeLogs: ChangeLog[];
   [key: string]: unknown[];
 };

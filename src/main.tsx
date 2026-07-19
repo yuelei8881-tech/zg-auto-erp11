@@ -4,7 +4,7 @@ import { FormalGate } from './FormalGate';
 import type { CloudRow, CloudSession, CloudStore, StaffMember } from './lib/cloud';
 import { decodeVin, escapeHtml, money, recalculateWorkOrder, today, uid } from './lib/erp';
 import { MONTHLY_BILLING_TERM, MONTHLY_PAYMENT_METHOD, nextMonthlyBillingDate } from './lib/billing';
-import type { AppStore, ApprovalRequest, Campaign, ChangeLog, Customer, Driver, Expense, Fleet, InventoryLog, Part, Payment, ShopSettings, Vehicle, Warranty, WorkOrder } from './types';
+import type { AppStore, ApprovalRequest, Campaign, ChangeLog, Customer, Driver, Expense, Fleet, InventoryLog, Part, Payment, ServicePackage, ShopSettings, Vehicle, Warranty, WorkOrder } from './types';
 import { WorkOrderEditor } from './WorkOrderEditor';
 import { SmartTools } from './SmartTools';
 import { ActivityCenter } from './ActivityCenter';
@@ -25,7 +25,7 @@ import './v0780.css';
 type Page = 'dashboard' | 'customers' | 'fleets' | 'vehicles' | 'workOrders' | 'parts' | 'finance' | 'campaigns' | 'staff' | 'smart' | 'settings';
 type ModalState = { type: 'customer' | 'fleet' | 'driver' | 'vehicle' | 'part' | 'expense' | 'campaign' | 'warranty' | 'settings'; value?: Record<string, unknown> } | null;
 
-const emptyStore: AppStore = { customers: [], fleets: [], drivers: [], vehicles: [], workOrders: [], parts: [], inventoryLogs: [], payments: [], expenses: [], settings: [], campaigns: [], warranties: [], approvalRequests: [], changeLogs: [] };
+const emptyStore: AppStore = { customers: [], fleets: [], drivers: [], vehicles: [], workOrders: [], parts: [], inventoryLogs: [], payments: [], expenses: [], settings: [], campaigns: [], warranties: [], servicePackages: [], approvalRequests: [], changeLogs: [] };
 const defaultSettings: ShopSettings = { id: '00000000-0000-4000-8000-000000000075', shopName: 'Z&G AUTO REPAIR', address: '319 Agostino Rd, San Gabriel, CA 91776', phone: '626-508-0888', email: '', defaultLaborRate: 165, defaultTaxRate: 9.5, invoiceTerms: 'Thank you for your business.' };
 
 const nav: Array<{ id: Page; icon: string; label: string }> = [
@@ -451,7 +451,7 @@ function App({ cloud }: { cloud: CloudSession }) {
     closeModal();
   };
 
-  if (editingOrder) return <WorkOrderEditor value={editingOrder === 'new' ? undefined : editingOrder} customers={store.customers} vehicles={store.vehicles} fleets={store.fleets} drivers={store.drivers} workOrders={store.workOrders} parts={store.parts} settings={settings} nextNumber={nextWorkOrderNumber(store.workOrders)} onCreateVehicle={vehicle => persist('vehicles', vehicle)} onPrint={(order, type) => printDocumentV077(recalculateWorkOrder(order), settings, type, store.payments)} onSave={saveWorkOrder} onCancel={() => setEditingOrder(null)} cloud={cloud} currentUser={actorName} currentUserId={cloud.user.id} technicians={staffMembers} canApproveReview={can(cloud, 'approve')} canAssignTechnician={can(cloud, 'assignTechnician')} canEditPricing={can(cloud, 'pricing')} canViewFinancials={can(cloud, 'pricing') || can(cloud, 'finance')} canPrintDocuments={can(cloud, 'printDocuments')} />;
+  if (editingOrder) return <WorkOrderEditor value={editingOrder === 'new' ? undefined : editingOrder} customers={store.customers} vehicles={store.vehicles} fleets={store.fleets} drivers={store.drivers} workOrders={store.workOrders} parts={store.parts} servicePackages={store.servicePackages} settings={settings} nextNumber={nextWorkOrderNumber(store.workOrders)} onCreateVehicle={vehicle => persist('vehicles', vehicle)} onSaveServicePackage={(item: ServicePackage) => persist('servicePackages', item)} onDeleteServicePackage={(id: string) => remove('servicePackages', id)} onPrint={(order, type) => printDocumentV077(recalculateWorkOrder(order), settings, type, store.payments)} onSave={saveWorkOrder} onCancel={() => setEditingOrder(null)} cloud={cloud} currentUser={actorName} currentUserId={cloud.user.id} technicians={staffMembers} canApproveReview={can(cloud, 'approve')} canAssignTechnician={can(cloud, 'assignTechnician')} canEditPricing={can(cloud, 'pricing')} canViewFinancials={can(cloud, 'pricing') || can(cloud, 'finance')} canPrintDocuments={can(cloud, 'printDocuments')} />;
 
   return <div className="app-shell">
     <aside className="sidebar"><div className="brand"><div className="brand-mark">Z&G</div><div><b>AUTO ERP</b><small>正式服务器版</small></div></div>
