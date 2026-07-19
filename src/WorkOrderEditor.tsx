@@ -438,6 +438,11 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, w
       patch({ laborItems: calculated.laborItems.filter(item => item.id !== existing.id) });
       return;
     }
+    const learnedPackage = repairLibrary.find(item => item.name.trim().toLocaleLowerCase() === template.name.trim().toLocaleLowerCase());
+    if (learnedPackage) {
+      addRepairLibraryItem(learnedPackage);
+      return;
+    }
     patch({ laborItems: [...calculated.laborItems, {
       id: uid(), description: template.name, hours: template.hours,
       rate: settings.defaultLaborRate, technician: order.technician || '',
@@ -471,7 +476,19 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, w
     const sourceParts = template.parts.length ? template.parts : [{
       id: '', partId: '', partNo: '', name: '', qty: 1, cost: 0, price: 0, total: 0, costTotal: 0, serviceOnly: true,
     } as PartItem];
-    const addedParts = sourceParts.map(source => ({ ...source, id: uid(), serviceOnly: !source.partId && !source.partNo?.trim() && !source.name?.trim() }));
+    const shortages = sourceParts.map(source => {
+      const inventory = parts.find(part => part.id === source.partId || (!!source.partNo?.trim() && part.partNo.trim().toLocaleLowerCase() === source.partNo.trim().toLocaleLowerCase()));
+      return inventory && Number(source.qty || 0) > Number(inventory.qty || 0) ? `${inventory.partNo} ${inventory.name}：需要 ${source.qty}，库存 ${inventory.qty}` : '';
+    }).filter(Boolean);
+    if (shortages.length) return alert(`套餐“${template.name}”库存不足，暂时不能添加：\n${shortages.join('\n')}`);
+    const addedParts = sourceParts.map(source => {
+      const inventory = parts.find(part => part.id === source.partId || (!!source.partNo?.trim() && part.partNo.trim().toLocaleLowerCase() === source.partNo.trim().toLocaleLowerCase()));
+      return {
+        ...source, id: uid(), partId: inventory?.id || source.partId, partNo: inventory?.partNo || source.partNo,
+        name: inventory?.name || source.name, cost: inventory?.cost ?? source.cost, price: inventory?.price ?? source.price,
+        serviceOnly: !inventory && !source.partId && !source.partNo?.trim() && !source.name?.trim(),
+      };
+    });
     const firstLineId = addedParts[0].id;
     const addedLabor: LaborItem = {
       ...template.labor, id: uid(), linkedPartItemId: firstLineId, technician: order.technician || template.labor.technician || '',

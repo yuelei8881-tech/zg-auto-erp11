@@ -1,7 +1,7 @@
 {
   "name": "zg-auto-erp-v076",
   "private": true,
-  "version": "0.84.6",
+  "version": "0.84.7",
   "engines": {
     "node": "22.x"
   },
