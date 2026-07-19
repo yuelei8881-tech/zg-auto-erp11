@@ -161,6 +161,7 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, w
   const [translationStatus, setTranslationStatus] = useState<Record<TranslationSource, TranslationStatus>>({ complaint: 'idle', diagnosis: 'idle', workPerformed: 'idle' });
   const [translationError, setTranslationError] = useState<Record<TranslationSource, string>>({ complaint: '', diagnosis: '', workPerformed: '' });
   const [repairLibrarySearch, setRepairLibrarySearch] = useState('');
+  const [repairLibraryOpen, setRepairLibraryOpen] = useState(false);
   const [packageEditor, setPackageEditor] = useState<ServicePackage | null>(null);
   const [packageSaving, setPackageSaving] = useState(false);
   const lastAutomaticTranslation = useRef<Record<TranslationSource, { source: string; translation: string }>>({
@@ -509,6 +510,7 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, w
       hours: Number(template.labor.hours || 0), rate: Number(template.labor.rate || 0), flatAmount: Number(template.labor.flatAmount || 0),
     };
     patch({ partItems: [...calculated.partItems, ...addedParts], laborItems: [...calculated.laborItems, addedLabor] });
+    setRepairLibraryOpen(false);
   };
   const openPackageEditor = (saved?: ServicePackage) => setPackageEditor(saved ? { ...saved, parts: saved.parts.map(item => ({ ...item })) } : {
     id: uid(), name: '', laborDescription: '', billingMode: 'flat', hours: 1, rate: settings.defaultLaborRate, flatAmount: 0, parts: [{ partId: '', qty: 1 }],
@@ -786,10 +788,15 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, w
       {!!order.reviewHistory?.length && <div className="review-history"><b>审查记录</b>{[...order.reviewHistory].reverse().map(item => <div key={item.id}><span>{item.action}</span><small>{item.by} · {new Date(item.at).toLocaleString()}{item.note ? ` · ${item.note}` : ''}</small></div>)}</div>}
     </section>
 
-    <section className="form-section repair-library-section"><div className="section-title"><div><h3>维修项目资料库</h3><span className="muted">每个套餐可绑定多种库存配件、用量和人工；点击项目即可整套带入。</span></div><div className="toolbar"><b>{repairLibrary.length} 个可用项目</b><button type="button" className="primary" onClick={() => openPackageEditor()}>＋ 新建维修套餐</button></div></div>
-      {!!servicePackages.some(item => !item.archived) && <div className="service-package-admin">{servicePackages.filter(item => !item.archived).map(savedPackage => <div key={savedPackage.id}><span><b>{savedPackage.name}</b><small>{savedPackage.parts.length} 种配件 · {savedPackage.billingMode === 'flat' ? `人工一口价 ${money(savedPackage.flatAmount || 0)}` : `${savedPackage.hours} 小时 × ${money(savedPackage.rate)}`}</small></span><button type="button" onClick={() => openPackageEditor(savedPackage)}>编辑</button><button type="button" className="danger-link" onClick={() => void deletePackage(savedPackage)}>删除</button></div>)}</div>}
-      <div className="repair-library-search"><input value={repairLibrarySearch} onChange={event => setRepairLibrarySearch(event.target.value)} placeholder="搜索维修项目或配件，例如：刹车片、机油、火花塞" />{repairLibrarySearch && <button type="button" onClick={() => setRepairLibrarySearch('')}>清除</button>}</div>
-      <div className="repair-library-list">{repairLibrary.map(template => <article key={template.name.toLocaleLowerCase()}><button type="button" className="repair-library-add" onClick={() => addRepairLibraryItem(template)}><span><b>＋ {template.name}</b><small>{template.parts.length ? template.parts.map(part => `${part.name || part.partNo} ×${part.qty}`).join('、') : '仅人工，无配件'}</small></span><span><b>{money(template.total)}</b><small>{template.labor.billingMode === 'flat' ? '一口价' : `${template.labor.hours} 工时 × ${money(template.labor.rate)}`}</small></span></button><div className="repair-library-actions"><button type="button" onClick={() => openLibraryPackageEditor(template)}>编辑</button><button type="button" className="danger-link" onClick={() => void deleteLibraryItem(template)}>删除</button></div></article>)}{!repairLibrary.length && <div className="empty-line">保存第一张包含人工项目的工单后，项目会自动出现在这里。</div>}</div>
+    <section className="form-section repair-library-section"><div className="section-title"><div><h3>维修项目资料库</h3><span className="muted">套餐默认折叠；展开后点击套餐主体，配件、用量和人工会整套加入工单。</span></div><button type="button" className="primary" onClick={() => openPackageEditor()}>＋ 新建维修套餐</button></div>
+      <details className="repair-library-collapse" open={repairLibraryOpen} onToggle={event => setRepairLibraryOpen(event.currentTarget.open)}>
+        <summary><span><b>维修套餐快捷选择</b><small>点开后选择套餐，点击套餐主体即可整套加入当前工单</small></span><strong>{repairLibrary.length} 个套餐</strong></summary>
+        <div className="repair-library-collapse-body">
+          {!!servicePackages.some(item => !item.archived) && <div className="service-package-admin">{servicePackages.filter(item => !item.archived).map(savedPackage => <div key={savedPackage.id}><span><b>{savedPackage.name}</b><small>{savedPackage.parts.length} 种配件 · {savedPackage.billingMode === 'flat' ? `人工一口价 ${money(savedPackage.flatAmount || 0)}` : `${savedPackage.hours} 小时 × ${money(savedPackage.rate)}`}</small></span><button type="button" onClick={() => openPackageEditor(savedPackage)}>编辑</button><button type="button" className="danger-link" onClick={() => void deletePackage(savedPackage)}>删除</button></div>)}</div>}
+          <div className="repair-library-search"><input value={repairLibrarySearch} onChange={event => setRepairLibrarySearch(event.target.value)} placeholder="搜索维修项目或配件，例如：刹车片、机油、火花塞" />{repairLibrarySearch && <button type="button" onClick={() => setRepairLibrarySearch('')}>清除</button>}</div>
+          <div className="repair-library-list">{repairLibrary.map(template => <article key={template.name.toLocaleLowerCase()}><button type="button" className="repair-library-add" onClick={() => addRepairLibraryItem(template)} title="点击将整套内容加入工单"><span><b>＋ {template.name}</b><small>{template.parts.length ? template.parts.map(part => `${part.name || part.partNo} ×${part.qty}`).join('、') : '仅人工，无配件'}</small></span><span><b>{money(template.total)}</b><small>{template.labor.billingMode === 'flat' ? '一口价 · 点击添加整套' : `${template.labor.hours} 工时 × ${money(template.labor.rate)} · 点击添加整套`}</small></span></button><div className="repair-library-actions"><button type="button" onClick={() => openLibraryPackageEditor(template)}>编辑</button><button type="button" className="danger-link" onClick={() => void deleteLibraryItem(template)}>删除</button></div></article>)}{!repairLibrary.length && <div className="empty-line">保存第一张包含人工项目的工单后，项目会自动出现在这里。</div>}</div>
+        </div>
+      </details>
     </section>
 
     <section className="form-section"><div className="section-title"><div><h3>人工项目</h3><span className="muted">左右滚动选择常用维修项目，再根据实际情况修改工时和费率。</span></div><button onClick={addLabor}>＋ 自定义工时</button></div>
