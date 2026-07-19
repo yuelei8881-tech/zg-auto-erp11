@@ -176,6 +176,7 @@
   .focused-editor[data-mobile-step="account"]>.evidence-section,
   .focused-editor[data-mobile-step="inspection"]>.panel-intake:has(.voice-fields),
   .focused-editor[data-mobile-step="inspection"]>.review-section,
+  .focused-editor[data-mobile-step="quote"]>.repair-library-section,
   .focused-editor[data-mobile-step="quote"]>.form-section:has(.labor-grid),
   .focused-editor[data-mobile-step="quote"]>.form-section:has(.parts-grid),
   .focused-editor[data-mobile-step="quote"]>.totals-section,
