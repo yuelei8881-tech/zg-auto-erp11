@@ -172,6 +172,7 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, w
   const latestOrder = useRef(order);
   latestOrder.current = order;
   const draftKey = `work-order:${value?.id || 'new'}`;
+  const allowLocalDraft = !value;
   const calculated = useMemo(() => recalculateWorkOrder(order), [order]);
   const serverOrder = value ? workOrders.find(item => item.id === value.id) : undefined;
   useEffect(() => {
@@ -262,6 +263,12 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, w
 
   useEffect(() => {
     let cancelled = false;
+    if (!allowLocalDraft) {
+      void removeWorkOrderDraft(draftKey);
+      setDraftReady(true);
+      setDraftStatus('idle');
+      return () => { cancelled = true; };
+    }
     void readWorkOrderDraft(draftKey).then(draft => {
       if (cancelled) return;
       if (draft && confirm(`发现 ${new Date(draft.savedAt).toLocaleString()} 自动保存的未完成工单，是否恢复？`)) {
@@ -272,17 +279,22 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, w
       setDraftReady(true);
     }).catch(() => { if (!cancelled) { setDraftStatus('error'); setDraftReady(true); } });
     return () => { cancelled = true; };
-  }, [draftKey]);
+  }, [allowLocalDraft, draftKey]);
 
   useEffect(() => {
-    if (!draftReady) return;
+    if (!draftReady || !allowLocalDraft) return;
     setDraftStatus('saving');
     const timer = window.setTimeout(() => {
       void writeWorkOrderDraft({ key: draftKey, savedAt: new Date().toISOString(), order: calculated, mobileStep })
         .then(() => setDraftStatus('saved')).catch(() => setDraftStatus('error'));
     }, 700);
     return () => window.clearTimeout(timer);
-  }, [calculated, draftKey, draftReady, mobileStep]);
+  }, [allowLocalDraft, calculated, draftKey, draftReady, mobileStep]);
+
+  const cancelEditor = () => {
+    if (value) void removeWorkOrderDraft(draftKey);
+    onCancel();
+  };
 
   const patch = (changes: Partial<WorkOrder>) => setOrder(current => recalculateWorkOrder({ ...current, ...changes }));
 
@@ -723,7 +735,7 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, w
   };
 
   return <div className="editor-screen focused-editor" data-panel={activePanel} data-mobile-step={mobileStep}>
-    <div className="editor-head"><div><p className="eyebrow">维修工单 / Repair Order</p><h2>{value ? `编辑 ${order.number}` : '新建维修工单'}</h2></div><div className="toolbar">{canPrintDocuments && <button type="button" onClick={() => onPrint(calculated, 'Repair Order')}>打印工单</button>}<button type="button" onClick={onCancel}>取消</button><button type="button" className="primary" onClick={submit} disabled={saving}>{saving ? '保存中…' : '保存工单'}</button></div></div>
+    <div className="editor-head"><div><p className="eyebrow">维修工单 / Repair Order</p><h2>{value ? `编辑 ${order.number}` : '新建维修工单'}</h2>{value && <small>已明确选择此工单；只有点击“保存工单”或“保存进度”才会写入服务器。</small>}</div><div className="toolbar">{canPrintDocuments && <button type="button" onClick={() => onPrint(calculated, 'Repair Order')}>打印工单</button>}<button type="button" onClick={cancelEditor}>取消</button><button type="button" className="primary" onClick={submit} disabled={saving}>{saving ? '保存中…' : '保存工单'}</button></div></div>
     <div className="workflow-strip">{workflowStages.map((stage, index) => <div key={stage} className={`workflow-step ${workflowStages.indexOf(workflowStage) >= index ? 'done' : ''} ${workflowStage === stage ? 'active' : ''}`}><span className="step-number">{index + 1}</span><strong>{stage}</strong><small>{['前两项即可保存','员工领取并诊断','配件工时与确认','施工及证据留存','收款与交车','流程完成'][index]}</small></div>)}</div>
 
     <nav className="editor-section-nav" aria-label="工单填写步骤">
@@ -834,7 +846,7 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, w
       <div className="checkout-delivery-action"><span>{calculated.status === '已交车' ? '已经结账并交车' : calculated.balance <= 0.009 ? '款项已结清，可以交车' : order.paymentMethod === MONTHLY_PAYMENT_METHOD || order.paymentMethod === '月结' ? '月结客户，可以确认交车' : `欠款 ${money(calculated.balance)}，请先收款`}</span><button type="button" className="primary" onClick={finalizeDelivery} disabled={saving || calculated.status === '已交车'}>{calculated.status === '已交车' ? '已交车' : '确认结账并交车'}</button></div>
     </div><p className="tax-guidance">加州默认规则：系统仅对配件销售额计算销售税；单独列示的维修/安装人工通常不计销售税。制造加工人工等例外请由会计确认。参考：<a href="https://www.cdtfa.ca.gov/formspubs/pub25.pdf" target="_blank" rel="noreferrer">CDTFA Publication 25</a>、<a href="https://www.cdtfa.ca.gov/lawguides/vol1/sutr/1546.html" target="_blank" rel="noreferrer">Regulation 1546</a>。</p></div><div className="totals-card"><div><span>人工（免销售税）</span><b>{money(calculated.laborTotal)}</b></div><div><span>配件</span><b>{money(calculated.partsTotal)}</b></div><div><span>配件销售税</span><b>{money(calculated.tax)}</b></div><div className="grand"><span>总价</span><b>{money(calculated.total)}</b></div><div className="balance"><span>欠款</span><b>{money(calculated.balance)}</b></div></div></section>}
     {packageEditor && <ServicePackageEditor value={packageEditor} inventory={parts} editing={servicePackages.some(item => item.id === packageEditor.id)} saving={packageSaving} onChange={setPackageEditor} onCancel={() => setPackageEditor(null)} onSave={() => void savePackage()} />}
-    <div className="mobile-editor-actions"><div><small>{mobileStepIndex + 1} / {mobileSteps.length} · {draftStatus === 'saving' ? '正在自动保存…' : draftStatus === 'saved' ? '草稿已保存在本机' : draftStatus === 'error' ? '本机草稿保存失败' : '自动保存已开启'}</small><b>{mobileSteps[mobileStepIndex]?.label}</b></div><button type="button" onClick={() => moveMobileStep(-1)} disabled={mobileStepIndex === 0}>上一步</button><button type="button" className="primary" onClick={saveProgress} disabled={saving}>{saving ? '保存中…' : '保存进度'}</button><button type="button" onClick={() => moveMobileStep(1)} disabled={mobileStepIndex === mobileSteps.length - 1}>下一步</button></div>
+    <div className="mobile-editor-actions"><div><small>{mobileStepIndex + 1} / {mobileSteps.length} · {allowLocalDraft ? (draftStatus === 'saving' ? '正在自动保存…' : draftStatus === 'saved' ? '草稿已保存在本机' : draftStatus === 'error' ? '本机草稿保存失败' : '自动保存已开启') : '已选择此工单；取消不会保存修改'}</small><b>{mobileSteps[mobileStepIndex]?.label}</b></div><button type="button" onClick={() => moveMobileStep(-1)} disabled={mobileStepIndex === 0}>上一步</button><button type="button" className="primary" onClick={saveProgress} disabled={saving}>{saving ? '保存中…' : '保存进度'}</button><button type="button" onClick={() => moveMobileStep(1)} disabled={mobileStepIndex === mobileSteps.length - 1}>下一步</button></div>
   </div>;
 }
 

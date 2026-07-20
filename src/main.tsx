@@ -187,6 +187,16 @@ function App({ cloud }: { cloud: CloudSession }) {
   };
 
   const saveWorkOrder = async (rawOrder: WorkOrder, keepOpen = false) => {
+    const selectedOrderId = editingOrder !== 'new' ? editingOrder?.id : undefined;
+    const existingOrder = store.workOrders.find(item => item.id === rawOrder.id);
+    if (existingOrder && selectedOrderId !== rawOrder.id) {
+      alert(`为了保护历史工单，当前没有明确选中 ${rawOrder.number}，本次修改不会保存。请返回工单列表并重新点击该工单后再编辑。`);
+      return;
+    }
+    if (!existingOrder && editingOrder !== 'new') {
+      alert('当前没有通过“新建工单”进入编辑，本次内容不会保存。');
+      return;
+    }
     const computedOrder = recalculateWorkOrder({ ...rawOrder, settlementTotal: undefined });
     const order = recalculateWorkOrder(rawOrder);
     const old = store.workOrders.find(item => item.id === order.id);
