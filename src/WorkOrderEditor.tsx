@@ -10,6 +10,7 @@ type Props = {
   value?: WorkOrder; customers: Customer[]; vehicles: Vehicle[]; fleets: Fleet[]; drivers: Driver[]; workOrders: WorkOrder[];
   parts: Part[]; servicePackages: ServicePackage[]; settings: ShopSettings; nextNumber: string;
   onSave: (order: WorkOrder, keepOpen?: boolean) => Promise<void>; onCancel: () => void;
+  onCheckoutAndDeliver: (order: WorkOrder, paymentMethod: string) => Promise<WorkOrder | undefined>;
     onCreateVehicle: (vehicle: Vehicle) => Promise<void>;
     onSaveServicePackage: (item: ServicePackage) => Promise<void>;
     onDeleteServicePackage: (id: string) => Promise<void>;
@@ -139,7 +140,7 @@ async function removeWorkOrderDraft(key: string) {
   }).finally(() => database.close());
 }
 
-export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, workOrders, parts, servicePackages, settings, nextNumber, onSave, onCancel, onCreateVehicle, onSaveServicePackage, onDeleteServicePackage, onPrint, cloud, currentUser, currentUserId, technicians, canApproveReview, canAssignTechnician, canEditPricing, canViewFinancials, canPrintDocuments }: Props) {
+export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, workOrders, parts, servicePackages, settings, nextNumber, onSave, onCancel, onCheckoutAndDeliver, onCreateVehicle, onSaveServicePackage, onDeleteServicePackage, onPrint, cloud, currentUser, currentUserId, technicians, canApproveReview, canAssignTechnician, canEditPricing, canViewFinancials, canPrintDocuments }: Props) {
   const [order, setOrder] = useState<WorkOrder>(() => recalculateWorkOrder(value || {
     id: uid(), number: nextNumber, date: today(), customer: '', vehicle: '', status: '等待检查',
     technician: canAssignTechnician ? '' : currentUser, technicianUserId: canAssignTechnician ? '' : currentUserId,
@@ -697,10 +698,16 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, w
   const finalizeDelivery = async () => {
     const monthlyBilling = order.paymentMethod === MONTHLY_PAYMENT_METHOD || order.paymentMethod === '月结';
     if (calculated.status !== '已完成' && calculated.status !== '已交车') return alert('请先由技师把维修状态设为“已完成”，再结账交车。');
-    if (calculated.balance > 0.009 && !monthlyBilling) return alert(`当前仍欠 ${money(calculated.balance)}。请先在工单列表完成收款，或将客户设为月结。`);
-    if (!confirm(`确认工单 ${calculated.number} 已完成结账并交车？`)) return;
+    const method = order.paymentMethod && order.paymentMethod !== '未记录' ? order.paymentMethod : '现金';
+    const promptText = calculated.balance > 0.009 && !monthlyBilling
+      ? `工单 ${calculated.number} 当前仍欠 ${money(calculated.balance)}。\n\n确认按“${method}”收取全部余额并交车？`
+      : `确认工单 ${calculated.number} 已完成结账并交车？`;
+    if (!confirm(promptText)) return;
     setSaving(true);
-    try { await onSave(recalculateWorkOrder({ ...calculated, status: '已交车', workflowStage: '已结账' })); }
+    try {
+      const delivered = await onCheckoutAndDeliver(calculated, method);
+      if (delivered) setOrder(delivered);
+    }
     finally { setSaving(false); }
   };
 

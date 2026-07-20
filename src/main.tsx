@@ -235,6 +235,52 @@ function App({ cloud }: { cloud: CloudSession }) {
     } catch { /* persist already explains the error */ }
   };
 
+  const checkoutAndDeliver = async (draft: WorkOrder, paymentMethod: string): Promise<WorkOrder | undefined> => {
+    if (paymentInFlight.current.has(draft.id)) {
+      alert('这张工单正在结账，请不要重复点击。');
+      return;
+    }
+    const saved = store.workOrders.find(item => item.id === draft.id);
+    if (!saved) {
+      alert('请先保存工单，再确认结账交车。');
+      return;
+    }
+    const base = recalculateWorkOrder({
+      ...saved,
+      paid: Number(saved.paid || 0),
+      paymentMethod: saved.paymentMethod || paymentMethod,
+    });
+    const monthlyBilling = base.paymentMethod === MONTHLY_PAYMENT_METHOD || base.paymentMethod === '月结';
+    paymentInFlight.current.add(base.id);
+    setSyncing(true);
+    try {
+      let settled = base;
+      let payment: Payment | undefined;
+      if (base.balance > 0.009 && !monthlyBilling) {
+        payment = {
+          id: uid(), date: new Date().toISOString(), workOrderId: base.id, workOrderNumber: base.number,
+          customer: base.customer, amount: base.balance, method: paymentMethod || '现金', note: '结账交车全额付款',
+        };
+        settled = recalculateWorkOrder(await cloud.recordPayment(base.id, payment as unknown as CloudRow) as unknown as WorkOrder);
+      }
+      const delivered = recalculateWorkOrder({ ...settled, status: '已交车', workflowStage: '已结账' });
+      await persist('workOrders', delivered);
+      if (payment) setStore(current => ({ ...current, payments: upsertLocal(current.payments, payment as Payment), workOrders: upsertLocal(current.workOrders, delivered) }));
+      alert(payment
+        ? `已按“${payment.method}”收款 ${money(payment.amount)}，工单已结清并交车。`
+        : monthlyBilling ? '月结工单已确认交车，欠款继续保留到账期。' : '工单已确认交车。');
+      setEditingOrder(null);
+      setPage('workOrders');
+      return delivered;
+    } catch (error) {
+      alert(`结账交车失败：${error instanceof Error ? error.message : error}\n系统不会重复记录收款，请刷新后核对。`);
+      return;
+    } finally {
+      paymentInFlight.current.delete(base.id);
+      setSyncing(false);
+    }
+  };
+
   const executeWorkOrderArchive = async (order: WorkOrder, reason: string) => {
     if (order.status !== '已取消') {
       for (const [partId, qty] of Object.entries(usageMap(order))) {
@@ -451,7 +497,7 @@ function App({ cloud }: { cloud: CloudSession }) {
     closeModal();
   };
 
-  if (editingOrder) return <WorkOrderEditor value={editingOrder === 'new' ? undefined : editingOrder} customers={store.customers} vehicles={store.vehicles} fleets={store.fleets} drivers={store.drivers} workOrders={store.workOrders} parts={store.parts.filter(item => item.inventoryType !== '日常消耗品')} servicePackages={store.servicePackages} settings={settings} nextNumber={nextWorkOrderNumber(store.workOrders)} onCreateVehicle={vehicle => persist('vehicles', vehicle)} onSaveServicePackage={(item: ServicePackage) => persist('servicePackages', item)} onDeleteServicePackage={(id: string) => remove('servicePackages', id)} onPrint={(order, type) => printDocumentV077(recalculateWorkOrder(order), settings, type, store.payments)} onSave={saveWorkOrder} onCancel={() => setEditingOrder(null)} cloud={cloud} currentUser={actorName} currentUserId={cloud.user.id} technicians={staffMembers} canApproveReview={can(cloud, 'approve')} canAssignTechnician={can(cloud, 'assignTechnician')} canEditPricing={can(cloud, 'pricing')} canViewFinancials={can(cloud, 'pricing') || can(cloud, 'finance')} canPrintDocuments={can(cloud, 'printDocuments')} />;
+  if (editingOrder) return <WorkOrderEditor value={editingOrder === 'new' ? undefined : editingOrder} customers={store.customers} vehicles={store.vehicles} fleets={store.fleets} drivers={store.drivers} workOrders={store.workOrders} parts={store.parts.filter(item => item.inventoryType !== '日常消耗品')} servicePackages={store.servicePackages} settings={settings} nextNumber={nextWorkOrderNumber(store.workOrders)} onCreateVehicle={vehicle => persist('vehicles', vehicle)} onSaveServicePackage={(item: ServicePackage) => persist('servicePackages', item)} onDeleteServicePackage={(id: string) => remove('servicePackages', id)} onPrint={(order, type) => printDocumentV077(recalculateWorkOrder(order), settings, type, store.payments)} onSave={saveWorkOrder} onCheckoutAndDeliver={checkoutAndDeliver} onCancel={() => setEditingOrder(null)} cloud={cloud} currentUser={actorName} currentUserId={cloud.user.id} technicians={staffMembers} canApproveReview={can(cloud, 'approve')} canAssignTechnician={can(cloud, 'assignTechnician')} canEditPricing={can(cloud, 'pricing')} canViewFinancials={can(cloud, 'pricing') || can(cloud, 'finance')} canPrintDocuments={can(cloud, 'printDocuments')} />;
 
   return <div className="app-shell">
     <aside className="sidebar"><div className="brand"><div className="brand-mark">Z&G</div><div><b>AUTO ERP</b><small>正式服务器版</small></div></div>
