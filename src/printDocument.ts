@@ -23,13 +23,9 @@ export function printDocumentV077(order: WorkOrder, settings: ShopSettings, kind
   };
   const laborRows = (order.laborItems || []).map(item => { const flat = item.billingMode === 'flat'; return `<tr><td>${escapeHtml(item.description)}${item.descriptionEn ? `<br><em>${escapeHtml(item.descriptionEn)}</em>` : ''}</td><td class="n">${flat ? 'Flat' : Number(item.hours).toFixed(1)}</td><td class="n">${flat ? '—' : money(item.rate)}</td><td class="n">${money(item.total)}</td></tr>`; }).join('');
   const partRows = (order.partItems || []).filter(item => !!(item.partId || item.partNo?.trim() || item.name?.trim())).map(item => `<tr><td>${escapeHtml(item.partNo)}</td><td>${escapeHtml(item.name)}${item.nameEn ? `<br><em>${escapeHtml(item.nameEn)}</em>` : ''}</td><td class="n">${item.qty}</td><td class="n">${money(item.price)}</td><td class="n">${money(item.total)}</td></tr>`).join('');
-  const paymentRows = payments.filter(item => {
-    if (item.archivedAt) return false;
-    // A ledger row with an internal work-order id must match that id exactly.
-    // Number fallback is reserved for legacy rows that predate workOrderId;
-    // otherwise reused/imported order numbers can leak another customer's payment.
-    return item.workOrderId ? item.workOrderId === order.id : item.workOrderNumber === order.number;
-  }).sort((a, b) => a.date.localeCompare(b.date)).map(item => {
+  const paymentRows = payments.filter(item =>
+    !item.archivedAt && !!item.workOrderId && item.workOrderId === order.id
+  ).sort((a, b) => a.date.localeCompare(b.date)).map(item => {
     const time = new Intl.DateTimeFormat('en-US', { timeZone: 'America/Los_Angeles', month: '2-digit', day: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }).format(new Date(item.date));
     const method = item.splits?.length ? item.splits.map(split => `${split.method} ${money(split.amount)}`).join(' + ') : item.method || 'Not recorded';
     return `<tr><td>${escapeHtml(time)}</td><td>${escapeHtml(method)}</td><td class="n">${money(item.amount)}</td></tr>`;

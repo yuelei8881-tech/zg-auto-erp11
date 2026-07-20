@@ -42,3 +42,4 @@
 .search-select { display: grid; gap: 8px; }
 .search-select input[type="search"] { background: #f7f9fc; }
 .top-status>b::after{content:"v0.86.1"}
+.top-status>b::after{content:"v0.86.2"}
