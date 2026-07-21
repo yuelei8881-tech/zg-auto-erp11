@@ -56,7 +56,7 @@ create or replace function public.zg_submit_oil_reward_registration(p_payload js
 returns jsonb language plpgsql security definer set search_path = public
 as $$
 declare
-  v_org uuid; v_enrollment uuid; v_token text := encode(gen_random_bytes(24),'hex'); v_vehicle jsonb;
+  v_org uuid; v_enrollment uuid; v_token text := encode(extensions.gen_random_bytes(24),'hex'); v_vehicle jsonb;
   v_account text := coalesce(p_payload->>'accountType',''); v_phone text := regexp_replace(coalesce(p_payload->>'phone',''),'[^0-9]','','g');
   v_email text := lower(trim(coalesce(p_payload->>'email',''))); v_vin text; v_plate text;
 begin
@@ -76,7 +76,7 @@ begin
   end loop;
 
   insert into public.zg_reward_enrollments(organization_id,account_type,contact_name,phone,phone_normalized,email,email_normalized,company_name,tcp_number,preferred_language,terms_version,terms_accepted_at,sms_consent,sms_consent_at,access_token_hash)
-  values(v_org,v_account,trim(p_payload->>'contactName'),trim(p_payload->>'phone'),v_phone,v_email,v_email,nullif(trim(p_payload->>'companyName'),''),nullif(trim(p_payload->>'tcpNumber'),''),coalesce(p_payload->>'preferredLanguage','zh'),'2026-07-20-v1',now(),coalesce((p_payload->>'smsConsent')::boolean,false),case when coalesce((p_payload->>'smsConsent')::boolean,false) then now() end,crypt(v_token,gen_salt('bf')))
+  values(v_org,v_account,trim(p_payload->>'contactName'),trim(p_payload->>'phone'),v_phone,v_email,v_email,nullif(trim(p_payload->>'companyName'),''),nullif(trim(p_payload->>'tcpNumber'),''),coalesce(p_payload->>'preferredLanguage','zh'),'2026-07-20-v1',now(),coalesce((p_payload->>'smsConsent')::boolean,false),case when coalesce((p_payload->>'smsConsent')::boolean,false) then now() end,extensions.crypt(v_token,extensions.gen_salt('bf')))
   returning id into v_enrollment;
 
   for v_vehicle in select value from jsonb_array_elements(p_payload->'vehicles') loop
@@ -92,7 +92,7 @@ create or replace function public.zg_get_oil_reward_registration(p_token text)
 returns jsonb language plpgsql security definer set search_path = public
 as $$
 declare v_enrollment public.zg_reward_enrollments; begin
-  select * into v_enrollment from public.zg_reward_enrollments where access_token_hash=crypt(p_token,access_token_hash);
+  select * into v_enrollment from public.zg_reward_enrollments where access_token_hash=extensions.crypt(p_token,access_token_hash);
   if v_enrollment.id is null then raise exception 'Invalid progress link'; end if;
   return jsonb_build_object('status',v_enrollment.status,'contactName',v_enrollment.contact_name,'vehicles',(select coalesce(jsonb_agg(jsonb_build_object('id',v.id,'vinLast6',right(v.vin_normalized,6),'plate',v.plate,'year',v.year,'make',v.make,'model',v.model,'count',v.qualifying_count,'rewardEarnedAt',v.reward_earned_at,'rewardExpiresAt',v.reward_expires_at,'rewardRedeemedAt',v.reward_redeemed_at,'status',v.status) order by v.created_at),'[]'::jsonb) from public.zg_reward_vehicles v where v.enrollment_id=v_enrollment.id));
 end $$;
