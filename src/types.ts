@@ -105,9 +105,10 @@ export type WorkOrder = {
 
 export type ApprovalRequest = {
   id: string; workOrderId?: string; workOrderNumber?: string;
-  type: '删除工单' | '工单折扣' | '实际结账金额' | '支出'; status: '待授权' | '已批准' | '已拒绝' | '已执行';
+  type: '删除工单' | '工单折扣' | '实际结账金额' | '支出' | '收款更正'; status: '待授权' | '已批准' | '已拒绝' | '已执行';
   requestedBy: string; requestedById: string; requestedAt: string; reason: string;
   oldValue?: number; newValue?: number; proposedOrder?: WorkOrder; proposedExpense?: Expense;
+  paymentId?: string; proposedPayment?: Payment;
   approvedBy?: string; approvedById?: string; approvedAt?: string; decisionNote?: string;
 };
 
@@ -127,6 +128,8 @@ export type Payment = {
   amount: number; method: string; reference?: string; note?: string;
   splits?: Array<{ method: string; amount: number }>;
   archivedAt?: string;
+  status?: '有效' | '已更正' | '已作废'; originalAmount?: number;
+  correctedAt?: string; correctedBy?: string; correctionReason?: string;
 };
 
 export type Expense = { id: string; date: string; category: string; vendor?: string; amount: number; method?: string; note?: string };

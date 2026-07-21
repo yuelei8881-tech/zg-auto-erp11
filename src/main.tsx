@@ -329,8 +329,38 @@ function App({ cloud }: { cloud: CloudSession }) {
     alert('作废归档申请已提交。第二人批准后会标记作废，但原始工单和修改记录永久保留。');
   };
 
+  const requestPaymentCorrection = async (payment: Payment) => {
+    if (store.approvalRequests.some(item => item.paymentId === payment.id && item.type === '收款更正' && item.status === '待授权')) return alert('这笔收款已经有待处理的双人审核申请。');
+    const rawAmount = prompt(`收款更正申请\n工单：${payment.workOrderNumber}\n当前实收：${money(payment.amount)}\n\n请输入更正后的实收金额；输入 0 表示作废：`, String(payment.amount));
+    if (rawAmount === null) return;
+    const amount = Math.round(Number(rawAmount) * 100) / 100;
+    if (!Number.isFinite(amount) || amount < 0) return alert('请输入大于或等于 0 的正确金额。');
+    const method = amount > 0 ? (prompt('更正后的付款方式：', payment.method || '现金') || payment.method || '现金') : payment.method;
+    const reason = prompt('请输入更正原因（必填）：', '收款录入错误');
+    if (!reason?.trim()) return;
+    const proposedPayment: Payment = { ...payment, amount, method, splits: undefined, status: amount <= 0 ? '已作废' : '已更正', originalAmount: payment.originalAmount ?? payment.amount, correctedAt: new Date().toISOString(), correctedBy: actorName, correctionReason: reason.trim(), archivedAt: amount <= 0 ? new Date().toISOString() : undefined };
+    await requestApproval({ workOrderId: payment.workOrderId, workOrderNumber: payment.workOrderNumber, type: '收款更正', reason: reason.trim(), oldValue: payment.amount, newValue: amount, paymentId: payment.id, proposedPayment });
+    alert('收款更正申请已提交。必须由另一位有审核权限的员工批准后才会生效。');
+  };
+
   const approveRequest = async (request: ApprovalRequest) => {
     if (request.requestedById === cloud.user.id) return alert('双人授权规则：申请人不能批准自己的申请。请让另一位有审批权限的员工登录处理。');
+    if (request.type === '收款更正') {
+      const payment = store.payments.find(item => item.id === request.paymentId);
+      const proposed = request.proposedPayment;
+      const order = store.workOrders.find(item => item.id === request.workOrderId);
+      if (!payment || !proposed || !order) return alert('收款更正资料不完整，无法批准。');
+      if (!confirm(`批准收款更正？\n工单：${request.workOrderNumber}\n原实收：${money(payment.amount)}\n更正后：${money(proposed.amount)}\n申请人：${request.requestedBy}\n原因：${request.reason}`)) return;
+      const otherPaid = store.payments.filter(item => item.workOrderId === order.id && item.id !== payment.id && !item.archivedAt).reduce((sum, item) => sum + Number(item.amount || 0), 0);
+      const paid = Math.round((otherPaid + Number(proposed.amount || 0)) * 100) / 100;
+      const recalculated = recalculateWorkOrder({ ...order, paid });
+      const reopened = recalculated.balance > 0.009 && order.status === '已交车' ? recalculateWorkOrder({ ...recalculated, status: '已完成', workflowStage: '完工待结账' }) : recalculated;
+      await persist('payments', proposed);
+      await persist('workOrders', reopened);
+      await persist('approvalRequests', { ...request, status: '已执行', approvedBy: actorName, approvedById: cloud.user.id, approvedAt: new Date().toISOString() });
+      await writeChangeLog(reopened, '双人授权收款更正', `收款由 ${money(payment.amount)} 更正为 ${money(proposed.amount)}；申请人 ${request.requestedBy}，批准人 ${actorName}。原因：${request.reason}`, order, reopened);
+      return alert(`收款已更正为 ${money(proposed.amount)}。${reopened.balance > 0.009 ? `工单已重新打开，当前欠款 ${money(reopened.balance)}。` : '工单仍为结清状态。'}`);
+    }
     if (request.type === '支出') {
       const expense = request.proposedExpense;
       if (!expense) return alert('支出申请资料不完整，无法批准。');
@@ -535,7 +565,7 @@ function App({ cloud }: { cloud: CloudSession }) {
       <div className="side-foot"><small>{cloud.organizationName}</small><b>{actorName}</b><span>{cloud.user.email}</span><button onClick={() => confirm('确定退出当前账号？') && void cloud.signOut()}>退出登录</button></div>
     </aside>
     <main className="main"><header className="topbar"><div className="global-search">⌕<input value={searchDraft} onChange={e => setSearchDraft(e.target.value)} onKeyDown={e => e.key === 'Enter' && runGlobalSearch()} placeholder="搜索客户、电话、VIN、车牌、工单、司机…" /><button type="button" onClick={runGlobalSearch}>搜索</button>{searchSuggestions.length > 0 && <div className="search-suggestions">{searchSuggestions.map((item, index) => <button type="button" key={`${item.page}-${item.label}-${index}`} onClick={() => { setSearchDraft(item.query); setSearch(item.query); setPage(item.page); }}><b>{item.label}</b><small>{item.meta}</small></button>)}</div>}</div><div className="top-status"><span className={syncing ? 'syncing' : ''}>{syncing ? '正在同步…' : '● 云端已同步'}</span><span>{actorName}</span><b>v0.82.4</b><button type="button" className="topbar-logout" onClick={() => confirm('确定退出当前账号？') && void cloud.signOut()}>退出</button></div></header>
-      {loading ? <div className="loading">正在读取正式服务器数据…</div> : <PageContent page={page} search={search} store={store} settings={settings} cloud={cloud} setPage={setPage} openModal={openModal} setEditingOrder={setEditingOrder} persist={persist} remove={remove} receiveStock={receiveStock} addPayment={addPayment} deleteWorkOrder={deleteWorkOrder} approveRequest={approveRequest} rejectRequest={rejectRequest} claimWorkOrder={claimWorkOrder} completeWorkOrder={completeWorkOrder} actorName={actorName} editOwnProfile={editOwnProfile} />}
+      {loading ? <div className="loading">正在读取正式服务器数据…</div> : <PageContent page={page} search={search} store={store} settings={settings} cloud={cloud} setPage={setPage} openModal={openModal} setEditingOrder={setEditingOrder} persist={persist} remove={remove} receiveStock={receiveStock} addPayment={addPayment} deleteWorkOrder={deleteWorkOrder} requestPaymentCorrection={requestPaymentCorrection} approveRequest={approveRequest} rejectRequest={rejectRequest} claimWorkOrder={claimWorkOrder} completeWorkOrder={completeWorkOrder} actorName={actorName} editOwnProfile={editOwnProfile} />}
     </main>
     {modal && <EntityModal state={modal} store={store} settings={settings} cloud={cloud} onClose={closeModal} onSave={saveModal} />}
   </div>;
@@ -548,6 +578,7 @@ type ContentProps = {
   persist: <T extends { id: string }>(module: keyof AppStore, row: T) => Promise<void>;
   remove: (module: keyof AppStore, id: string) => Promise<void>; receiveStock: (part: Part, entry?: { qty: number; unitCost: number; reference: string }) => Promise<void>;
   addPayment: (order: WorkOrder) => Promise<void>; deleteWorkOrder: (order: WorkOrder) => Promise<void>;
+  requestPaymentCorrection: (payment: Payment) => Promise<void>;
   approveRequest: (request: ApprovalRequest) => Promise<void>; rejectRequest: (request: ApprovalRequest) => Promise<void>;
   claimWorkOrder: (order: WorkOrder) => Promise<void>; completeWorkOrder: (order: WorkOrder) => Promise<void>;
   actorName: string; editOwnProfile: () => Promise<void>;
@@ -740,7 +771,7 @@ function Inventory({ store, search, openModal, remove, receiveStock, persist, ac
   return <div className="page"><div className="page-title"><div><p className="eyebrow">Parts & Inventory</p><h2>库存管理</h2><p>{rows.length} 种销售配件 · {consumables.length} 种日常消耗品 · {low} 项配件低库存</p><p className="muted">销售配件用于客户工单；日常消耗品独立保存，只能手动调整或员工领取扣减。</p></div><button className="primary" onClick={() => openModal('part')}>＋ 添加库存物品</button></div><section className="panel"><div className="inventory-query-bar"><input value={draft} onChange={event => setDraft(event.target.value)} onKeyDown={event => event.key === 'Enter' && runQuery()} placeholder="输入编号、名称、品牌、供应商或库位" /><button className="primary" onClick={runQuery}>查询库存</button>{(draft || partQuery) && <button onClick={() => { setDraft(''); setPartQuery(''); }}>清除</button>}</div><h3>销售配件库存</h3><table><thead><tr><th>配件编号/名称</th><th>品牌/供应商</th><th>采购成本（内部）</th><th>客户销售价</th><th>库存</th><th>位置</th><th /></tr></thead><tbody>{rows.map(item => <tr className={item.qty <= item.minimum ? 'low-stock' : ''} key={item.id}><td><b>{item.partNo}</b><small>{item.oemNo ? `OEM ${item.oemNo} · ` : ''}{item.name}</small></td><td>{item.brand || '—'}<small>{item.supplier}</small></td><td>{money(item.cost)}</td><td>{money(item.price)}</td><td><b>{item.qty}</b><small>最低 {item.minimum}</small></td><td>{item.location || '—'}</td><td className="actions"><button className="primary-soft" onClick={() => receiveStock(item)}>采购入库</button><button onClick={() => openModal('part', item)}>编辑</button><button className="danger-link" onClick={() => confirm('确定删除配件？') && remove('parts', item.id)}>删除</button></td></tr>)}</tbody></table>{!rows.length && <Empty text="没有找到匹配的销售配件。" />}</section><section className="panel consumables-panel"><div className="section-title"><div><h3>日常消耗品库存</h3><span>领取会自动扣减；盘点差异可手动设置实际结存</span></div><b>{consumables.length} 种</b></div><table><thead><tr><th>编号 / 名称</th><th>库存</th><th>最低库存</th><th>库位 / 备注</th><th /></tr></thead><tbody>{consumables.map(item => <tr className={item.qty <= item.minimum ? 'low-stock' : ''} key={item.id}><td><b>{item.partNo}</b><small>{item.name}</small></td><td><b>{item.qty}</b></td><td>{item.minimum}</td><td>{item.location || '—'}<small>{item.notes || ''}</small></td><td className="actions"><button className="primary" onClick={() => void claimConsumable(item)}>领取减少</button><button onClick={() => void adjustConsumable(item)}>手动设置</button><button onClick={() => openModal('part', item)}>编辑</button><button className="danger-link" onClick={() => confirm('确定删除日常消耗品？') && remove('parts', item.id)}>删除</button></td></tr>)}</tbody></table>{!consumables.length && <Empty text="添加库存物品时选择“日常消耗品”，这里就会单独显示。" />}</section><section className="panel"><h3>最近库存流水</h3><table><thead><tr><th>时间</th><th>物品</th><th>类型</th><th>变化</th><th>结存</th><th>领取人/关联</th><th>备注</th></tr></thead><tbody>{[...store.inventoryLogs].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 50).map(log => <tr key={log.id}><td>{new Date(log.date).toLocaleString()}</td><td>{log.partNo}<small>{log.partName}</small></td><td>{log.type}</td><td className={log.change >= 0 ? 'success-text' : 'warning-text'}>{log.change > 0 ? '+' : ''}{log.change}</td><td>{log.after}</td><td>{log.reference || '—'}</td><td>{log.note || (log.unitCost === undefined ? '—' : `${money(log.unitCost)} / 件 · 合计 ${money(log.totalCost || 0)}`)}</td></tr>)}</tbody></table></section></div>;
 }
 
-function Finance({ store, openModal, persist }: ContentProps) {
+function Finance({ store, openModal, persist, requestPaymentCorrection }: ContentProps) {
   const metrics = dashboardMetrics(store);
   const paymentRows = useMemo(() => [...store.payments].sort((a, b) => b.date.localeCompare(a.date)), [store.payments]);
   const expenseRows = useMemo(() => [...store.expenses].sort((a, b) => b.date.localeCompare(a.date)), [store.expenses]);
@@ -801,7 +832,7 @@ function Finance({ store, openModal, persist }: ContentProps) {
     await persist('payments', { id: uid(), date: new Date().toISOString(), workOrderId: '', workOrderNumber: '手工收入', customer: customer.trim() || '其他收入', amount, method, note });
     alert('收入记录已保存到服务器。');
   };
-  return <div className="page"><div className="page-title"><div><p className="eyebrow">Finance Center</p><h2>财务、收款与支出</h2></div><div className="title-actions"><button className="primary-soft" onClick={recordIncome}>＋ 记录收入</button><button className="primary" onClick={() => openModal('expense')}>＋ 记录支出</button></div></div><div className="kpi-grid"><Kpi label="今日实收" value={money(metrics.todayReceived)} tone="green" /><Kpi label="本月实收" value={money(metrics.monthReceived)} /><Kpi label="本月支出" value={money(metrics.monthExpenses)} tone="orange" /><Kpi label="本月净经营收益" value={money(metrics.monthNet)} tone="purple" /></div><div className="split-panels"><section className="panel"><h3>最近收款</h3><table><thead><tr><th>日期/工单</th><th>客户</th><th>方式</th><th>金额</th></tr></thead><tbody>{[...store.payments].sort((a, b) => b.date.localeCompare(a.date)).map(item => <tr key={item.id}><td>{new Date(item.date).toLocaleDateString()}<small>{item.workOrderNumber}</small></td><td>{item.customer}</td><td>{item.method}</td><td className="success-text"><b>{money(item.amount)}</b></td></tr>)}</tbody></table></section><section className="panel"><h3>最近支出</h3><table><thead><tr><th>日期</th><th>类别/收款方</th><th>方式</th><th>金额</th></tr></thead><tbody>{[...store.expenses].sort((a, b) => b.date.localeCompare(a.date)).map(item => <tr key={item.id}><td>{item.date}</td><td>{item.category}<small>{item.vendor}</small></td><td>{item.method || '—'}</td><td className="warning-text"><b>{money(item.amount)}</b></td></tr>)}</tbody></table></section></div></div>;
+  return <div className="page"><div className="page-title"><div><p className="eyebrow">Finance Center</p><h2>财务、收款与支出</h2></div><div className="title-actions"><button className="primary-soft" onClick={recordIncome}>＋ 记录收入</button><button className="primary" onClick={() => openModal('expense')}>＋ 记录支出</button></div></div><div className="kpi-grid"><Kpi label="今日实收" value={money(metrics.todayReceived)} tone="green" /><Kpi label="本月实收" value={money(metrics.monthReceived)} /><Kpi label="本月支出" value={money(metrics.monthExpenses)} tone="orange" /><Kpi label="本月净经营收益" value={money(metrics.monthNet)} tone="purple" /></div><div className="split-panels"><section className="panel"><h3>最近收款</h3><table><thead><tr><th>日期/工单</th><th>客户</th><th>方式</th><th>金额</th><th /></tr></thead><tbody>{[...store.payments].sort((a, b) => b.date.localeCompare(a.date)).map(item => <tr key={item.id}><td>{new Date(item.date).toLocaleDateString()}<small>{item.workOrderNumber}</small></td><td>{item.customer}<small>{item.status || '有效'}</small></td><td>{item.method}</td><td className={item.amount > 0 ? 'success-text' : 'muted'}><b>{money(item.amount)}</b>{item.originalAmount !== undefined && <small>原记录 {money(item.originalAmount)}</small>}</td><td><button onClick={() => void requestPaymentCorrection(item)}>申请更正</button></td></tr>)}</tbody></table></section><section className="panel"><h3>最近支出</h3><table><thead><tr><th>日期</th><th>类别/收款方</th><th>方式</th><th>金额</th></tr></thead><tbody>{[...store.expenses].sort((a, b) => b.date.localeCompare(a.date)).map(item => <tr key={item.id}><td>{item.date}</td><td>{item.category}<small>{item.vendor}</small></td><td>{item.method || '—'}</td><td className="warning-text"><b>{money(item.amount)}</b></td></tr>)}</tbody></table></section></div></div>;
 }
 
 async function prepareReceiptImage(file: File) {
