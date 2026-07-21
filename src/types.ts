@@ -86,6 +86,8 @@ export type WorkOrder = {
   customerSignature?: string;
   customerSignedAt?: string;
   customerSignedBy?: string;
+  customerSignatureConfirmedAt?: string;
+  customerSignatureConfirmedBy?: string;
   settlementTotal?: number;
   customerApprovalStatus?: '未发送' | '待客户确认' | '客户已批准' | '客户已拒绝' | '已过期';
   customerApprovalAt?: string;

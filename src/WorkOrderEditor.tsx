@@ -793,10 +793,16 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, w
       {!!order.evidencePhotos?.some(item => item.archivedAt) && <details className="archived-evidence"><summary>查看已作废照片（{order.evidencePhotos.filter(item => item.archivedAt).length}）</summary>{order.evidencePhotos.filter(item => item.archivedAt).map(item => <div key={item.id}><span>{item.category} · {item.fileName}</span><small>{item.archivedBy} 作废于 {new Date(item.archivedAt!).toLocaleString()} · {item.archiveReason}</small></div>)}</details>}
     </section>
 
-    <section className="form-section signature-section"><div className="section-title"><div><h3>客户手写签字 / Customer Signature</h3><span>客户可在手机、平板或电脑触摸屏直接签字；签名随工单同步并显示在打印工单中。</span></div>{order.customerSignedAt && <b>已签字</b>}</div>
-      <label className="signature-name">签字人姓名<input value={order.customerSignedBy || ''} onChange={e => patch({ customerSignedBy: e.target.value })} placeholder={order.customer || '客户姓名'} /></label>
-      <SignaturePad value={order.customerSignature} onChange={(customerSignature, customerSignedAt) => patch({ customerSignature, customerSignedAt, customerSignedBy: customerSignature ? (order.customerSignedBy || order.customer) : order.customerSignedBy })} />
-      {order.customerSignedAt && <small className="signature-time">签署时间：{new Date(order.customerSignedAt).toLocaleString()}</small>}
+    <section className="form-section signature-section"><div className="section-title"><div><h3>客户手写签字 / Customer Signature</h3><span>{order.customerSignatureConfirmedAt ? '客户签名已经确认并锁定，不能直接清除或覆盖。' : '客户完成签字后，请点击“确认签名并授权维修”。'}</span></div>{order.customerSignatureConfirmedAt ? <b className="signature-locked">🔒 已确认</b> : order.customerSignedAt && <b>待确认</b>}</div>
+      <label className="signature-name">签字人姓名<input disabled={!!order.customerSignatureConfirmedAt} value={order.customerSignedBy || ''} onChange={e => patch({ customerSignedBy: e.target.value })} placeholder={order.customer || '客户姓名'} /></label>
+      <SignaturePad disabled={!!order.customerSignatureConfirmedAt} value={order.customerSignature} onChange={(customerSignature, customerSignedAt) => patch({ customerSignature, customerSignedAt, customerSignedBy: customerSignature ? (order.customerSignedBy || order.customer) : order.customerSignedBy })} />
+      {!order.customerSignatureConfirmedAt && <button type="button" className="primary signature-confirm-button" disabled={!order.customerSignature} onClick={() => {
+        if (!window.confirm('请客户确认：是否批准本工单维修内容和金额？\n\n确认后签名将被锁定，不能直接修改。')) return;
+        const confirmedAt = new Date().toISOString();
+        patch({ customerSignedAt: confirmedAt, customerSignatureConfirmedAt: confirmedAt, customerSignatureConfirmedBy: order.customerSignedBy || order.customer || '客户' });
+      }}>确认签名并授权维修</button>}
+      {order.customerSignatureConfirmedAt && <div className="signature-lock-notice"><b>签名已锁定 / Signature Confirmed</b><span>确认人：{order.customerSignatureConfirmedBy || order.customerSignedBy || order.customer || '客户'}</span><span>确认时间：{new Date(order.customerSignatureConfirmedAt).toLocaleString()}</span></div>}
+      {!order.customerSignatureConfirmedAt && order.customerSignedAt && <small className="signature-time">签字草稿时间：{new Date(order.customerSignedAt).toLocaleString()}（尚未确认）</small>}
     </section>
 
     <section className="form-section review-section"><div className="section-title"><div><h3>检查与审查流程</h3><span>Inspection & Review · 已完成 {inspectionDone}/{inspectionItems.length}</span></div><span className={`review-badge review-${reviewStatus}`}>{reviewStatus}</span></div>

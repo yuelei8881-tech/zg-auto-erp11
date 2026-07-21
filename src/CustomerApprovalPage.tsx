@@ -14,6 +14,7 @@ export function CustomerApprovalPage({ token }: { token: string }) {
   const [error, setError] = useState('');
   const [note, setNote] = useState('');
   const [signature, setSignature] = useState('');
+  const [authorizationAccepted, setAuthorizationAccepted] = useState(false);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -26,6 +27,8 @@ export function CustomerApprovalPage({ token }: { token: string }) {
   const decide = async (decision: 'approved' | 'rejected') => {
     if (!supabase || !data) return;
     if (decision === 'approved' && !signature) { alert('请先完成手写签名。'); return; }
+    if (decision === 'approved' && !authorizationAccepted) { alert('请勾选授权确认后再提交。'); return; }
+    if (decision === 'approved' && !window.confirm('确认批准本维修项目和金额吗？\n\n确认后签名将被锁定，不能再次修改。')) return;
     setSaving(true);
     const { data: result, error: rpcError } = await supabase.rpc('zg_submit_customer_approval', {
       p_token: token, p_decision: decision, p_note: note || null, p_signature: signature || null,
@@ -50,8 +53,8 @@ export function CustomerApprovalPage({ token }: { token: string }) {
       {finished ? <div className={data.status === 'approved' ? 'approval-result approved' : 'approval-result rejected'}>{data.status === 'approved' ? '✓ 客户已批准维修' : '✕ 客户已拒绝维修'}<small>{data.decided_at ? new Date(data.decided_at).toLocaleString() : ''}</small></div> : <>
         <label>客户备注（可选）<textarea value={note} onChange={e => setNote(e.target.value)} /></label>
         <SignaturePad value={signature} onChange={setSignature} />
-        <p className="approval-terms">本人确认已阅读以上项目和金额，并授权 Z&amp;G AUTO REPAIR 按所选决定处理车辆。</p>
-        <div className="approval-actions"><button disabled={saving} className="primary" onClick={() => void decide('approved')}>批准维修并签名</button><button disabled={saving} onClick={() => void decide('rejected')}>拒绝维修</button></div>
+        <label className="approval-confirm"><input type="checkbox" checked={authorizationAccepted} onChange={event => setAuthorizationAccepted(event.target.checked)} /><span>本人确认已阅读以上维修项目和金额，并授权 Z&amp;G AUTO REPAIR 进行维修。我了解点击确认后，签名与本次授权将被锁定，不能自行修改。<small>I have reviewed the repairs and amount and authorize the work. Once confirmed, this signature and authorization cannot be changed.</small></span></label>
+        <div className="approval-actions"><button disabled={saving || !signature || !authorizationAccepted} className="primary" onClick={() => void decide('approved')}>{saving ? '正在确认…' : '确认签名并批准维修'}</button><button disabled={saving} onClick={() => void decide('rejected')}>拒绝维修</button></div>
       </>}
     </section>
   </main>;
