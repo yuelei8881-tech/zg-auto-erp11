@@ -8,8 +8,8 @@ export function printRepairHistory(subject: RepairHistorySubject, orders: WorkOr
   const sorted = [...orders].sort((a, b) => `${b.date}${b.number}`.localeCompare(`${a.date}${a.number}`));
   const total = sorted.reduce((sum, order) => sum + Number(order.total || 0), 0);
   const rows = sorted.map(order => {
-    const work = order.workPerformed || order.diagnosis || order.complaint || '—';
-    const parts = (order.partItems || []).filter(item => item.name).map(item => `${item.name} ×${item.qty}`).join('、');
+    const work = order.workPerformedEn || order.diagnosisEn || order.complaintEn || order.workPerformed || order.diagnosis || order.complaint || '—';
+    const parts = (order.partItems || []).filter(item => item.nameEn || item.name).map(item => `${item.nameEn || item.name} ×${item.qty}`).join(', ');
     return `<tr><td>${escapeHtml(order.date)}<br><b>${escapeHtml(order.number)}</b></td><td>${escapeHtml(order.vehicle || '—')}<br><span>${escapeHtml(order.plate || '—')} · VIN ${escapeHtml(order.vin || '—')}</span></td><td>${escapeHtml(order.mileage || '—')}</td><td>${escapeHtml(work)}${parts ? `<br><span>Parts / 配件：${escapeHtml(parts)}</span>` : ''}</td><td>${escapeHtml(order.status || '—')}</td><td class="amount">${money(order.total)}</td></tr>`;
   }).join('');
   const html = `<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(subject.title)}</title><style>
