@@ -11,14 +11,14 @@ const copy = {
   zh: {
     eyebrow: 'Z&G 机油保养奖励计划', title: '换 5 次机油，第 6 次免费', subtitle: '每辆车单独累计。在线登记后，符合条件的保养会自动计入车辆进度。',
     personal: '个人客户', fleet: '公司 / 车队', contact: '联系人姓名', phone: '手机号码', email: '电子邮箱', company: '公司名称', tcp: 'TCP 号码', optional: '选填',
-    vehicles: '参加活动的车辆', addVehicle: '添加另一辆车', remove: '删除', vin: 'VIN 车架号', plate: '车牌号码', state: '州', year: '年份', make: '品牌', model: '车型', engine: '发动机（选填）', unit: '车队编号（选填）', driver: '实际司机（选填）', driverPhone: '司机电话（选填）',
+    vehicles: '参加活动的车辆', addVehicle: '添加另一辆车', remove: '删除', vin: 'VIN 车架号', plate: '车牌号码', state: '州', year: '年份', make: '品牌', model: '车型', engine: '发动机（选填）', unit: '车队编号（选填）', driver: '实际司机（选填）', driverPhone: '司机电话（选填）', vehicleNotice: '此处为客户预登记资料。车辆到店后，以本店扫描 VIN、识别车牌并由员工核对录入的正式车辆资料为准。',
     termsTitle: '活动规则与免责声明', agree: '我已阅读并同意中英文活动条款；如两种语言有冲突，以英文版本为准。', sms: '我同意接收本活动进度、奖励和维修相关短信。此项为选填；同意短信不是购买服务或参加活动的条件。可回复 STOP 退订。',
     submit: '登记参加活动', submitting: '正在安全提交…', success: '登记已收到', successText: '我们会核对客户与车辆资料。通过后，登记日期之后的合格机油保养将按车辆分别累计。', saveLink: '请保存您的专属进度查询链接', copyLink: '复制链接', copied: '已复制', error: '提交失败，请检查资料后重试。',
   },
   en: {
     eyebrow: 'Z&G Oil Change Rewards', title: 'Buy 5 oil changes. Get the 6th free.', subtitle: 'Progress is tracked separately for each registered vehicle after enrollment.',
     personal: 'Individual', fleet: 'Business / Fleet', contact: 'Contact name', phone: 'Mobile number', email: 'Email address', company: 'Legal business name', tcp: 'TCP number', optional: 'Optional',
-    vehicles: 'Participating vehicles', addVehicle: 'Add another vehicle', remove: 'Remove', vin: 'VIN', plate: 'License plate', state: 'State', year: 'Year', make: 'Make', model: 'Model', engine: 'Engine (optional)', unit: 'Fleet unit (optional)', driver: 'Driver name (optional)', driverPhone: 'Driver phone (optional)',
+    vehicles: 'Participating vehicles', addVehicle: 'Add another vehicle', remove: 'Remove', vin: 'VIN', plate: 'License plate', state: 'State', year: 'Year', make: 'Make', model: 'Model', engine: 'Engine (optional)', unit: 'Fleet unit (optional)', driver: 'Driver name (optional)', driverPhone: 'Driver phone (optional)', vehicleNotice: 'Customer-entered information is preliminary. After arrival, the shop’s VIN scan, plate recognition, and staff-verified vehicle record will control.',
     termsTitle: 'Program Terms & Disclosures', agree: 'I have read and agree to the bilingual program terms. If the two versions conflict, the English version controls.', sms: 'I agree to receive transactional program progress, reward, and repair-related text messages. Optional; SMS consent is not a condition of purchase or participation. Reply STOP to opt out.',
     submit: 'Enroll in rewards', submitting: 'Submitting securely…', success: 'Enrollment received', successText: 'We will review and match your customer and vehicle records. Qualifying oil changes after enrollment will then be tracked separately for each vehicle.', saveLink: 'Save your private progress link', copyLink: 'Copy link', copied: 'Copied', error: 'Submission failed. Please review the information and try again.',
   },
@@ -30,7 +30,7 @@ function ProgramTerms() {
       <li>客户成功登记后，每辆登记车辆完成五次符合条件的付费机油保养，可获得同一车辆第六次机油保养免费；不同车辆的次数不得合并或转让。</li>
       <li>免费保养包含依车辆制造商规格及实际车型所需数量的本店常规全合成机油、适用的本店常用滤芯、标准人工、税费及环保费。机油粘度、认证标准、数量及滤芯适用性以 VIN、发动机和制造商要求为准。</li>
       <li>特殊滤芯、柴油车及欧洲车型在本活动内不另收补差价，但服务须属于本店可正常、安全提供的范围；超出常规机油保养的维修、零件或服务不包含在免费项目内。</li>
-      <li>只有成功登记后，在 Z&G Auto Body And Repair 完成并结清的正式工单才计数。经批准的月结车队工单在完工并记入月结账户后计数。取消、退款、冲销、重复或欺诈交易不计数，并可被撤销。</li>
+      <li>客户填写的车辆信息属于预登记资料。车辆到店后，以本店通过 VIN 扫描、车牌识别及员工核对后录入 ERP 的正式车辆资料为准。</li><li>只有成功登记后，在 Z&G Auto Body And Repair 完成并结清的正式工单才计数。经批准的月结车队工单在完工并记入月结账户后计数。取消、退款、冲销、重复或欺诈交易不计数，并可被撤销。</li>
       <li>奖励在第五次合格服务完成时取得，自取得日起十二个月内有效；不可兑换现金、出售、转让或与其他车辆进度合并。</li>
       <li>Z&G 可为防止欺诈、纠正错误或符合法律而审核、暂停或更正记录，并可在合理通知后对未来交易修改或终止活动，但不会无理取消已经取得且尚未过期的奖励。</li>
       <li>短信同意为选填，不是购买服务或参加本活动的条件。客户资料依本店隐私政策处理。</li>
@@ -39,7 +39,7 @@ function ProgramTerms() {
       <li>After successful enrollment, each registered vehicle earns one complimentary sixth oil change after five qualifying paid oil changes. Progress is vehicle-specific and may not be combined or transferred.</li>
       <li>The complimentary service includes the quantity of the shop's regular full-synthetic motor oil required by the vehicle manufacturer, an applicable commonly stocked oil filter, standard labor, taxes, and environmental fees. Oil viscosity, approvals, quantity, and filter fitment are determined from the VIN, engine, and manufacturer requirements.</li>
       <li>No surcharge is added solely because a vehicle uses a specialty filter, is diesel-powered, or is a European model, provided the service can be performed safely within the shop's normal capabilities. Repairs, parts, and services beyond a standard oil change are excluded.</li>
-      <li>Only qualifying repair orders completed after successful enrollment and fully settled count. Approved monthly-account fleet work counts when completed and posted to the monthly account. Canceled, refunded, reversed, duplicate, or fraudulent transactions do not count and may be removed.</li>
+      <li>Vehicle information entered by a customer is preliminary. After arrival, the official ERP vehicle record verified by the shop through VIN scanning, plate recognition, and staff review controls.</li><li>Only qualifying repair orders completed after successful enrollment and fully settled count. Approved monthly-account fleet work counts when completed and posted to the monthly account. Canceled, refunded, reversed, duplicate, or fraudulent transactions do not count and may be removed.</li>
       <li>A reward is earned when the fifth qualifying service is completed and expires 12 months later. Rewards have no cash value and may not be sold, transferred, or combined with another vehicle.</li>
       <li>Z&G may review, suspend, or correct records to prevent fraud, correct errors, or comply with law. Z&G may prospectively modify or end the program after reasonable notice, but will not unreasonably revoke an earned, unexpired reward.</li>
       <li>SMS consent is optional and is not a condition of purchase or participation. Personal information is handled under the shop's Privacy Policy.</li>
