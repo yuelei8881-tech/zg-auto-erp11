@@ -52,6 +52,22 @@ function ProgramTerms() {
   </div>;
 }
 
+function CurrentOffers() {
+  return <section className="reward-offers"><p className="reward-progress-eyebrow">CURRENT OFFERS / 当前优惠</p><h2>More ways to care for your vehicle / 更多车辆服务</h2><div className="reward-offer-grid"><article><b>Complimentary Tire Check</b><h3>免费轮胎检查</h3><p>Tire pressure, tread, and visible wear check with scheduled service.<br />预约维修时可检查胎压、胎纹及可见磨损。</p></article><article><b>Brake Safety Check</b><h3>刹车安全检查</h3><p>Ask for a visual brake inspection with qualifying service.<br />符合条件的到店服务可申请刹车系统目视检查。</p></article><article><b>Fleet Maintenance Support</b><h3>车队保养支持</h3><p>Vehicle-by-vehicle records and maintenance planning for fleets.<br />为车队提供逐车档案与保养计划。</p></article></div><p className="reward-offer-note">Offers are subject to availability and inspection; additional repairs or parts require approval. / 优惠视预约和车辆检查情况而定，额外维修或配件须经客户批准。</p><a className="reward-contact-offer" href="tel:+16265080888">Call / 致电 626-508-0888</a></section>;
+}
+
+function RecoverRewardLink() {
+  const [phone, setPhone] = useState(''); const [vin6, setVin6] = useState('');
+  const [busy, setBusy] = useState(false); const [message, setMessage] = useState(''); const [link, setLink] = useState('');
+  const recover = async (event: React.FormEvent) => { event.preventDefault(); setBusy(true); setMessage(''); setLink(''); try {
+    if (!supabase) throw new Error('Service unavailable');
+    const { data, error } = await supabase.rpc('zg_recover_oil_reward_registration', { p_phone: phone, p_vin_last6: vin6 });
+    if (error) throw error; const token = (data as { token?: string })?.token; if (!token) throw new Error('No matching enrollment found');
+    setLink(`${window.location.origin}${window.location.pathname}?reward_token=${encodeURIComponent(token)}`);
+  } catch { setMessage('No matching enrollment found. Please verify the phone number and VIN last 6. / 未找到匹配记录，请核对手机号码和 VIN 后六位。'); } finally { setBusy(false); } };
+  return <section className="reward-recover"><p className="reward-progress-eyebrow">PRIVATE LINK RECOVERY / 找回专属链接</p><h2>No password required / 无需注册密码</h2><p>Verify the mobile number and the last six characters of one enrolled VIN.<br />请输入登记手机号码和其中一辆车 VIN 的后六位进行验证。</p><form onSubmit={recover}><label>Mobile / 手机号码<input required type="tel" value={phone} onChange={event => setPhone(event.target.value)} /></label><label>VIN last 6 / VIN 后六位<input required minLength={6} maxLength={6} value={vin6} onChange={event => setVin6(event.target.value.toUpperCase().replace(/[^A-HJ-NPR-Z0-9]/g,''))} /></label><button disabled={busy}>{busy ? 'Verifying… / 正在验证…' : 'Recover Link / 找回链接'}</button></form>{message && <p className="reward-error">{message}</p>}{link && <div className="reward-recovered"><b>Private progress link / 专属进度链接</b><code>{link}</code><a href={link}>Open Progress / 打开进度</a></div>}</section>;
+}
+
 export function OilChangeRewardsPage({ Header, Footer }: { Header: ComponentType; Footer: ComponentType }) {
   const [lang, setLang] = useState<Lang>('zh'); const t = copy[lang];
   const [accountType, setAccountType] = useState<'personal' | 'fleet'>('personal');
@@ -96,7 +112,7 @@ export function OilChangeRewardsPage({ Header, Footer }: { Header: ComponentType
     <p className="reward-progress-eyebrow">Z&amp;G OIL CHANGE REWARDS / 换机油奖励</p>
     <h1>Reward Progress / 活动进度</h1>
     {progressBusy && <p className="reward-progress-message">Loading progress… / 正在查询进度…</p>}
-    {!progressBusy && progressError && <div className="reward-error"><b>Unable to open this progress link.</b><br />无法打开此进度链接，请确认链接完整或联系 626-508-0888。</div>}
+    {!progressBusy && progressError && <><div className="reward-error"><b>Unable to open this progress link.</b><br />无法打开此进度链接，请确认链接完整或联系 626-508-0888。</div><RecoverRewardLink /></>}
     {!progressBusy && progress && <>
       <div className="reward-progress-summary"><div><span>Customer / 客户</span><b>{progress.contactName || '—'}</b></div><div><span>Enrollment / 登记状态</span><b>{progress.status === 'approved' ? 'Approved / 已通过' : progress.status === 'rejected' ? 'Needs review / 需处理' : 'Pending review / 等待审核'}</b></div></div>
       <p className="reward-progress-note">Each vehicle is tracked separately. Shop-verified VIN and plate records control.<br />每辆车分别累计，以到店后由本店核验的 VIN 和车牌资料为准。</p>
@@ -106,7 +122,7 @@ export function OilChangeRewardsPage({ Header, Footer }: { Header: ComponentType
         return <article key={vehicle.id || index}><div className="reward-progress-vehicle-head"><div><small>Vehicle {index + 1} / 车辆 {index + 1}</small><h2>{[vehicle.year, vehicle.make, vehicle.model].filter(Boolean).join(' ') || 'Registered vehicle / 已登记车辆'}</h2><p>{vehicle.plate ? `Plate / 车牌: ${vehicle.plate}` : ''}{vehicle.vinLast6 ? ` · VIN ••••••${vehicle.vinLast6}` : ''}</p></div><strong>{rewarded ? 'FREE SERVICE READY / 免费保养可用' : `${count} / 5`}</strong></div><div className="reward-progress-dots">{[1,2,3,4,5].map(step => <i key={step} className={step <= count ? 'done' : ''}>{step}</i>)}<i className={rewarded ? 'reward-ready' : ''}>6<br /><small>FREE</small></i></div>{vehicle.rewardExpiresAt && rewarded && <p className="reward-expiry">Expires / 到期：{new Date(vehicle.rewardExpiresAt).toLocaleDateString()}</p>}{vehicle.rewardRedeemedAt && <p className="reward-redeemed">Redeemed / 已使用：{new Date(vehicle.rewardRedeemedAt).toLocaleDateString()}</p>}</article>;
       })}</div>
     </>}
-  </section></main><Footer /></>;
+  </section><CurrentOffers /></main><Footer /></>;
   return <><Header /><main className="reward-page">
     <section className="reward-hero"><div className="reward-lang"><button className={lang === 'zh' ? 'active' : ''} onClick={() => setLang('zh')}>中文</button><button className={lang === 'en' ? 'active' : ''} onClick={() => setLang('en')}>English</button></div><p>{t.eyebrow}</p><h1>{t.title}</h1><span>{t.subtitle}</span><div className="reward-count"><b>1</b><i>2</i><i>3</i><i>4</i><i>5</i><strong>FREE<br />免费</strong></div></section>
     {result ? <section className="reward-success"><div>✓</div><h2>{t.success}</h2><p>{t.successText}</p><b>{t.saveLink}</b><code>{progressUrl}</code><button onClick={async () => { await navigator.clipboard.writeText(progressUrl); setCopied(true); }}>{copied ? t.copied : t.copyLink}</button></section> :
@@ -116,6 +132,6 @@ export function OilChangeRewardsPage({ Header, Footer }: { Header: ComponentType
       <section><h2>2. {t.vehicles}</h2>{vehicles.map((vehicle, index) => <div className="reward-vehicle" key={index}><div className="reward-vehicle-title"><b>Vehicle {index + 1} / 车辆 {index + 1}</b>{vehicles.length > 1 && <button type="button" onClick={() => setVehicles(items => items.filter((_, i) => i !== index))}>{t.remove}</button>}</div><div className="reward-grid"><label>{t.vin}<input required minLength={11} maxLength={17} value={vehicle.vin} onChange={e => updateVehicle(index, 'vin', e.target.value.toUpperCase().replace(/[^A-HJ-NPR-Z0-9]/g, ''))} /></label><label>{t.plate}<input required value={vehicle.plate} onChange={e => updateVehicle(index, 'plate', e.target.value.toUpperCase())} /></label><label>{t.state}<input required value={vehicle.state} onChange={e => updateVehicle(index, 'state', e.target.value.toUpperCase())} /></label><label>{t.year}<input required inputMode="numeric" value={vehicle.year} onChange={e => updateVehicle(index, 'year', e.target.value)} /></label><label>{t.make}<input required value={vehicle.make} onChange={e => updateVehicle(index, 'make', e.target.value)} /></label><label>{t.model}<input required value={vehicle.model} onChange={e => updateVehicle(index, 'model', e.target.value)} /></label><label>{t.engine}<input value={vehicle.engine} onChange={e => updateVehicle(index, 'engine', e.target.value)} /></label>{accountType === 'fleet' && <><label>{t.unit}<input value={vehicle.unit} onChange={e => updateVehicle(index, 'unit', e.target.value)} /></label><label>{t.driver}<input value={vehicle.driverName} onChange={e => updateVehicle(index, 'driverName', e.target.value)} /></label><label>{t.driverPhone}<input type="tel" value={vehicle.driverPhone} onChange={e => updateVehicle(index, 'driverPhone', e.target.value)} /></label></>}</div></div>)}<button className="reward-add" type="button" onClick={() => setVehicles(items => [...items, blankVehicle()])}>+ {t.addVehicle}</button></section>
       <section><details className="reward-terms"><summary>{t.termsTitle} / Program Terms</summary><ProgramTerms /></details><label className="reward-check"><input required type="checkbox" checked={form.termsAccepted} onChange={e => setForm({ ...form, termsAccepted: e.target.checked })} /><span>{t.agree}</span></label><label className="reward-check"><input type="checkbox" checked={form.smsConsent} onChange={e => setForm({ ...form, smsConsent: e.target.checked })} /><span>{t.sms}</span></label></section>
       {error && <p className="reward-error">{error}</p>}<button className="reward-submit" disabled={busy}>{busy ? t.submitting : t.submit}</button>
-    </form>}
+    </form>}<RecoverRewardLink /><CurrentOffers />
   </main><Footer /></>;
 }
