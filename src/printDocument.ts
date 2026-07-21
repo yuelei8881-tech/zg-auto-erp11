@@ -21,7 +21,7 @@ export function printDocumentV077(order: WorkOrder, settings: ShopSettings, kind
     const secondary = (en || '').trim();
     return `<div>${escapeHtml(primary)}</div>${secondary && secondary.toLowerCase() !== primary.toLowerCase() ? `<div class="translation">${escapeHtml(secondary)}</div>` : ''}`;
   };
-  const laborRows = (order.laborItems || []).map(item => { const flat = item.billingMode === 'flat'; return `<tr><td>${escapeHtml(item.description)}${item.descriptionEn ? `<br><em>${escapeHtml(item.descriptionEn)}</em>` : ''}</td><td class="n">${flat ? 'Flat' : Number(item.hours).toFixed(1)}</td><td class="n">${flat ? '—' : money(item.rate)}</td><td class="n">${money(item.total)}</td></tr>`; }).join('');
+  const laborRows = (order.laborItems || []).map(item => { const flat = item.billingMode === 'flat'; const qty = Number(item.qty || 1); return `<tr><td>${escapeHtml(item.description)}${qty !== 1 ? ` × ${qty}` : ''}${item.descriptionEn ? `<br><em>${escapeHtml(item.descriptionEn)}</em>` : ''}</td><td class="n">${flat ? `Flat${qty !== 1 ? ` ×${qty}` : ''}` : `${Number(item.hours).toFixed(1)}${qty !== 1 ? ` ×${qty}` : ''}`}</td><td class="n">${flat ? '—' : money(item.rate)}</td><td class="n">${money(item.total)}</td></tr>`; }).join('');
   const partRows = (order.partItems || []).filter(item => !!(item.partId || item.partNo?.trim() || item.name?.trim())).map(item => `<tr><td>${escapeHtml(item.partNo)}</td><td>${escapeHtml(item.name)}${item.nameEn ? `<br><em>${escapeHtml(item.nameEn)}</em>` : ''}</td><td class="n">${item.qty}</td><td class="n">${money(item.price)}</td><td class="n">${money(item.total)}</td></tr>`).join('');
   const paymentRows = payments.filter(item =>
     !item.archivedAt && !!item.workOrderId && item.workOrderId === order.id

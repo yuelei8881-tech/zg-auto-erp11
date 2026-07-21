@@ -17,10 +17,11 @@ export const num = (value: unknown) => Number(value || 0);
 export function recalculateWorkOrder(order: Partial<WorkOrder>): WorkOrder {
   const laborItems = (order.laborItems || []).map((item: LaborItem) => {
     const billingMode = item.billingMode === 'flat' ? 'flat' : 'hourly';
+    const qty = Math.max(0, num(item.qty ?? 1));
     const hours = num(item.hours);
     const rate = num(item.rate);
     const flatAmount = num(item.flatAmount);
-    return { ...item, billingMode, hours, rate, flatAmount, total: billingMode === 'flat' ? flatAmount : hours * rate };
+    return { ...item, billingMode, qty, hours, rate, flatAmount, total: qty * (billingMode === 'flat' ? flatAmount : hours * rate) };
   });
   const partItems = (order.partItems || []).map((item: PartItem) => ({
     ...item, qty: num(item.qty), cost: num(item.cost), price: num(item.price),

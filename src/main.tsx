@@ -1021,7 +1021,7 @@ function SendMenu({ order, settings, store, cloud }: { order: WorkOrder; setting
       invoice: 'Invoice / 发票', receipt: 'Receipt / 收据',
     };
     const title = documentNames[kind] || documentNames.repair;
-    const laborRows = order.laborItems.map(item => `<tr><td>${escapeHtml(item.description)}${item.descriptionEn ? `<br><em>${escapeHtml(item.descriptionEn)}</em>` : ''}</td><td style="text-align:right">${item.billingMode === 'flat' ? 'Flat' : Number(item.hours).toFixed(1)}</td><td style="text-align:right">${money(item.total)}</td></tr>`).join('');
+    const laborRows = order.laborItems.map(item => { const qty = Number(item.qty || 1); return `<tr><td>${escapeHtml(item.description)}${qty !== 1 ? ` × ${qty}` : ''}${item.descriptionEn ? `<br><em>${escapeHtml(item.descriptionEn)}</em>` : ''}</td><td style="text-align:right">${item.billingMode === 'flat' ? 'Flat' : Number(item.hours).toFixed(1)}${qty !== 1 ? ` ×${qty}` : ''}</td><td style="text-align:right">${money(item.total)}</td></tr>`; }).join('');
     const partRows = order.partItems.filter(item => !!(item.partId || item.partNo?.trim() || item.name?.trim())).map(item => `<tr><td>${escapeHtml(item.partNo)}</td><td>${escapeHtml(item.name)}${item.nameEn ? `<br><em>${escapeHtml(item.nameEn)}</em>` : ''}</td><td style="text-align:right">${item.qty}</td><td style="text-align:right">${money(item.price)}</td><td style="text-align:right">${money(item.total)}</td></tr>`).join('');
     const amountLabel = kind === 'receipt' ? 'Amount Paid / 已付款' : 'Total / 总计';
     const amount = kind === 'receipt' ? order.paid : order.total;
@@ -1117,7 +1117,7 @@ function printDocument(order: WorkOrder, settings: ShopSettings, documentType: s
   const shopAddress = settings.address || '319 Agostino Rd, San Gabriel, CA 91776';
   const shopPhone = settings.phone || '626-508-0888';
   documentType = ({ Estimate: 'ESTIMATE / 报价单', 'Repair Order': 'REPAIR ORDER / 维修工单', Invoice: 'INVOICE / 发票', Receipt: 'RECEIPT / 收据' } as Record<string, string>)[documentType] || documentType;
-  const laborRows = order.laborItems.map(item => { const flat = item.billingMode === 'flat'; return `<tr><td>${escapeHtml(item.description)}${item.descriptionEn ? `<br><em>${escapeHtml(item.descriptionEn)}</em>` : ''}</td><td class="num">${flat ? 'Flat' : item.hours.toFixed(1)}</td><td class="num">${flat ? '—' : money(item.rate)}</td><td class="num">${money(item.total)}</td></tr>`; }).join('');
+  const laborRows = order.laborItems.map(item => { const flat = item.billingMode === 'flat'; const qty = Number(item.qty || 1); return `<tr><td>${escapeHtml(item.description)}${qty !== 1 ? ` × ${qty}` : ''}${item.descriptionEn ? `<br><em>${escapeHtml(item.descriptionEn)}</em>` : ''}</td><td class="num">${flat ? 'Flat' : item.hours.toFixed(1)}${qty !== 1 ? ` ×${qty}` : ''}</td><td class="num">${flat ? '—' : money(item.rate)}</td><td class="num">${money(item.total)}</td></tr>`; }).join('');
   const partRows = order.partItems.filter(item => !!(item.partId || item.partNo?.trim() || item.name?.trim())).map(item => `<tr><td>${escapeHtml(item.partNo)}</td><td>${escapeHtml(item.name)}${item.nameEn ? `<br><em>${escapeHtml(item.nameEn)}</em>` : ''}</td><td class="num">${item.qty}</td><td class="num">${money(item.price)}</td><td class="num">${money(item.total)}</td></tr>`).join('');
   const signatureName = order.customerSignedBy || order.customer || '';
   const signatureTime = order.customerSignedAt ? new Date(order.customerSignedAt).toLocaleString() : '';
