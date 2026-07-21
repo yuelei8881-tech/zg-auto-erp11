@@ -1,9 +1,14 @@
-import { useMemo, useState, type ComponentType } from 'react';
+import { useEffect, useMemo, useState, type ComponentType } from 'react';
 import { supabase } from './lib/supabase';
 import './oilChangeRewards.css';
 
 type Lang = 'zh' | 'en';
 type VehicleForm = { vin: string; plate: string; state: string; year: string; make: string; model: string; engine: string; unit: string; driverName: string; driverPhone: string };
+type RewardProgress = {
+  status: string;
+  contactName: string;
+  vehicles: Array<{ id: string; vinLast6?: string; plate?: string; year?: number; make?: string; model?: string; count?: number; rewardEarnedAt?: string; rewardExpiresAt?: string; rewardRedeemedAt?: string; status?: string }>;
+};
 const blankVehicle = (): VehicleForm => ({ vin: '', plate: '', state: 'CA', year: '', make: '', model: '', engine: '', unit: '', driverName: '', driverPhone: '' });
 const termsVersion = '2026-07-20-v1';
 
@@ -53,7 +58,28 @@ export function OilChangeRewardsPage({ Header, Footer }: { Header: ComponentType
   const [form, setForm] = useState({ contactName: '', phone: '', email: '', companyName: '', tcpNumber: '', termsAccepted: false, smsConsent: false });
   const [vehicles, setVehicles] = useState<VehicleForm[]>([blankVehicle()]);
   const [busy, setBusy] = useState(false); const [error, setError] = useState(''); const [result, setResult] = useState<{ enrollmentId: string; token: string } | null>(null); const [copied, setCopied] = useState(false);
+  const rewardToken = useMemo(() => new URLSearchParams(window.location.search).get('reward_token')?.trim() || '', []);
+  const [progress, setProgress] = useState<RewardProgress | null>(null);
+  const [progressBusy, setProgressBusy] = useState(Boolean(rewardToken));
+  const [progressError, setProgressError] = useState('');
   const progressUrl = useMemo(() => result ? `${window.location.origin}${window.location.pathname}?reward_token=${encodeURIComponent(result.token)}` : '', [result]);
+  useEffect(() => {
+    if (!rewardToken) return;
+    let active = true;
+    (async () => {
+      try {
+        if (!supabase) throw new Error('Service unavailable');
+        const { data, error: rpcError } = await supabase.rpc('zg_get_oil_reward_registration', { p_token: rewardToken });
+        if (rpcError) throw rpcError;
+        if (active) setProgress(data as RewardProgress);
+      } catch (cause) {
+        if (active) setProgressError(cause instanceof Error ? cause.message : 'Unable to load reward progress');
+      } finally {
+        if (active) setProgressBusy(false);
+      }
+    })();
+    return () => { active = false; };
+  }, [rewardToken]);
   const updateVehicle = (index: number, field: keyof VehicleForm, value: string) => setVehicles(items => items.map((item, i) => i === index ? { ...item, [field]: value } : item));
   const submit = async (event: React.FormEvent) => {
     event.preventDefault(); setError(''); setBusy(true);
@@ -66,6 +92,21 @@ export function OilChangeRewardsPage({ Header, Footer }: { Header: ComponentType
       setResult({ enrollmentId: payload.enrollmentId, token: payload.token });
     } catch (cause) { setError(cause instanceof Error ? cause.message : t.error); } finally { setBusy(false); }
   };
+  if (rewardToken) return <><Header /><main className="reward-page"><section className="reward-progress">
+    <p className="reward-progress-eyebrow">Z&amp;G OIL CHANGE REWARDS / 换机油奖励</p>
+    <h1>Reward Progress / 活动进度</h1>
+    {progressBusy && <p className="reward-progress-message">Loading progress… / 正在查询进度…</p>}
+    {!progressBusy && progressError && <div className="reward-error"><b>Unable to open this progress link.</b><br />无法打开此进度链接，请确认链接完整或联系 626-508-0888。</div>}
+    {!progressBusy && progress && <>
+      <div className="reward-progress-summary"><div><span>Customer / 客户</span><b>{progress.contactName || '—'}</b></div><div><span>Enrollment / 登记状态</span><b>{progress.status === 'approved' ? 'Approved / 已通过' : progress.status === 'rejected' ? 'Needs review / 需处理' : 'Pending review / 等待审核'}</b></div></div>
+      <p className="reward-progress-note">Each vehicle is tracked separately. Shop-verified VIN and plate records control.<br />每辆车分别累计，以到店后由本店核验的 VIN 和车牌资料为准。</p>
+      <div className="reward-progress-vehicles">{(progress.vehicles || []).map((vehicle, index) => {
+        const count = Math.max(0, Math.min(5, Number(vehicle.count || 0)));
+        const rewarded = Boolean(vehicle.rewardEarnedAt) && !vehicle.rewardRedeemedAt;
+        return <article key={vehicle.id || index}><div className="reward-progress-vehicle-head"><div><small>Vehicle {index + 1} / 车辆 {index + 1}</small><h2>{[vehicle.year, vehicle.make, vehicle.model].filter(Boolean).join(' ') || 'Registered vehicle / 已登记车辆'}</h2><p>{vehicle.plate ? `Plate / 车牌: ${vehicle.plate}` : ''}{vehicle.vinLast6 ? ` · VIN ••••••${vehicle.vinLast6}` : ''}</p></div><strong>{rewarded ? 'FREE SERVICE READY / 免费保养可用' : `${count} / 5`}</strong></div><div className="reward-progress-dots">{[1,2,3,4,5].map(step => <i key={step} className={step <= count ? 'done' : ''}>{step}</i>)}<i className={rewarded ? 'reward-ready' : ''}>6<br /><small>FREE</small></i></div>{vehicle.rewardExpiresAt && rewarded && <p className="reward-expiry">Expires / 到期：{new Date(vehicle.rewardExpiresAt).toLocaleDateString()}</p>}{vehicle.rewardRedeemedAt && <p className="reward-redeemed">Redeemed / 已使用：{new Date(vehicle.rewardRedeemedAt).toLocaleDateString()}</p>}</article>;
+      })}</div>
+    </>}
+  </section></main><Footer /></>;
   return <><Header /><main className="reward-page">
     <section className="reward-hero"><div className="reward-lang"><button className={lang === 'zh' ? 'active' : ''} onClick={() => setLang('zh')}>中文</button><button className={lang === 'en' ? 'active' : ''} onClick={() => setLang('en')}>English</button></div><p>{t.eyebrow}</p><h1>{t.title}</h1><span>{t.subtitle}</span><div className="reward-count"><b>1</b><i>2</i><i>3</i><i>4</i><i>5</i><strong>FREE<br />免费</strong></div></section>
     {result ? <section className="reward-success"><div>✓</div><h2>{t.success}</h2><p>{t.successText}</p><b>{t.saveLink}</b><code>{progressUrl}</code><button onClick={async () => { await navigator.clipboard.writeText(progressUrl); setCopied(true); }}>{copied ? t.copied : t.copyLink}</button></section> :
