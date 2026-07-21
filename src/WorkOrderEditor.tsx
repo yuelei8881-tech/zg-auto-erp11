@@ -148,6 +148,7 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, w
   }));
   const [saving, setSaving] = useState(false);
   const [partSearch, setPartSearch] = useState('');
+  const [accountSearch, setAccountSearch] = useState('');
   const [activePanel, setActivePanel] = useState<'intake' | 'evidence' | 'pricing'>('intake');
   const [mobileStep, setMobileStep] = useState<MobileStep>('account');
   const [draftReady, setDraftReady] = useState(false);
@@ -245,6 +246,22 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, w
   }, [parts, repairLibrarySearch, servicePackages, value?.id, workOrders]);
   const selectedVehicle = vehicles.find(v => v.id === order.vehicleId);
   const selectedAccountValue = order.fleetId ? `fleet:${order.fleetId}` : order.customerId ? `customer:${order.customerId}` : '';
+  const accountOptions = useMemo(() => [
+    ...customers.map(item => ({ value: `customer:${item.id}`, label: `${item.name} · ${item.phone || '无电话'}`, search: `${item.name} ${item.phone || ''} ${item.email || ''}`.toLocaleLowerCase() })),
+    ...fleets.map(item => ({ value: `fleet:${item.id}`, label: `${item.company} · ${item.contact || '无联系人'} · ${item.phone || '无电话'}`, search: `${item.company} ${item.contact || ''} ${item.phone || ''} ${item.billingEmail || ''}`.toLocaleLowerCase() })),
+  ], [customers, fleets]);
+  useEffect(() => {
+    const selected = accountOptions.find(item => item.value === selectedAccountValue);
+    if (selected) setAccountSearch(selected.label);
+    else if (!selectedAccountValue) setAccountSearch('');
+  }, [selectedAccountValue, accountOptions]);
+  const searchAndSelectAccount = (text: string) => {
+    setAccountSearch(text);
+    if (!text.trim()) return selectCustomer('');
+    const normalized = text.trim().toLocaleLowerCase();
+    const exact = accountOptions.find(item => item.label.toLocaleLowerCase() === normalized || item.search === normalized);
+    if (exact) selectCustomer(exact.value);
+  };
   const availableVehicles = vehicles.filter(vehicle => !order.customerId && !order.fleetId || vehicle.ownerId === (order.fleetId || order.customerId));
   const checklist: InspectionChecklist = order.inspectionChecklist || { intake: false, exterior: false, scan: false, diagnosis: false, estimate: false };
   const inspectionDone = inspectionItems.filter(([key]) => checklist[key]).length;
@@ -753,7 +770,7 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, w
       <label>日期<input type="date" value={order.date} onChange={e => patch({ date: e.target.value })} /></label>
       <label>状态<select value={order.status} disabled={!!order.archivedAt || order.status === '已交车'} onChange={e => patch({ status: e.target.value as WorkOrderStatus })}>{order.archivedAt && <option>已取消</option>}{order.status === '已交车' && <option value="已交车">已交车（结账完成）</option>}{statuses.map(item => <option key={item}>{item}</option>)}</select></label>
       <label>负责技师{canAssignTechnician ? <select value={order.technicianUserId || ''} onChange={e => { const member = technicians.find(item => item.userId === e.target.value); patch({ technicianUserId: member?.userId || '', technician: member?.displayName || '' }); }}><option value="">未分配</option>{technicians.filter(item => item.role === 'technician' || item.role === 'manager').map(item => <option key={item.userId} value={item.userId}>{item.displayName || item.userId.slice(0, 8)}</option>)}</select> : <input value={order.technician || currentUser} readOnly />}</label>
-      <label>客户 / 公司 / 车队<select value={selectedAccountValue} onChange={e => selectCustomer(e.target.value)}><option value="">请选择</option><optgroup label="个人与普通公司客户">{customers.map(item => <option key={item.id} value={`customer:${item.id}`}>{item.name} · {item.phone}</option>)}</optgroup><optgroup label="车队与公司账户">{fleets.map(item => <option key={item.id} value={`fleet:${item.id}`}>{item.company} · {item.contact} · {item.phone}</option>)}</optgroup></select></label>
+      <label>客户 / 公司 / 车队<input list="work-order-account-options" value={accountSearch} onChange={e => searchAndSelectAccount(e.target.value)} placeholder="输入公司名、客户、联系人或电话搜索" autoComplete="off" /><datalist id="work-order-account-options">{accountOptions.map(item => <option key={item.value} value={item.label} />)}</datalist></label>
       <label>联系电话<input value={order.phone || ''} onChange={e => patch({ phone: e.target.value })} /></label>
       <label>车辆<div className="input-action"><select value={order.vehicleId || ''} onChange={e => selectVehicle(e.target.value)}><option value="">{availableVehicles.length ? '选择当前账户车辆' : '暂无车辆，请快速添加'}</option>{availableVehicles.map(item => <option key={item.id} value={item.id}>{item.plate || item.vin} · {item.year} {item.make} {item.model}{item.ownerName ? ` · ${item.ownerName}` : ''}</option>)}</select><button type="button" onClick={() => setAddingVehicle(current => !current)}>＋ 添加</button></div></label>
       <label>当前里程<input type="number" value={order.mileage || ''} onChange={e => patch({ mileage: Number(e.target.value) })} /></label>
