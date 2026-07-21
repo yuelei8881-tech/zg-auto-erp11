@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import './publicWebsite.css';
+import { OilChangeRewardsPage } from './OilChangeRewardsPage';
 
 const business = {
   name: 'Z&G Auto Body And Repair',
@@ -11,7 +12,7 @@ const business = {
 const publicUrl = (path: string) => window.location.pathname.startsWith('/website') ? `/website${path === '/' ? '' : path}` : path;
 
 function Header() {
-  return <header className="public-header"><a className="public-brand" href={publicUrl('/')}><span>Z&amp;G</span><b>AUTO BODY AND REPAIR</b></a><nav><a href={`${publicUrl('/')}#services`}>Services</a><a href={`${publicUrl('/')}#contact`}>Contact</a><a href={publicUrl('/privacy')}>Privacy</a><a href={publicUrl('/terms')}>SMS Terms</a></nav><a className="public-call" href="tel:+16265080888">Call {business.phone}</a></header>;
+  return <header className="public-header"><a className="public-brand" href={publicUrl('/')}><span>Z&amp;G</span><b>AUTO BODY AND REPAIR</b></a><nav><a href={`${publicUrl('/')}#services`}>Services</a><a href={publicUrl('/oil-change-rewards')}>Oil Rewards / 机油活动</a><a href={`${publicUrl('/')}#contact`}>Contact</a><a href={publicUrl('/privacy')}>Privacy</a><a href={publicUrl('/terms')}>SMS Terms</a></nav><a className="public-call" href="tel:+16265080888">Call {business.phone}</a></header>;
 }
 
 function Footer() {
@@ -41,6 +42,7 @@ function Terms() {
 }
 
 export function PublicWebsite({ path }: { path: string }) {
+  if (path.startsWith('/oil-change-rewards')) return <OilChangeRewardsPage Header={Header} Footer={Footer} />;
   if (path.startsWith('/privacy')) return <Privacy />;
   if (path.startsWith('/terms')) return <Terms />;
   return <Home />;

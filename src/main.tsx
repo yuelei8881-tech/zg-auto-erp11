@@ -543,7 +543,7 @@ function PageContent(props: ContentProps) {
   if (page === 'workOrders') return <WorkOrders {...props} />;
   if (page === 'parts') return <Inventory {...props} />;
   if (page === 'finance') return <Finance {...props} />;
-  if (page === 'campaigns') return <ActivityCenter campaigns={store.campaigns} warranties={store.warranties} vehicles={store.vehicles} onAddCampaign={() => props.openModal('campaign')} onEditCampaign={item => props.openModal('campaign', item)} onAddWarranty={() => props.openModal('warranty')} onEditWarranty={item => props.openModal('warranty', item)} onRemoveCampaign={id => props.remove('campaigns', id)} onRemoveWarranty={id => props.remove('warranties', id)} />;
+  if (page === 'campaigns') return <ActivityCenter organizationId={props.cloud.organizationId} campaigns={store.campaigns} warranties={store.warranties} vehicles={store.vehicles} onAddCampaign={() => props.openModal('campaign')} onEditCampaign={item => props.openModal('campaign', item)} onAddWarranty={() => props.openModal('warranty')} onEditWarranty={item => props.openModal('warranty', item)} onRemoveCampaign={id => props.remove('campaigns', id)} onRemoveWarranty={id => props.remove('warranties', id)} />;
   if (page === 'staff') return <StaffPage cloud={cloud} />;
   if (page === 'smart') return <SmartTools cloud={cloud} workOrders={store.workOrders} />;
   return <SettingsPage {...props} />;
