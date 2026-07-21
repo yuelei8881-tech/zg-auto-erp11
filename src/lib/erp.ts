@@ -45,7 +45,10 @@ export function recalculateWorkOrder(order: Partial<WorkOrder>): WorkOrder {
     customer: order.customer || '', vehicle: order.vehicle || '', status: order.status || '等待检查',
     ...order, laborItems, partItems, outsource, discount, taxRate, taxOverride: order.taxOverride, laborTotal, partsTotal,
     partsCost, tax, total, paid, balance: Math.max(0, total - paid),
-    grossProfit: laborTotal + partsTotal - partsCost - outsource - discount,
+    // Profit follows the final customer total, including any approved flat
+    // settlement amount. Sales tax is not shop income; outsourced work and
+    // actual parts cost are expenses.
+    grossProfit: Math.max(0, total - tax - partsCost - outsource),
   } as WorkOrder;
 }
 

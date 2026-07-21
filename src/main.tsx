@@ -211,6 +211,10 @@ function App({ cloud }: { cloud: CloudSession }) {
     // opened before a payment must never be allowed to write an older `paid`
     // value back over the settled work order.
     const authoritativePaid = old ? Number(old.paid || 0) : Number(order.paid || 0);
+    if (order.total + 0.009 < authoritativePaid) {
+      alert(`不能把工单总额改为 ${money(order.total)}：本单已经收款 ${money(authoritativePaid)}。请先由管理员更正收款流水，再修改工单金额。`);
+      return;
+    }
     const hasPaymentLedger = store.payments.some(payment => payment.workOrderId === order.id && !payment.archivedAt);
     const authoritativePaymentMethod = old && hasPaymentLedger ? old.paymentMethod : order.paymentMethod;
     const authoritativeBillingDueDate = old && hasPaymentLedger ? old.billingDueDate : order.billingDueDate;
@@ -330,7 +334,11 @@ function App({ cloud }: { cloud: CloudSession }) {
     if (!confirm(`批准“${request.type}”？\n工单：${request.workOrderNumber}\n申请人：${request.requestedBy}\n原因：${request.reason}`)) return;
     if (request.type === '删除工单') await executeWorkOrderArchive(order, request.reason);
     if (request.type === '工单折扣') await persist('workOrders', recalculateWorkOrder({ ...order, discount: Number(request.newValue || 0) }));
-    if (request.type === '实际结账金额') await persist('workOrders', recalculateWorkOrder({ ...order, settlementTotal: Number(request.newValue || 0) }));
+    if (request.type === '实际结账金额') {
+      const proposedTotal = Number(request.newValue || 0);
+      if (proposedTotal + 0.009 < Number(order.paid || 0)) return alert(`无法批准：拟调整金额 ${money(proposedTotal)} 低于已收款 ${money(order.paid)}。请先更正收款流水。`);
+      await persist('workOrders', recalculateWorkOrder({ ...order, settlementTotal: proposedTotal }));
+    }
     await persist('approvalRequests', { ...request, status: '已执行', approvedBy: actorName, approvedById: cloud.user.id, approvedAt: new Date().toISOString() });
     await writeChangeLog(order, '双人授权已执行', `${request.type}由 ${actorName} 批准；申请人 ${request.requestedBy}。`, request.oldValue, request.newValue);
   };
