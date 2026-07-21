@@ -142,7 +142,7 @@ async function removeWorkOrderDraft(key: string) {
 
 export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, workOrders, parts, servicePackages, settings, nextNumber, onSave, onCancel, onCheckoutAndDeliver, onCreateVehicle, onSaveServicePackage, onDeleteServicePackage, onPrint, cloud, currentUser, currentUserId, technicians, canApproveReview, canAssignTechnician, canEditPricing, canViewFinancials, canPrintDocuments }: Props) {
   const [order, setOrder] = useState<WorkOrder>(() => recalculateWorkOrder(value || {
-    id: uid(), number: nextNumber, date: today(), customer: '', vehicle: '', status: '等待检查',
+    id: uid(), number: '保存时自动分配', date: today(), customer: '', vehicle: '', status: '等待检查',
     technician: canAssignTechnician ? '' : currentUser, technicianUserId: canAssignTechnician ? '' : currentUserId,
     laborItems: [], partItems: [], outsource: 0, discount: 0, taxRate: settings.defaultTaxRate,
   }));
@@ -749,7 +749,7 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, w
     </nav>
 
     <section className="form-section editor-panel panel-intake"><h3>客户与车辆</h3><div className="form-grid four">
-      <label>工单号<input value={order.number} onChange={e => patch({ number: e.target.value })} /></label>
+      <label>工单号<input value={order.number} readOnly aria-label="工单号（服务器自动分配）" /></label>
       <label>日期<input type="date" value={order.date} onChange={e => patch({ date: e.target.value })} /></label>
       <label>状态<select value={order.status} disabled={!!order.archivedAt || order.status === '已交车'} onChange={e => patch({ status: e.target.value as WorkOrderStatus })}>{order.archivedAt && <option>已取消</option>}{order.status === '已交车' && <option value="已交车">已交车（结账完成）</option>}{statuses.map(item => <option key={item}>{item}</option>)}</select></label>
       <label>负责技师{canAssignTechnician ? <select value={order.technicianUserId || ''} onChange={e => { const member = technicians.find(item => item.userId === e.target.value); patch({ technicianUserId: member?.userId || '', technician: member?.displayName || '' }); }}><option value="">未分配</option>{technicians.filter(item => item.role === 'technician' || item.role === 'manager').map(item => <option key={item.userId} value={item.userId}>{item.displayName || item.userId.slice(0, 8)}</option>)}</select> : <input value={order.technician || currentUser} readOnly />}</label>

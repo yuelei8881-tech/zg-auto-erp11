@@ -199,8 +199,18 @@ function App({ cloud }: { cloud: CloudSession }) {
       alert('当前没有通过“新建工单”进入编辑，本次内容不会保存。');
       return;
     }
-    const computedOrder = recalculateWorkOrder({ ...rawOrder, settlementTotal: undefined });
-    const order = recalculateWorkOrder(rawOrder);
+    let numberedOrder = rawOrder;
+    if (!existingOrder && continuingNewOrder) {
+      try {
+        const assignedNumber = await cloud.reserveWorkOrderNumber(rawOrder.id);
+        numberedOrder = { ...rawOrder, number: assignedNumber };
+      } catch (error) {
+        alert(`无法取得唯一工单号，本次内容尚未保存。${error instanceof Error ? `\n${error.message}` : ''}`);
+        return;
+      }
+    }
+    const computedOrder = recalculateWorkOrder({ ...numberedOrder, settlementTotal: undefined });
+    const order = recalculateWorkOrder(numberedOrder);
     const old = store.workOrders.find(item => item.id === order.id);
     const oldComputed = old ? recalculateWorkOrder({ ...old, settlementTotal: undefined }) : undefined;
     const discountNeedsApproval = Number(order.discount || 0) !== Number(old?.discount || 0);

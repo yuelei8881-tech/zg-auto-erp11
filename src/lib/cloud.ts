@@ -17,6 +17,7 @@ export type CloudSession = {
   permissions: Record<string, boolean>;
   loadStore: () => Promise<CloudStore>;
   upsertRecord: (module: string, row: CloudRow) => Promise<void>;
+  reserveWorkOrderNumber: (recordId: string) => Promise<string>;
   recordPayment: (workOrderId: string, payment: CloudRow) => Promise<CloudRow>;
   deleteRecord: (module: string, id: string) => Promise<void>;
   subscribe: (refresh: () => void) => () => void;
@@ -191,6 +192,14 @@ export async function openCloudSession(user: User): Promise<CloudSession> {
     return payload as T;
   };
 
+  const reserveWorkOrderNumber = async (recordId: string) => {
+    const { data, error } = await client.rpc('zg_reserve_work_order_number', { p_record_id: recordId });
+    if (error) throw error;
+    const number = String(data || '').trim();
+    if (!/^RO-\d{4}-\d{4,}$/.test(number)) throw new Error('服务器没有返回有效的工单号，请稍后重试。');
+    return number;
+  };
+
   const recordPayment = async (workOrderId: string, payment: CloudRow) => {
     const { data, error } = await client.rpc('zg_record_payment', {
       p_org: organizationId,
@@ -283,7 +292,7 @@ export async function openCloudSession(user: User): Promise<CloudSession> {
     organizationName: organization?.name || 'Z&G AUTO REPAIR',
     role: String(membership.role),
     permissions: (membership.permissions || {}) as Record<string, boolean>,
-    loadStore, upsertRecord, deleteRecord, recordPayment, subscribe, invokeFunction, uploadEvidencePhoto, createCustomerApproval, listStaff, createStaffInvite, updateStaff, updateOwnProfile, cancelStaffInvite, deleteStaffByEmail,
+    loadStore, upsertRecord, reserveWorkOrderNumber, deleteRecord, recordPayment, subscribe, invokeFunction, uploadEvidencePhoto, createCustomerApproval, listStaff, createStaffInvite, updateStaff, updateOwnProfile, cancelStaffInvite, deleteStaffByEmail,
     signOut: async () => { await client.auth.signOut(); },
   };
 }
