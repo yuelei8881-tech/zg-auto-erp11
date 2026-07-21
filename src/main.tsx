@@ -1059,10 +1059,22 @@ function SendMenu({ order, settings, store, cloud }: { order: WorkOrder; setting
   const sendSmsNotice = async (kind: 'repair' | 'invoice' | 'progress') => {
     const phone = prompt('客户手机号码：', savedPhone);
     if (!phone?.trim()) return;
+    const statusEnglish: Record<string, string> = {
+      '等待检查': 'Waiting for inspection', '等待批准': 'Waiting for approval', '等待配件': 'Waiting for parts',
+      '维修中': 'Repair in progress', '已完成': 'Completed', '已交车': 'Delivered', '已取消': 'Canceled',
+    };
+    const commonWorkEnglish: Record<string, string> = {
+      '换机油': 'Engine oil change', '已更换机油': 'Engine oil changed',
+      '更换发动机机油和滤芯': 'Engine oil and filter replacement',
+    };
+    const workUpdateEnglish = String(order.workPerformedEn || '').trim()
+      || commonWorkEnglish[String(order.workPerformed || '').trim()]
+      || (order.workPerformed ? 'Service work has been updated' : '');
+    const pickupNotice = ['已完成', '已交车'].includes(order.status) ? 'Your vehicle is ready for pickup. ' : '';
     const messages = {
       repair: `Z&G AUTO: Repair order ${order.number} for ${order.vehicle} is ready. Total ${money(order.total)}. Questions: ${settings.phone}.`,
       invoice: `Z&G AUTO: Invoice ${order.number} is ready. Total ${money(order.total)}, paid ${money(order.paid)}, balance ${money(order.balance)}. Questions: ${settings.phone}.`,
-      progress: `Z&G AUTO: Update for ${order.number} (${order.vehicle}): ${order.status}. ${order.workPerformed ? `Work update: ${order.workPerformed.slice(0, 180)}. ` : ''}Questions: ${settings.phone}.`,
+      progress: `Z&G AUTO: Update for ${order.number} (${order.vehicle}). Status: ${statusEnglish[order.status] || 'Updated'}. ${workUpdateEnglish ? `Work performed: ${workUpdateEnglish.slice(0, 180)}. ` : ''}${pickupNotice}Questions: ${settings.phone}.`,
     };
     const labels = { repair: '短信工单通知', invoice: '短信发票通知', progress: '短信维修进度通知' };
     const result = await notifySms(phone.trim(), messages[kind]);
