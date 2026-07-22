@@ -150,6 +150,8 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, w
   const [partSearch, setPartSearch] = useState('');
   const [accountSearch, setAccountSearch] = useState('');
   const [vehicleSearch, setVehicleSearch] = useState('');
+  const [accountSearchOpen, setAccountSearchOpen] = useState(false);
+  const [vehicleSearchOpen, setVehicleSearchOpen] = useState(false);
   const [activePanel, setActivePanel] = useState<'intake' | 'evidence' | 'pricing'>('intake');
   const [mobileStep, setMobileStep] = useState<MobileStep>('account');
   const [draftReady, setDraftReady] = useState(false);
@@ -251,6 +253,16 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, w
     label: `${item.plate || '无车牌'} · ${item.year} ${item.make} ${item.model} · ${item.ownerName || '无所属账户'}`,
     search: `${item.plate || ''} ${item.vin || ''} ${item.unit || ''} ${item.year || ''} ${item.make || ''} ${item.model || ''} ${item.ownerName || ''}`.toLocaleLowerCase(),
   })), [vehicles]);
+  const fuzzyMatch = (source: string, query: string) => {
+    const normalize = (text: string) => text.toLocaleLowerCase().replace(/[^a-z0-9\u3400-\u9fff]+/g, ' ').trim();
+    const haystack = normalize(source);
+    return normalize(query).split(/\s+/).filter(Boolean).every(token => haystack.includes(token));
+  };
+  const matchingVehicles = useMemo(() => {
+    const query = vehicleSearch.trim();
+    if (!query || order.vehicleId && vehicleOptions.some(item => item.value === order.vehicleId && item.label === query)) return vehicleOptions.slice(0, 12);
+    return vehicleOptions.filter(item => fuzzyMatch(`${item.label} ${item.search}`, query)).slice(0, 20);
+  }, [order.vehicleId, vehicleOptions, vehicleSearch]);
   useEffect(() => {
     const selected = vehicleOptions.find(item => item.value === order.vehicleId);
     if (selected) setVehicleSearch(selected.label);
@@ -268,6 +280,11 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, w
     ...customers.map(item => ({ value: `customer:${item.id}`, label: `${item.name} · ${item.phone || '无电话'}`, search: `${item.name} ${item.phone || ''} ${item.email || ''}`.toLocaleLowerCase() })),
     ...fleets.map(item => ({ value: `fleet:${item.id}`, label: `${item.company} · ${item.contact || '无联系人'} · ${item.phone || '无电话'}`, search: `${item.company} ${item.contact || ''} ${item.phone || ''} ${item.billingEmail || ''}`.toLocaleLowerCase() })),
   ], [customers, fleets]);
+  const matchingAccounts = useMemo(() => {
+    const query = accountSearch.trim();
+    if (!query || selectedAccountValue && accountOptions.some(item => item.value === selectedAccountValue && item.label === query)) return accountOptions.slice(0, 12);
+    return accountOptions.filter(item => fuzzyMatch(`${item.label} ${item.search}`, query)).slice(0, 20);
+  }, [accountOptions, accountSearch, selectedAccountValue]);
   useEffect(() => {
     const selected = accountOptions.find(item => item.value === selectedAccountValue);
     if (selected) setAccountSearch(selected.label);
@@ -789,9 +806,9 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, w
       <label>日期<input type="date" value={order.date} onChange={e => patch({ date: e.target.value })} /></label>
       <label>状态<select value={order.status} disabled={!!order.archivedAt || order.status === '已交车'} onChange={e => patch({ status: e.target.value as WorkOrderStatus })}>{order.archivedAt && <option>已取消</option>}{order.status === '已交车' && <option value="已交车">已交车（结账完成）</option>}{statuses.map(item => <option key={item}>{item}</option>)}</select></label>
       <label>负责技师{canAssignTechnician ? <select value={order.technicianUserId || ''} onChange={e => { const member = technicians.find(item => item.userId === e.target.value); patch({ technicianUserId: member?.userId || '', technician: member?.displayName || '' }); }}><option value="">未分配</option>{technicians.filter(item => item.role === 'technician' || item.role === 'manager').map(item => <option key={item.userId} value={item.userId}>{item.displayName || item.userId.slice(0, 8)}</option>)}</select> : <input value={order.technician || currentUser} readOnly />}</label>
-      <label>客户 / 公司 / 车队<input list="work-order-account-options" value={accountSearch} onChange={e => searchAndSelectAccount(e.target.value)} placeholder="输入公司名、客户、联系人或电话搜索" autoComplete="off" /><datalist id="work-order-account-options">{accountOptions.map(item => <option key={item.value} value={item.label} />)}</datalist></label>
+      <label>客户 / 公司 / 车队<div className="fuzzy-select"><input value={accountSearch} onFocus={() => setAccountSearchOpen(true)} onBlur={() => window.setTimeout(() => setAccountSearchOpen(false), 150)} onChange={e => { searchAndSelectAccount(e.target.value); setAccountSearchOpen(true); }} placeholder="输入部分公司名、客户、联系人或电话" autoComplete="off" />{accountSearchOpen && <div className="fuzzy-options">{matchingAccounts.length ? matchingAccounts.map(item => <button type="button" key={item.value} onMouseDown={e => e.preventDefault()} onClick={() => { selectCustomer(item.value); setAccountSearch(item.label); setAccountSearchOpen(false); }}>{item.label}</button>) : <span>没有找到匹配的客户或公司</span>}</div>}</div></label>
       <label>联系电话<input value={order.phone || ''} onChange={e => patch({ phone: e.target.value })} /></label>
-      <label>车辆<div className="input-action"><div><input list="work-order-vehicle-options" value={vehicleSearch} onChange={e => searchAndSelectVehicle(e.target.value)} placeholder="搜索车牌、VIN、Unit、车型或公司" autoComplete="off" /><datalist id="work-order-vehicle-options">{vehicleOptions.map(item => <option key={item.value} value={item.label} />)}</datalist></div><button type="button" onClick={() => setAddingVehicle(current => !current)}>＋ 添加</button></div></label>
+      <label>车辆<div className="input-action"><div className="fuzzy-select"><input value={vehicleSearch} onFocus={() => setVehicleSearchOpen(true)} onBlur={() => window.setTimeout(() => setVehicleSearchOpen(false), 150)} onChange={e => { searchAndSelectVehicle(e.target.value); setVehicleSearchOpen(true); }} placeholder="输入部分车牌、VIN、Unit、车型或公司" autoComplete="off" />{vehicleSearchOpen && <div className="fuzzy-options">{matchingVehicles.length ? matchingVehicles.map(item => <button type="button" key={item.value} onMouseDown={e => e.preventDefault()} onClick={() => { selectVehicle(item.value); setVehicleSearch(item.label); setVehicleSearchOpen(false); }}>{item.label}</button>) : <span>没有找到匹配车辆</span>}</div>}</div><button type="button" onClick={() => setAddingVehicle(current => !current)}>＋ 添加</button></div></label>
       <label>当前里程<input type="number" value={order.mileage || ''} onChange={e => patch({ mileage: Number(e.target.value) })} /></label>
     </div>{addingVehicle && <div className="quick-vehicle">
       <div><b>快速添加当前客户车辆</b><span>可拍摄车牌或车架号自动识别；保存后会自动选中。</span></div>
