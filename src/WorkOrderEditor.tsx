@@ -179,6 +179,14 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, w
   const draftKey = `work-order:${value?.id || 'new'}`;
   const allowLocalDraft = !value;
   const calculated = useMemo(() => recalculateWorkOrder(order), [order]);
+  const visibleMobileSteps = useMemo(() => canCheckoutAndDeliver ? mobileSteps : mobileSteps.filter(step => step.key !== 'checkout'), [canCheckoutAndDeliver]);
+  const visibleWorkflowStages = useMemo(() => canCheckoutAndDeliver ? workflowStages : workflowStages.filter(stage => stage !== '已结账'), [canCheckoutAndDeliver]);
+  useEffect(() => {
+    if (!canCheckoutAndDeliver && mobileStep === 'checkout') {
+      setMobileStep('repair');
+      setActivePanel('evidence');
+    }
+  }, [canCheckoutAndDeliver, mobileStep]);
   const serverOrder = value ? workOrders.find(item => item.id === value.id) : undefined;
   useEffect(() => {
     if (!serverOrder) return;
@@ -753,15 +761,25 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, w
       return hasPart ? (!item.name.trim() || item.qty <= 0) : !linkedLabor?.description.trim();
     });
     if (invalidServiceLine) { setActivePanel('pricing'); return alert('请填写人工项目；如有配件，请检查配件名称和数量。'); }
+    const saveAsCompleted = !canCheckoutAndDeliver && mobileStep === 'repair';
+    const orderToSave = saveAsCompleted ? recalculateWorkOrder({ ...calculated, status: '已完成', workflowStage: '完工待结账', technicianCompletedAt: new Date().toISOString(), completedBy: currentUser, completedByUserId: currentUserId }) : calculated;
     setSaving(true);
-    try { await onSave(calculated); await removeWorkOrderDraft(draftKey); } finally { setSaving(false); }
+    try { await onSave(orderToSave); await removeWorkOrderDraft(draftKey); } finally { setSaving(false); }
   };
   const saveProgress = async () => {
     if (!calculated.customer || !calculated.vehicle) { selectMobileStep('account'); return alert('请先选择客户和车辆，然后即可保存当前进度。'); }
     if (Number(calculated.mileage || 0) <= 0) { selectMobileStep('account'); return alert('当前里程为必填项。每次开工单都必须重新读取仪表并填写实际里程。'); }
+    const saveAsCompleted = !canCheckoutAndDeliver && mobileStep === 'repair';
+    const orderToSave = recalculateWorkOrder({
+      ...calculated,
+      ...(saveAsCompleted ? { status: '已完成' as const, workflowStage: '完工待结账' as const, technicianCompletedAt: new Date().toISOString(), completedBy: currentUser, completedByUserId: currentUserId } : {}),
+      inspectionChecklist: { ...checklist, intake: true },
+    });
     setSaving(true);
     try {
-      await onSave(recalculateWorkOrder({ ...calculated, inspectionChecklist: { ...checklist, intake: true } }), true);
+      await onSave(orderToSave, true);
+      setOrder(orderToSave);
+      if (saveAsCompleted) alert(`工单 ${orderToSave.number} 已自动设为“已完成”，请由有收款权限的账号继续结账交车。`);
     } finally { setSaving(false); }
   };
   const finalizeDelivery = async () => {
@@ -783,19 +801,20 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, w
   };
 
   const selectMobileStep = (step: MobileStep) => {
+    if (!canCheckoutAndDeliver && step === 'checkout') step = 'repair';
     setMobileStep(step);
     setActivePanel(step === 'account' || step === 'inspection' ? 'intake' : step === 'quote' || step === 'checkout' ? 'pricing' : 'evidence');
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
-  const mobileStepIndex = mobileSteps.findIndex(item => item.key === mobileStep);
+  const mobileStepIndex = visibleMobileSteps.findIndex(item => item.key === mobileStep);
   const moveMobileStep = (direction: -1 | 1) => {
-    const next = mobileSteps[Math.max(0, Math.min(mobileSteps.length - 1, mobileStepIndex + direction))];
+    const next = visibleMobileSteps[Math.max(0, Math.min(visibleMobileSteps.length - 1, mobileStepIndex + direction))];
     if (next) selectMobileStep(next.key);
   };
 
   return <div className="editor-screen focused-editor" data-panel={activePanel} data-mobile-step={mobileStep}>
     <div className="editor-head"><div><p className="eyebrow">维修工单 / Repair Order</p><h2>{value ? `编辑 ${order.number}` : '新建维修工单'}</h2>{value && <small>已明确选择此工单；只有点击“保存工单”或“保存进度”才会写入服务器。</small>}</div><div className="toolbar">{canPrintDocuments && <button type="button" onClick={() => onPrint(calculated, 'Repair Order')}>打印工单</button>}<button type="button" onClick={cancelEditor}>取消</button><button type="button" className="primary" onClick={submit} disabled={saving}>{saving ? '保存中…' : '保存工单'}</button></div></div>
-    <div className="workflow-strip">{workflowStages.map((stage, index) => <div key={stage} className={`workflow-step ${workflowStages.indexOf(workflowStage) >= index ? 'done' : ''} ${workflowStage === stage ? 'active' : ''}`}><span className="step-number">{index + 1}</span><strong>{stage}</strong><small>{['前两项即可保存','员工领取并诊断','配件工时与确认','施工及证据留存','收款与交车','流程完成'][index]}</small></div>)}</div>
+    <div className="workflow-strip">{visibleWorkflowStages.map((stage, index) => <div key={stage} className={`workflow-step ${workflowStages.indexOf(workflowStage) >= workflowStages.indexOf(stage) ? 'done' : ''} ${workflowStage === stage ? 'active' : ''}`}><span className="step-number">{index + 1}</span><strong>{stage}</strong><small>{['前两项即可保存','员工领取并诊断','配件工时与确认','施工及证据留存','等待授权账号结账'][index]}</small></div>)}</div>
 
     <nav className="editor-section-nav" aria-label="工单填写步骤">
       <button type="button" className={activePanel === 'intake' ? 'active' : ''} onClick={() => setActivePanel('intake')}><span>1</span><b>接车资料</b><small>客户、车辆与描述</small></button>
@@ -804,7 +823,7 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, w
     </nav>
 
     <nav className="mobile-workflow-nav" aria-label="手机工单流程">
-      {mobileSteps.map((step, index) => <button type="button" key={step.key} className={`${mobileStep === step.key ? 'active' : ''} ${mobileStepComplete[step.key] ? 'complete' : ''}`} onClick={() => selectMobileStep(step.key)}><span>{mobileStepComplete[step.key] ? '✓' : index + 1}</span><b>{step.short}</b></button>)}
+      {visibleMobileSteps.map((step, index) => <button type="button" key={step.key} className={`${mobileStep === step.key ? 'active' : ''} ${mobileStepComplete[step.key] ? 'complete' : ''}`} onClick={() => selectMobileStep(step.key)}><span>{mobileStepComplete[step.key] ? '✓' : index + 1}</span><b>{step.short}</b></button>)}
     </nav>
 
     <section className="form-section editor-panel panel-intake"><h3>客户与车辆</h3><div className="form-grid four">
@@ -921,7 +940,7 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, w
       <div className="inspection-grid">{inspectionItems.slice(4, 5).map(([key, label]) => <label key={key}><input type="checkbox" checked={checklist[key]} onChange={e => patch({ inspectionChecklist: { ...checklist, [key]: e.target.checked } })} /><span>{label}</span></label>)}</div>
     </section>
     {packageEditor && <ServicePackageEditor value={packageEditor} inventory={parts} editing={servicePackages.some(item => item.id === packageEditor.id)} saving={packageSaving} onChange={setPackageEditor} onCancel={() => setPackageEditor(null)} onSave={() => void savePackage()} />}
-    <div className="mobile-editor-actions"><div><small>{mobileStepIndex + 1} / {mobileSteps.length} · {allowLocalDraft ? (draftStatus === 'saving' ? '正在自动保存…' : draftStatus === 'saved' ? '草稿已保存在本机' : draftStatus === 'error' ? '本机草稿保存失败' : '自动保存已开启') : '已选择此工单；取消不会保存修改'}</small><b>{mobileSteps[mobileStepIndex]?.label}</b></div><button type="button" onClick={() => moveMobileStep(-1)} disabled={mobileStepIndex === 0}>上一步</button><button type="button" className="primary" onClick={saveProgress} disabled={saving}>{saving ? '保存中…' : '保存进度'}</button><button type="button" onClick={() => moveMobileStep(1)} disabled={mobileStepIndex === mobileSteps.length - 1}>下一步</button></div>
+    <div className="mobile-editor-actions"><div><small>{mobileStepIndex + 1} / {visibleMobileSteps.length} · {allowLocalDraft ? (draftStatus === 'saving' ? '正在自动保存…' : draftStatus === 'saved' ? '草稿已保存在本机' : draftStatus === 'error' ? '本机草稿保存失败' : '自动保存已开启') : '已选择此工单；取消不会保存修改'}</small><b>{visibleMobileSteps[mobileStepIndex]?.label}</b></div><button type="button" onClick={() => moveMobileStep(-1)} disabled={mobileStepIndex === 0}>上一步</button><button type="button" className="primary" onClick={saveProgress} disabled={saving}>{saving ? '保存中…' : !canCheckoutAndDeliver && mobileStep === 'repair' ? '完成维修并保存' : '保存进度'}</button><button type="button" onClick={() => moveMobileStep(1)} disabled={mobileStepIndex === visibleMobileSteps.length - 1}>下一步</button></div>
   </div>;
 }
 
