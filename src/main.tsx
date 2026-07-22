@@ -262,6 +262,10 @@ function App({ cloud }: { cloud: CloudSession }) {
   };
 
   const checkoutAndDeliver = async (draft: WorkOrder, paymentMethod: string): Promise<WorkOrder | undefined> => {
+    if (!can(cloud, 'collectPayment')) {
+      alert('当前员工账号没有“收款并交车”权限，请由老板、经理、前台或财务账号操作。');
+      return;
+    }
     if (paymentInFlight.current.has(draft.id)) {
       alert('这张工单正在结账，请不要重复点击。');
       return;
@@ -274,7 +278,7 @@ function App({ cloud }: { cloud: CloudSession }) {
     const base = recalculateWorkOrder({
       ...saved,
       paid: Number(saved.paid || 0),
-      paymentMethod: saved.paymentMethod || paymentMethod,
+      paymentMethod: paymentMethod || saved.paymentMethod,
     });
     const monthlyBilling = base.paymentMethod === MONTHLY_PAYMENT_METHOD || base.paymentMethod === '月结';
     paymentInFlight.current.add(base.id);
@@ -291,7 +295,11 @@ function App({ cloud }: { cloud: CloudSession }) {
       }
       const delivered = recalculateWorkOrder({ ...settled, status: '已交车', workflowStage: '已结账' });
       await persist('workOrders', delivered);
-      if (payment) setStore(current => ({ ...current, payments: upsertLocal(current.payments, payment as Payment), workOrders: upsertLocal(current.workOrders, delivered) }));
+      setStore(current => ({
+        ...current,
+        payments: payment ? upsertLocal(current.payments, payment as Payment) : current.payments,
+        workOrders: upsertLocal(current.workOrders, delivered),
+      }));
       alert(payment
         ? `已按“${payment.method}”收款 ${money(payment.amount)}，工单已结清并交车。`
         : monthlyBilling ? '月结工单已确认交车，欠款继续保留到账期。' : '工单已确认交车。');
@@ -392,15 +400,28 @@ function App({ cloud }: { cloud: CloudSession }) {
   };
 
   const addPayment = async (order: WorkOrder) => {
+    if (!can(cloud, 'collectPayment')) return alert('当前员工账号没有“收款并交车”权限。');
     if (paymentInFlight.current.has(order.id)) return alert('这张工单的收款正在处理中，请不要重复点击。');
-    if (order.balance <= 0.009) return alert('这张工单已经没有欠款。');
+    if (order.status === '已交车') return alert('这张工单已经完成交车，请勿重复收款。');
+    if (order.balance <= 0.009) {
+      if (!confirm(`工单 ${order.number} 已经付清。\n确认现在完成交车？`)) return;
+      await checkoutAndDeliver(order, order.paymentMethod || '现金');
+      return;
+    }
+    const existingMonthlyBilling = order.paymentMethod === MONTHLY_PAYMENT_METHOD || order.paymentMethod === '月结';
+    if (existingMonthlyBilling) {
+      if (!confirm(`工单 ${order.number} 是月结客户。\n确认交车并保留欠款 ${money(order.balance)}？\n本次不会产生收款流水，也不会增加今日实收。`)) return;
+      await checkoutAndDeliver(order, MONTHLY_PAYMENT_METHOD);
+      return;
+    }
     const paymentChoice = prompt(`工单 ${order.number}\n当前欠款：${money(order.balance)}\n\n请选择结账方式：\n1 = 全额付款\n2 = 部分付款\n3 = 月结（今日暂不收款）\n4 = 多种支付方式组合付款`, '1');
     if (paymentChoice === null) return;
     const choice = paymentChoice.trim();
     if (choice === '3' || choice === '月结') {
       const billingDueDate = nextMonthlyBillingDate();
-      await persist('workOrders', recalculateWorkOrder({ ...order, paymentMethod: MONTHLY_PAYMENT_METHOD, billingDueDate }));
-      return alert(`已设为月结，结账日为 ${billingDueDate}。\n今日收入不增加，剩余欠款仍为 ${money(order.balance)}。`);
+      const monthlyOrder = recalculateWorkOrder({ ...order, paymentMethod: MONTHLY_PAYMENT_METHOD, billingDueDate });
+      await checkoutAndDeliver(monthlyOrder, MONTHLY_PAYMENT_METHOD);
+      return;
     }
     if (!['1', '2', '4', '全额付款', '部分付款', '组合付款'].includes(choice)) return alert('请选择 1、2、3 或 4。');
     let amount = order.balance;
@@ -437,12 +458,14 @@ function App({ cloud }: { cloud: CloudSession }) {
     setSyncing(true);
     try {
       const updatedOrder = recalculateWorkOrder(await cloud.recordPayment(order.id, payment as unknown as CloudRow) as unknown as WorkOrder);
+      const deliveredOrder = recalculateWorkOrder({ ...updatedOrder, status: '已交车', workflowStage: '已结账' });
+      await persist('workOrders', deliveredOrder);
       setStore(current => ({
         ...current,
         payments: upsertLocal(current.payments, payment),
-        workOrders: upsertLocal(current.workOrders, updatedOrder),
+        workOrders: upsertLocal(current.workOrders, deliveredOrder),
       }));
-      alert(`${paymentType}已记录。\n本次实收 ${money(amount)} 已计入今日收入。\n剩余欠款 ${money(updatedOrder.balance)}。`);
+      alert(`${paymentType}已记录，并已完成交车。\n本次实收 ${money(amount)} 已计入今日收入。\n剩余欠款 ${money(deliveredOrder.balance)}。`);
     } catch (error) {
       alert(`收款失败：${error instanceof Error ? error.message : error}\n系统没有写入新的收款流水，请刷新后核对。`);
     } finally {
@@ -557,7 +580,7 @@ function App({ cloud }: { cloud: CloudSession }) {
     closeModal();
   };
 
-  if (editingOrder) return <WorkOrderEditor key={editingOrder === 'new' ? 'new-work-order' : editingOrder.id} value={editingOrder === 'new' ? undefined : editingOrder} customers={store.customers} vehicles={store.vehicles} fleets={store.fleets} drivers={store.drivers} workOrders={store.workOrders} parts={store.parts.filter(item => item.inventoryType !== '日常消耗品')} servicePackages={store.servicePackages} settings={settings} nextNumber={nextWorkOrderNumber(store.workOrders)} onCreateVehicle={vehicle => persist('vehicles', vehicle)} onSaveServicePackage={(item: ServicePackage) => persist('servicePackages', item)} onDeleteServicePackage={(id: string) => remove('servicePackages', id)} onPrint={(order, type) => printDocumentV077(recalculateWorkOrder(order), settings, type, store.payments)} onSave={saveWorkOrder} onCheckoutAndDeliver={checkoutAndDeliver} onCancel={() => setEditingOrder(null)} cloud={cloud} currentUser={actorName} currentUserId={cloud.user.id} technicians={staffMembers} canApproveReview={can(cloud, 'approve')} canAssignTechnician={can(cloud, 'assignTechnician')} canEditPricing={can(cloud, 'pricing')} canViewFinancials={can(cloud, 'pricing') || can(cloud, 'finance')} canPrintDocuments={can(cloud, 'printDocuments')} />;
+  if (editingOrder) return <WorkOrderEditor key={editingOrder === 'new' ? 'new-work-order' : editingOrder.id} value={editingOrder === 'new' ? undefined : editingOrder} customers={store.customers} vehicles={store.vehicles} fleets={store.fleets} drivers={store.drivers} workOrders={store.workOrders} parts={store.parts.filter(item => item.inventoryType !== '日常消耗品')} servicePackages={store.servicePackages} settings={settings} nextNumber={nextWorkOrderNumber(store.workOrders)} onCreateVehicle={vehicle => persist('vehicles', vehicle)} onSaveServicePackage={(item: ServicePackage) => persist('servicePackages', item)} onDeleteServicePackage={(id: string) => remove('servicePackages', id)} onPrint={(order, type) => printDocumentV077(recalculateWorkOrder(order), settings, type, store.payments)} onSave={saveWorkOrder} onCheckoutAndDeliver={checkoutAndDeliver} onCancel={() => setEditingOrder(null)} cloud={cloud} currentUser={actorName} currentUserId={cloud.user.id} technicians={staffMembers} canApproveReview={can(cloud, 'approve')} canAssignTechnician={can(cloud, 'assignTechnician')} canEditPricing={can(cloud, 'pricing')} canViewFinancials={can(cloud, 'pricing') || can(cloud, 'finance')} canCheckoutAndDeliver={can(cloud, 'collectPayment')} canPrintDocuments={can(cloud, 'printDocuments')} />;
 
   return <div className="app-shell">
     <aside className="sidebar"><div className="brand"><div className="brand-mark">Z&G</div><div><b>AUTO ERP</b><small>正式服务器版</small></div></div>

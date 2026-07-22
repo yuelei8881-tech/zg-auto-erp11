@@ -20,6 +20,7 @@ type Props = {
   currentUser: string;
   currentUserId: string; technicians: StaffMember[];
   canApproveReview: boolean; canAssignTechnician: boolean; canEditPricing: boolean; canViewFinancials: boolean;
+  canCheckoutAndDeliver: boolean;
 };
 
 type TranslationSource = 'complaint' | 'diagnosis' | 'workPerformed';
@@ -140,7 +141,7 @@ async function removeWorkOrderDraft(key: string) {
   }).finally(() => database.close());
 }
 
-export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, workOrders, parts, servicePackages, settings, nextNumber, onSave, onCancel, onCheckoutAndDeliver, onCreateVehicle, onSaveServicePackage, onDeleteServicePackage, onPrint, cloud, currentUser, currentUserId, technicians, canApproveReview, canAssignTechnician, canEditPricing, canViewFinancials, canPrintDocuments }: Props) {
+export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, workOrders, parts, servicePackages, settings, nextNumber, onSave, onCancel, onCheckoutAndDeliver, onCreateVehicle, onSaveServicePackage, onDeleteServicePackage, onPrint, cloud, currentUser, currentUserId, technicians, canApproveReview, canAssignTechnician, canEditPricing, canViewFinancials, canCheckoutAndDeliver, canPrintDocuments }: Props) {
   const [order, setOrder] = useState<WorkOrder>(() => recalculateWorkOrder(value || {
     id: uid(), number: '保存时自动分配', date: today(), customer: '', vehicle: '', status: '等待检查',
     technician: canAssignTechnician ? '' : currentUser, technicianUserId: canAssignTechnician ? '' : currentUserId,
@@ -764,6 +765,7 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, w
     } finally { setSaving(false); }
   };
   const finalizeDelivery = async () => {
+    if (!canCheckoutAndDeliver) return alert('当前员工账号没有“收款并交车”权限，请由老板、经理、前台或财务账号操作。');
     if (Number(calculated.mileage || 0) <= 0) { selectMobileStep('account'); return alert('当前里程为必填项，请填写实际里程后再结账交车。'); }
     const monthlyBilling = order.paymentMethod === MONTHLY_PAYMENT_METHOD || order.paymentMethod === '月结';
     if (calculated.status !== '已完成' && calculated.status !== '已交车') return alert('请先由技师把维修状态设为“已完成”，再结账交车。');
@@ -913,7 +915,7 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, w
       <label>结账方式（收款后自动同步）{order.paid > 0 ? <input value={order.paymentMethod || '已收款，方式未记录'} readOnly /> : <select value={order.paymentMethod === '月结' ? MONTHLY_PAYMENT_METHOD : (order.paymentMethod || '未记录')} onChange={e => { const paymentMethod = e.target.value === '未记录' ? '' : e.target.value; patch({ paymentMethod, billingDueDate: paymentMethod === MONTHLY_PAYMENT_METHOD ? (order.billingDueDate || nextMonthlyBillingDate()) : undefined }); }}>{paymentMethods.map(method => <option key={method}>{method}</option>)}</select>}</label>
       {(order.paymentMethod === MONTHLY_PAYMENT_METHOD || order.paymentMethod === '月结') && <label>月结结账日<input type="date" value={order.billingDueDate || nextMonthlyBillingDate()} onChange={e => patch({ billingDueDate: e.target.value })} /></label>}
       <label>实际结账金额（仅手动改价需双人授权）<input type="number" step="0.01" placeholder={`自动计算 ${money(calculated.laborTotal + calculated.partsTotal + calculated.outsource + calculated.tax - calculated.discount)}`} value={order.settlementTotal ?? ''} onChange={e => patch({ settlementTotal: e.target.value === '' ? undefined : Number(e.target.value) })} /></label>
-      <div className="checkout-delivery-action"><span>{calculated.status === '已交车' ? '已经结账并交车' : calculated.balance <= 0.009 ? '款项已结清，可以交车' : order.paymentMethod === MONTHLY_PAYMENT_METHOD || order.paymentMethod === '月结' ? '月结客户，可以确认交车' : `欠款 ${money(calculated.balance)}，请先收款`}</span><button type="button" className="primary" onClick={finalizeDelivery} disabled={saving || calculated.status === '已交车'}>{calculated.status === '已交车' ? '已交车' : '确认结账并交车'}</button></div>
+      <div className="checkout-delivery-action"><span>{!canCheckoutAndDeliver ? '当前员工账号没有收款并交车权限' : calculated.status === '已交车' ? '已经结账并交车' : calculated.balance <= 0.009 ? '款项已结清，可以交车' : order.paymentMethod === MONTHLY_PAYMENT_METHOD || order.paymentMethod === '月结' ? '月结客户：仅确认交车，欠款保留' : `欠款 ${money(calculated.balance)}，确认后将收款并交车`}</span><button type="button" className="primary" onClick={finalizeDelivery} disabled={!canCheckoutAndDeliver || saving || calculated.status === '已交车'}>{calculated.status === '已交车' ? '已交车' : '收款并交车'}</button></div>
     </div><p className="tax-guidance">加州默认规则：系统仅对配件销售额计算销售税；单独列示的维修/安装人工通常不计销售税。制造加工人工等例外请由会计确认。参考：<a href="https://www.cdtfa.ca.gov/formspubs/pub25.pdf" target="_blank" rel="noreferrer">CDTFA Publication 25</a>、<a href="https://www.cdtfa.ca.gov/lawguides/vol1/sutr/1546.html" target="_blank" rel="noreferrer">Regulation 1546</a>。</p></div><div className="totals-card"><div><span>人工（免销售税）</span><b>{money(calculated.laborTotal)}</b></div><div><span>配件</span><b>{money(calculated.partsTotal)}</b></div><div><span>配件销售税</span><b>{money(calculated.tax)}</b></div><div className="grand"><span>总价</span><b>{money(calculated.total)}</b></div><div className="balance"><span>欠款</span><b>{money(calculated.balance)}</b></div></div></section>}
     <section className="form-section review-section checklist-quote-section"><div className="section-title"><div><h3>报价核对</h3><span>Estimate Checklist · 请在确认全部金额后勾选</span></div></div>
       <div className="inspection-grid">{inspectionItems.slice(4, 5).map(([key, label]) => <label key={key}><input type="checkbox" checked={checklist[key]} onChange={e => patch({ inspectionChecklist: { ...checklist, [key]: e.target.checked } })} /><span>{label}</span></label>)}</div>
