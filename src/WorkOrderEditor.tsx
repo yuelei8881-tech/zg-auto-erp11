@@ -865,12 +865,20 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, w
       {!order.customerSignatureConfirmedAt && order.customerSignedAt && <small className="signature-time">签字草稿时间：{new Date(order.customerSignedAt).toLocaleString()}（尚未确认）</small>}
     </section>
 
-    <section className="form-section review-section"><div className="section-title"><div><h3>检查与审查流程</h3><span>Inspection & Review · 已完成 {inspectionDone}/{inspectionItems.length}</span></div><span className={`review-badge review-${reviewStatus}`}>{reviewStatus}</span></div>
-      <div className="inspection-grid">{inspectionItems.map(([key, label]) => <label key={key}><input type="checkbox" checked={checklist[key]} onChange={e => patch({ inspectionChecklist: { ...checklist, [key]: e.target.checked } })} /><span>{label}</span></label>)}</div>
+    <section className="form-section review-section checklist-account-section"><div className="section-title"><div><h3>接车确认</h3><span>Intake Checklist · 已完成 {inspectionItems.slice(0, 2).filter(([key]) => checklist[key]).length}/2</span></div></div>
+      <div className="inspection-grid">{inspectionItems.slice(0, 2).map(([key, label]) => <label key={key}><input type="checkbox" checked={checklist[key]} onChange={e => patch({ inspectionChecklist: { ...checklist, [key]: e.target.checked } })} /><span>{label}</span></label>)}</div>
+    </section>
+
+    <section className="form-section review-section main-review-section"><div className="section-title"><div><h3>检查与审查流程</h3><span>Inspection & Review · 总进度 {inspectionDone}/{inspectionItems.length}</span></div><span className={`review-badge review-${reviewStatus}`}>{reviewStatus}</span></div>
+      <div className="inspection-grid">{inspectionItems.slice(2, 4).map(([key, label]) => <label key={key}><input type="checkbox" checked={checklist[key]} onChange={e => patch({ inspectionChecklist: { ...checklist, [key]: e.target.checked } })} /><span>{label}</span></label>)}</div>
       <label className="review-notes">审查意见 / 退回原因<textarea value={order.reviewNotes || ''} onChange={e => patch({ reviewNotes: e.target.value })} placeholder="记录审查意见、需要补充的照片或检查项目" /></label>
       <div className="review-actions"><button type="button" onClick={submitReview} disabled={reviewStatus === '待审查'}>完成检查并提交审查</button>{reviewStatus === '待审查' && canApproveReview && <><button type="button" className="primary" onClick={approveReview}>批准并开始维修</button><button type="button" className="danger-soft" onClick={returnReview}>退回补充</button></>}{reviewStatus === '待审查' && !canApproveReview && <span className="muted">已提交，等待经理或老板审查</span>}</div>
       {(order.submittedForReviewAt || order.reviewedAt) && <div className="review-meta">{order.submittedForReviewAt && <span>提交：{new Date(order.submittedForReviewAt).toLocaleString()}</span>}{order.reviewedAt && <span>审查：{order.reviewedBy} · {new Date(order.reviewedAt).toLocaleString()}</span>}</div>}
       {!!order.reviewHistory?.length && <div className="review-history"><b>审查记录</b>{[...order.reviewHistory].reverse().map(item => <div key={item.id}><span>{item.action}</span><small>{item.by} · {new Date(item.at).toLocaleString()}{item.note ? ` · ${item.note}` : ''}</small></div>)}</div>}
+    </section>
+
+    <section className="form-section review-section checklist-quote-section"><div className="section-title"><div><h3>报价核对</h3><span>Estimate Checklist</span></div></div>
+      <div className="inspection-grid">{inspectionItems.slice(4, 5).map(([key, label]) => <label key={key}><input type="checkbox" checked={checklist[key]} onChange={e => patch({ inspectionChecklist: { ...checklist, [key]: e.target.checked } })} /><span>{label}</span></label>)}</div>
     </section>
 
     <section className="form-section repair-library-section"><div className="section-title"><div><h3>维修项目资料库</h3><span className="muted">套餐默认折叠；展开后点击套餐主体，配件、用量和人工会整套加入工单。</span></div><button type="button" className="primary" onClick={() => openPackageEditor()}>＋ 新建维修套餐</button></div>
