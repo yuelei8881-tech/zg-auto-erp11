@@ -444,6 +444,7 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, w
     const fleet = fleets.find(item => item.id === order.fleetId);
     if (!customer && !fleet) return alert('请先选择客户、公司或车队。');
     if (!vehicleDraft.plate.trim() || !vehicleDraft.year.trim() || !vehicleDraft.make.trim() || !vehicleDraft.model.trim()) return alert('请填写车牌、年份、品牌和车型。');
+    if (Number(vehicleDraft.mileage || 0) <= 0) return alert('当前里程为必填项，请读取仪表后填写大于 0 的实际里程。');
     const normalizedPlate = normalizeVehicleIdentifier(vehicleDraft.plate);
     const normalizedVin = normalizeVehicleIdentifier(vehicleDraft.vin);
     const duplicate = vehicles.find(item => (normalizedVin && normalizeVehicleIdentifier(item.vin) === normalizedVin) || (normalizedPlate && normalizeVehicleIdentifier(item.plate) === normalizedPlate));
@@ -474,7 +475,7 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, w
     const driver = drivers.find(item => item.id === vehicle?.driverId);
     patch({
       vehicleId: id, vehicle: vehicle ? `${vehicle.year} ${vehicle.make} ${vehicle.model}`.trim() : '',
-      plate: vehicle?.plate || '', vin: vehicle?.vin || '', mileage: vehicle?.mileage || 0,
+      plate: vehicle?.plate || '', vin: vehicle?.vin || '', mileage: 0,
       customerId: customer?.id || '', customer: customer?.name || fleet?.company || '', phone: customer?.phone || fleet?.phone || '',
       fleetId: fleet?.id || '', company: fleet?.company || '', driverId: driver?.id || vehicle?.driverId || '',
       driver: driver?.name || vehicle?.driverName || '', driverPhone: driver?.phone || vehicle?.driverPhone || '',
@@ -742,6 +743,7 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, w
 
   const submit = async () => {
     if (!calculated.customer || !calculated.vehicle) { setActivePanel('intake'); return alert('请选择客户和车辆。'); }
+    if (Number(calculated.mileage || 0) <= 0) { selectMobileStep('account'); return alert('当前里程为必填项。每次开工单都必须重新读取仪表并填写实际里程。'); }
     if (!checklist.intake || !checklist.exterior) { setActivePanel('evidence'); return alert('请先完成“接车资料”和“车辆外观”两项检查。'); }
     if (calculated.laborItems.some(item => !item.description)) { setActivePanel('pricing'); return alert('请填写所有人工项目名称。'); }
     const invalidServiceLine = calculated.partItems.some(item => {
@@ -755,12 +757,14 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, w
   };
   const saveProgress = async () => {
     if (!calculated.customer || !calculated.vehicle) { selectMobileStep('account'); return alert('请先选择客户和车辆，然后即可保存当前进度。'); }
+    if (Number(calculated.mileage || 0) <= 0) { selectMobileStep('account'); return alert('当前里程为必填项。每次开工单都必须重新读取仪表并填写实际里程。'); }
     setSaving(true);
     try {
       await onSave(recalculateWorkOrder({ ...calculated, inspectionChecklist: { ...checklist, intake: true } }), true);
     } finally { setSaving(false); }
   };
   const finalizeDelivery = async () => {
+    if (Number(calculated.mileage || 0) <= 0) { selectMobileStep('account'); return alert('当前里程为必填项，请填写实际里程后再结账交车。'); }
     const monthlyBilling = order.paymentMethod === MONTHLY_PAYMENT_METHOD || order.paymentMethod === '月结';
     if (calculated.status !== '已完成' && calculated.status !== '已交车') return alert('请先由技师把维修状态设为“已完成”，再结账交车。');
     const method = order.paymentMethod && order.paymentMethod !== '未记录' ? order.paymentMethod : '现金';
@@ -809,7 +813,7 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, w
       <label>客户 / 公司 / 车队<div className="fuzzy-select"><input value={accountSearch} onFocus={() => setAccountSearchOpen(true)} onBlur={() => window.setTimeout(() => setAccountSearchOpen(false), 150)} onChange={e => { searchAndSelectAccount(e.target.value); setAccountSearchOpen(true); }} placeholder="输入部分公司名、客户、联系人或电话" autoComplete="off" />{accountSearchOpen && <div className="fuzzy-options">{matchingAccounts.length ? matchingAccounts.map(item => <button type="button" key={item.value} onMouseDown={e => e.preventDefault()} onClick={() => { selectCustomer(item.value); setAccountSearch(item.label); setAccountSearchOpen(false); }}>{item.label}</button>) : <span>没有找到匹配的客户或公司</span>}</div>}</div></label>
       <label>联系电话<input value={order.phone || ''} onChange={e => patch({ phone: e.target.value })} /></label>
       <label>车辆<div className="input-action"><div className="fuzzy-select"><input value={vehicleSearch} onFocus={() => setVehicleSearchOpen(true)} onBlur={() => window.setTimeout(() => setVehicleSearchOpen(false), 150)} onChange={e => { searchAndSelectVehicle(e.target.value); setVehicleSearchOpen(true); }} placeholder="输入部分车牌、VIN、Unit、车型或公司" autoComplete="off" />{vehicleSearchOpen && <div className="fuzzy-options">{matchingVehicles.length ? matchingVehicles.map(item => <button type="button" key={item.value} onMouseDown={e => e.preventDefault()} onClick={() => { selectVehicle(item.value); setVehicleSearch(item.label); setVehicleSearchOpen(false); }}>{item.label}</button>) : <span>没有找到匹配车辆</span>}</div>}</div><button type="button" onClick={() => setAddingVehicle(current => !current)}>＋ 添加</button></div></label>
-      <label>当前里程<input type="number" value={order.mileage || ''} onChange={e => patch({ mileage: Number(e.target.value) })} /></label>
+      <label>当前里程（必填）<input type="number" inputMode="numeric" min="1" required value={order.mileage || ''} onChange={e => patch({ mileage: Number(e.target.value) })} placeholder="必须重新读取仪表填写" /></label>
     </div>{addingVehicle && <div className="quick-vehicle">
       <div><b>快速添加当前客户车辆</b><span>可拍摄车牌或车架号自动识别；保存后会自动选中。</span></div>
       <div className="quick-vehicle-grid">
@@ -819,7 +823,7 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, w
         <label>品牌<input value={vehicleDraft.make} onChange={e => setVehicleDraft(current => ({ ...current, make: e.target.value }))} /></label>
         <label>车型<input value={vehicleDraft.model} onChange={e => setVehicleDraft(current => ({ ...current, model: e.target.value }))} /></label>
         <label>发动机<input value={vehicleDraft.engine} onChange={e => setVehicleDraft(current => ({ ...current, engine: e.target.value }))} /></label>
-        <label>里程<input type="number" value={vehicleDraft.mileage || ''} onChange={e => setVehicleDraft(current => ({ ...current, mileage: Number(e.target.value) }))} /></label>
+        <label>当前里程（必填）<input type="number" inputMode="numeric" min="1" required value={vehicleDraft.mileage || ''} onChange={e => setVehicleDraft(current => ({ ...current, mileage: Number(e.target.value) }))} placeholder="读取仪表后填写" /></label>
       </div><div className="toolbar"><button type="button" onClick={() => setAddingVehicle(false)}>取消</button><button type="button" className="primary" onClick={createVehicle} disabled={vehicleSaving}>{vehicleSaving ? '保存中…' : '保存并选择车辆'}</button></div>
     </div>}{selectedVehicle && <div className="vehicle-strip"><b>{selectedVehicle.plate || '无车牌'}</b><span>VIN {selectedVehicle.vin || '—'}</span><span>Unit {selectedVehicle.unit || '—'}</span><span>{selectedVehicle.ownerName}</span></div>}</section>
 
