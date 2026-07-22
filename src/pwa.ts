@@ -10,8 +10,16 @@ export function registerPwa() {
         window.location.reload();
       });
       const registration = await navigator.serviceWorker.register('/service-worker.js', { updateViaCache: 'none' });
+      const checkForUpdate = () => void registration.update();
       await registration.update();
-      window.setInterval(() => void registration.update(), 15 * 60 * 1000);
+      // Keep every signed-in phone, tablet and computer on the current release.
+      // Backgrounded iOS apps resume the check as soon as they become visible again.
+      window.setInterval(checkForUpdate, 60 * 1000);
+      window.addEventListener('focus', checkForUpdate);
+      window.addEventListener('online', checkForUpdate);
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') checkForUpdate();
+      });
     } catch { /* The ERP remains usable when installation is unavailable. */ }
   });
   window.addEventListener('beforeinstallprompt', event => { event.preventDefault(); deferredPrompt = event as InstallPromptEvent; window.dispatchEvent(new CustomEvent('zg-install-available')); });
