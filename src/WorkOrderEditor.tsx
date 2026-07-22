@@ -836,9 +836,12 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, w
       <label className="span-2">维修授权人<input value={order.authorizedContact || ''} onChange={e => patch({ authorizedContact: e.target.value })} /></label>
     </div></section>}
 
-    <section className="form-section editor-panel panel-intake"><h3>维修内容</h3><div className="form-grid three voice-fields">
+    <section className="form-section editor-panel panel-intake inspection-content-section"><h3>客户描述与检查诊断</h3><div className="form-grid two voice-fields">
       <label><span className="field-title">客户描述 <button type="button" onClick={() => dictate('complaint')}>🎤 语音</button></span><textarea value={order.complaint || ''} onChange={e => patch({ complaint: e.target.value })} /><small>English translation（打印显示）</small>{translationControls('complaint')}<textarea className="translation-input" value={order.complaintEn || ''} onChange={e => patch({ complaintEn: e.target.value })} placeholder="Customer concern in English" /></label>
       <label><span className="field-title">检查/诊断结果 <button type="button" onClick={() => dictate('diagnosis')}>🎤 语音</button></span><textarea value={order.diagnosis || ''} onChange={e => patch({ diagnosis: e.target.value })} /><small>English translation（打印显示）</small>{translationControls('diagnosis')}<textarea className="translation-input" value={order.diagnosisEn || ''} onChange={e => patch({ diagnosisEn: e.target.value })} placeholder="Diagnosis in English" /></label>
+    </div></section>
+
+    <section className="form-section editor-panel panel-intake repair-content-section"><h3>完成的维修</h3><div className="form-grid voice-fields">
       <label><span className="field-title">完成的维修 <button type="button" onClick={() => dictate('workPerformed')}>🎤 语音</button></span><textarea value={order.workPerformed || ''} onChange={e => patch({ workPerformed: e.target.value })} /><small>English translation（打印显示）</small>{translationControls('workPerformed')}<textarea className="translation-input" value={order.workPerformedEn || ''} onChange={e => patch({ workPerformedEn: e.target.value })} placeholder="Work performed in English" /></label>
     </div><div className="form-grid two compact time-fields"><label>打印时间（可授权修改）<input type="datetime-local" value={order.printTime || ''} onChange={e => patch({ printTime: e.target.value })} /></label><label>做工时间备注<input value={order.workTimeNote || ''} onChange={e => patch({ workTimeNote: e.target.value })} placeholder="例如：2026/07/15 09:00–14:30" /></label></div></section>
 

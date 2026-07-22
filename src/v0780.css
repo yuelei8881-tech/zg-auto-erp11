@@ -174,7 +174,7 @@
   .focused-editor>.form-section{display:none!important}
   .focused-editor[data-mobile-step="account"]>.panel-intake:not(:has(.voice-fields)),
   .focused-editor[data-mobile-step="account"]>.evidence-section,
-  .focused-editor[data-mobile-step="inspection"]>.panel-intake:has(.voice-fields),
+  .focused-editor[data-mobile-step="inspection"]>.inspection-content-section,
   .focused-editor[data-mobile-step="inspection"]>.review-section,
   .focused-editor[data-mobile-step="quote"]>.repair-library-section,
   .focused-editor[data-mobile-step="quote"]>.form-section:has(.labor-grid),
@@ -182,7 +182,7 @@
   .focused-editor[data-mobile-step="quote"]>.totals-section,
   .focused-editor[data-mobile-step="approval"]>.signature-section,
   .focused-editor[data-mobile-step="approval"]>.review-section,
-  .focused-editor[data-mobile-step="repair"]>.panel-intake:has(.voice-fields),
+  .focused-editor[data-mobile-step="repair"]>.repair-content-section,
   .focused-editor[data-mobile-step="repair"]>.evidence-section,
   .focused-editor[data-mobile-step="checkout"]>.totals-section{display:block!important}
   .focused-editor[data-mobile-step="quote"]>.totals-section,
