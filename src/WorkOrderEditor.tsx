@@ -9,7 +9,7 @@ import type { CloudSession, StaffMember } from './lib/cloud';
 type Props = {
   value?: WorkOrder; customers: Customer[]; vehicles: Vehicle[]; fleets: Fleet[]; drivers: Driver[]; workOrders: WorkOrder[];
   parts: Part[]; servicePackages: ServicePackage[]; settings: ShopSettings; nextNumber: string;
-  onSave: (order: WorkOrder, keepOpen?: boolean) => Promise<void>; onCancel: () => void;
+  onSave: (order: WorkOrder, keepOpen?: boolean) => Promise<WorkOrder | undefined>; onCancel: () => void;
   onCheckoutAndDeliver: (order: WorkOrder, paymentMethod: string) => Promise<WorkOrder | undefined>;
     onCreateVehicle: (vehicle: Vehicle) => Promise<void>;
     onSaveServicePackage: (item: ServicePackage) => Promise<void>;
@@ -777,9 +777,9 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, w
     });
     setSaving(true);
     try {
-      await onSave(orderToSave, true);
-      setOrder(orderToSave);
-      if (saveAsCompleted) alert(`工单 ${orderToSave.number} 已自动设为“已完成”，请由有收款权限的账号继续结账交车。`);
+      const savedOrder = await onSave(orderToSave, true);
+      if (savedOrder) setOrder(savedOrder);
+      if (saveAsCompleted && savedOrder) alert(`工单 ${savedOrder.number} 已自动设为“已完成”，请由有收款权限的账号继续结账交车。`);
     } finally { setSaving(false); }
   };
   const finalizeDelivery = async () => {
@@ -811,9 +811,16 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, w
     const next = visibleMobileSteps[Math.max(0, Math.min(visibleMobileSteps.length - 1, mobileStepIndex + direction))];
     if (next) selectMobileStep(next.key);
   };
+  const printCurrentOrder = () => {
+    if (!calculated.number || calculated.number === '保存时自动分配') {
+      alert('这张工单还没有正式编号。请先点击“保存进度”或“保存工单”，服务器分配编号后再打印。');
+      return;
+    }
+    onPrint(calculated, 'Repair Order');
+  };
 
   return <div className="editor-screen focused-editor" data-panel={activePanel} data-mobile-step={mobileStep}>
-    <div className="editor-head"><div><p className="eyebrow">维修工单 / Repair Order</p><h2>{value ? `编辑 ${order.number}` : '新建维修工单'}</h2>{value && <small>已明确选择此工单；只有点击“保存工单”或“保存进度”才会写入服务器。</small>}</div><div className="toolbar">{canPrintDocuments && <button type="button" onClick={() => onPrint(calculated, 'Repair Order')}>打印工单</button>}<button type="button" onClick={cancelEditor}>取消</button><button type="button" className="primary" onClick={submit} disabled={saving}>{saving ? '保存中…' : '保存工单'}</button></div></div>
+    <div className="editor-head"><div><p className="eyebrow">维修工单 / Repair Order</p><h2>{value ? `编辑 ${order.number}` : '新建维修工单'}</h2>{value && <small>已明确选择此工单；只有点击“保存工单”或“保存进度”才会写入服务器。</small>}</div><div className="toolbar">{canPrintDocuments && <button type="button" onClick={printCurrentOrder}>打印工单</button>}<button type="button" onClick={cancelEditor}>取消</button><button type="button" className="primary" onClick={submit} disabled={saving}>{saving ? '保存中…' : '保存工单'}</button></div></div>
     <div className="workflow-strip">{visibleWorkflowStages.map((stage, index) => <div key={stage} className={`workflow-step ${workflowStages.indexOf(workflowStage) >= workflowStages.indexOf(stage) ? 'done' : ''} ${workflowStage === stage ? 'active' : ''}`}><span className="step-number">{index + 1}</span><strong>{stage}</strong><small>{['前两项即可保存','员工领取并诊断','配件工时与确认','施工及证据留存','等待授权账号结账'][index]}</small></div>)}</div>
 
     <nav className="editor-section-nav" aria-label="工单填写步骤">

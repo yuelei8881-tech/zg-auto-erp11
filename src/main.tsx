@@ -187,7 +187,7 @@ function App({ cloud }: { cloud: CloudSession }) {
     if (relatedOrder) await writeChangeLog(relatedOrder, '申请双人授权', `${row.type}：${row.reason}`);
   };
 
-  const saveWorkOrder = async (rawOrder: WorkOrder, keepOpen = false) => {
+  const saveWorkOrder = async (rawOrder: WorkOrder, keepOpen = false): Promise<WorkOrder | undefined> => {
     const selectedOrderId = editingOrder !== 'new' ? editingOrder?.id : undefined;
     const existingOrder = store.workOrders.find(item => item.id === rawOrder.id);
     const continuingNewOrder = editingOrder === 'new';
@@ -242,7 +242,10 @@ function App({ cloud }: { cloud: CloudSession }) {
       if (!part) continue;
       const delta = (newUsage[partId] || 0) - (oldUsage[partId] || 0);
       const nextQty = Number(part.qty || 0) - delta;
-      if (nextQty < 0) return alert(`${part.partNo} ${part.name} 库存不足。当前 ${part.qty}，本次还需 ${delta}。`);
+      if (nextQty < 0) {
+        alert(`${part.partNo} ${part.name} 库存不足。当前 ${part.qty}，本次还需 ${delta}。`);
+        return undefined;
+      }
       if (delta) partChanges.push({ part, nextQty, delta });
     }
     try {
@@ -256,8 +259,10 @@ function App({ cloud }: { cloud: CloudSession }) {
       await writeChangeLog(savedOrder, old ? '修改工单' : '新建工单', old ? '工单内容已更新并保存到服务器' : '工单已建立并保存到服务器', old, savedOrder);
       if (discountNeedsApproval) await requestApproval({ workOrderId: order.id, workOrderNumber: order.number, type: '工单折扣', reason: `折扣由 ${money(old?.discount || 0)} 调整为 ${money(order.discount)}`, oldValue: old?.discount || 0, newValue: order.discount, proposedOrder: savedOrder });
       if (settlementNeedsApproval) await requestApproval({ workOrderId: order.id, workOrderNumber: order.number, type: '实际结账金额', reason: `实际结账金额申请调整为 ${money(order.settlementTotal)}`, oldValue: old?.settlementTotal ?? order.total, newValue: order.settlementTotal, proposedOrder: savedOrder });
-      if (!keepOpen) { setEditingOrder(null); setPage('workOrders'); }
+      if (keepOpen) setEditingOrder(savedOrder);
+      else { setEditingOrder(null); setPage('workOrders'); }
       alert(keepOpen ? `工单 ${order.number} 当前进度已保存，可以继续填写。` : discountNeedsApproval || settlementNeedsApproval ? `工单 ${order.number} 已保存到服务器；折扣/结账金额将在第二人授权后生效。` : `工单 ${order.number} 已保存到正式服务器，其他账号会自动同步。`);
+      return savedOrder;
     } catch { /* persist already explains the error */ }
   };
 
