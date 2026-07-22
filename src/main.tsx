@@ -86,6 +86,7 @@ function App({ cloud }: { cloud: CloudSession }) {
   const [editingOrder, setEditingOrder] = useState<WorkOrder | 'new' | null>(null);
   const [staffMembers, setStaffMembers] = useState<StaffMember[]>([]);
   const paymentInFlight = useRef(new Set<string>());
+  const numberRepairInFlight = useRef(false);
 
   const refresh = async (quiet = false) => {
     if (!quiet) setLoading(true);
@@ -266,6 +267,39 @@ function App({ cloud }: { cloud: CloudSession }) {
       return savedOrder;
     } catch { /* persist already explains the error */ }
   };
+
+  useEffect(() => {
+    if (loading || cloud.role !== 'owner' || numberRepairInFlight.current) return;
+    const unnumberedOrders = store.workOrders.filter(order => !/^RO-\d{4}-\d+$/i.test(String(order.number || '')));
+    if (!unnumberedOrders.length) return;
+    numberRepairInFlight.current = true;
+    void (async () => {
+      const assigned = new Map<string, string>();
+      try {
+        setSyncing(true);
+        for (const order of unnumberedOrders) {
+          const number = await cloud.reserveWorkOrderNumber(order.id);
+          const repaired = { ...order, number };
+          await cloud.upsertRecord('workOrders', repaired as unknown as CloudRow);
+          assigned.set(order.id, number);
+          for (const payment of store.payments.filter(item => item.workOrderId === order.id && item.workOrderNumber !== number)) {
+            await cloud.upsertRecord('payments', { ...payment, workOrderNumber: number } as unknown as CloudRow);
+          }
+        }
+        setStore(current => ({
+          ...current,
+          workOrders: current.workOrders.map(order => assigned.has(order.id) ? { ...order, number: assigned.get(order.id)! } : order),
+          payments: current.payments.map(payment => assigned.has(payment.workOrderId) ? { ...payment, workOrderNumber: assigned.get(payment.workOrderId)! } : payment),
+        }));
+        alert(`历史工单编号修复完成：已为 ${assigned.size} 张工单分配正式编号。报价单、工单、发票和收据现在都可以正常预览。`);
+      } catch (error) {
+        alert(`历史工单编号修复未全部完成：${error instanceof Error ? error.message : error}\n系统下次打开时会继续修复剩余工单。`);
+      } finally {
+        numberRepairInFlight.current = false;
+        setSyncing(false);
+      }
+    })();
+  }, [loading, cloud.role, cloud.organizationId, store.workOrders, store.payments]);
 
   const checkoutAndDeliver = async (draft: WorkOrder, paymentMethod: string): Promise<WorkOrder | undefined> => {
     if (!can(cloud, 'collectPayment')) {
