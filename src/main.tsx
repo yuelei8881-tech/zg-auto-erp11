@@ -200,7 +200,8 @@ function App({ cloud }: { cloud: CloudSession }) {
       return;
     }
     let numberedOrder = rawOrder;
-    if (!existingOrder && continuingNewOrder) {
+    const needsOfficialNumber = !/^RO-\d{4}-\d+$/i.test(String(rawOrder.number || ''));
+    if (needsOfficialNumber && (continuingNewOrder || !!existingOrder)) {
       try {
         const assignedNumber = await cloud.reserveWorkOrderNumber(rawOrder.id);
         numberedOrder = { ...rawOrder, number: assignedNumber };
