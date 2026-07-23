@@ -1299,6 +1299,15 @@ function normalizeStore(raw: CloudStore): AppStore {
     return recalculateWorkOrder({ ...item, paid, laborItems: Array.isArray(item.laborItems) ? item.laborItems : legacyLabor(item), partItems: Array.isArray(item.partItems) ? item.partItems : legacyParts(item) });
   });
   result.parts = result.parts.map(item => ({ ...item, cost: Number(item.cost || 0), price: Number(item.price || 0), qty: Number(item.qty || 0), minimum: Number(item.minimum || 0) }));
+  const seenCustomerKeys = new Set<string>();
+  result.customers = result.customers.filter(item => {
+    const phone = normalizePhone(item.phone);
+    const email = normalizeText(item.email);
+    const key = phone ? `phone:${phone}` : email ? `email:${email}` : `id:${item.id}`;
+    if (seenCustomerKeys.has(key)) return false;
+    seenCustomerKeys.add(key);
+    return true;
+  });
   return result;
 }
 function legacyLabor(item: Partial<WorkOrder>) { const hours = Number((item as unknown as Record<string, unknown>).laborHours || 0), rate = Number((item as unknown as Record<string, unknown>).laborRate || 0); return hours || rate ? [{ id: uid(), description: '人工费（旧版导入）', hours, rate, total: hours * rate }] : []; }

@@ -87,14 +87,15 @@ export async function openCloudSession(user: User): Promise<CloudSession> {
   const loadStore = async () => {
     const { data, error } = await client
       .from('zg_erp_records')
-      .select('module, record_id, payload')
-      .eq('organization_id', organizationId);
+      .select('module, record_id, payload, updated_at')
+      .eq('organization_id', organizationId)
+      .order('updated_at', { ascending: false });
     if (error) throw error;
     const store: CloudStore = {};
     for (const item of data || []) {
       const module = String(item.module);
       const payload = (item.payload || {}) as Omit<CloudRow, 'id'>;
-      (store[module] ||= []).push({ ...payload, id: String(item.record_id) });
+      (store[module] ||= []).push({ ...payload, id: String(item.record_id), _cloudUpdatedAt: String(item.updated_at || '') });
     }
     const storedPhotos = (store.workOrders || []).flatMap(row => {
       const photos = Array.isArray(row.evidencePhotos) ? row.evidencePhotos : [];
@@ -114,6 +115,33 @@ export async function openCloudSession(user: User): Promise<CloudSession> {
   };
 
   const upsertRecord = async (module: string, row: CloudRow) => {
+    if (module === 'customers') {
+      const normalizePhone = (value: unknown) => {
+        const digits = String(value || '').replace(/\D/g, '');
+        return digits.length === 11 && digits.startsWith('1') ? digits.slice(1) : digits;
+      };
+      const phone = normalizePhone(row.phone);
+      const email = String(row.email || '').trim().toLocaleLowerCase();
+      if (phone || email) {
+        const { data: existingCustomers, error: lookupError } = await client
+          .from('zg_erp_records')
+          .select('record_id, payload, updated_at')
+          .eq('organization_id', organizationId)
+          .eq('module', 'customers')
+          .order('updated_at', { ascending: false });
+        if (lookupError) throw lookupError;
+        const duplicate = (existingCustomers || []).find(item => {
+          const payload = (item.payload || {}) as Record<string, unknown>;
+          if (payload.archived === true) return false;
+          return (phone && normalizePhone(payload.phone) === phone)
+            || (email && String(payload.email || '').trim().toLocaleLowerCase() === email);
+        });
+        if (duplicate && String(duplicate.record_id) !== row.id) {
+          const payload = (duplicate.payload || {}) as Record<string, unknown>;
+          throw new Error(`客户已经存在：${String(payload.name || '未命名客户')} · ${String(payload.phone || '未记录电话')}`);
+        }
+      }
+    }
     const { error } = await client.from('zg_erp_records').upsert({
       organization_id: organizationId,
       module,
