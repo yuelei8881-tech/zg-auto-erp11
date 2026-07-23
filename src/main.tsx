@@ -558,8 +558,24 @@ function App({ cloud }: { cloud: CloudSession }) {
       const email = normalizeText(row.email);
       const duplicate = store.customers.find(item => item.id !== row.id && ((phone && normalizePhone(item.phone) === phone) || (email && normalizeText(item.email) === email)));
       if (duplicate) {
-        const matchedBy = phone && normalizePhone(duplicate.phone) === phone ? `手机号 ${duplicate.phone}` : `邮箱 ${duplicate.email}`;
-        alert(`客户已经存在，不能重复添加。\n匹配信息：${matchedBy}\n现有客户：${duplicate.name}\n联系电话：${duplicate.phone || '未记录'}`);
+        const archivedCustomer = duplicate as Customer & { archived?: boolean; archivedAt?: string; archivedBy?: string; archiveReason?: string };
+        const wasArchived = Boolean(archivedCustomer.archived);
+        if (wasArchived) {
+          const restore = confirm(`客户已经存在，但目前处于归档状态。\n\n现有客户：${duplicate.name}\n联系电话：${duplicate.phone || '未记录'}\n\n是否恢复这位客户并直接打开客户列表？`);
+          if (!restore) return;
+          await persist('customers', {
+            ...duplicate,
+            archived: false,
+            archivedAt: undefined,
+            archivedBy: undefined,
+            archiveReason: undefined,
+          });
+        }
+        closeModal();
+        setSearch(duplicate.name || duplicate.phone || '');
+        setSearchDraft(duplicate.name || duplicate.phone || '');
+        setPage('customers');
+        alert(`${wasArchived ? '客户已经恢复' : '已找到现有客户'}：${duplicate.name}\n联系电话：${duplicate.phone || '未记录'}\n系统已为您打开客户列表。`);
         return;
       }
     }
