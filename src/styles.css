@@ -44,4 +44,4 @@
 .fuzzy-select{position:relative;min-width:0}.fuzzy-options{position:absolute;z-index:80;top:calc(100% + 4px);left:0;right:0;max-height:280px;overflow:auto;background:#fff;border:1px solid #cbd5e1;border-radius:10px;box-shadow:0 14px 35px #1018282b;padding:5px}.fuzzy-options button{display:block;width:100%;border:0;border-radius:7px;background:#fff;text-align:left;padding:10px 11px;color:#182230}.fuzzy-options button:hover,.fuzzy-options button:focus{background:#eff4ff;color:#1648c9}.fuzzy-options span{display:block;padding:12px;color:#667085;font-weight:500}
 .top-status>b::after{content:"v0.86.1"}
 .top-status>b::after{content:"v0.86.2"}
-.top-status>b::after{content:"v0.88.4"}
+.top-status>b::after{content:"v0.88.5"}

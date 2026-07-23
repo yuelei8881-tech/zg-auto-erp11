@@ -85,12 +85,20 @@ function App({ cloud }: { cloud: CloudSession }) {
   const [modal, setModal] = useState<ModalState>(null);
   const [editingOrder, setEditingOrder] = useState<WorkOrder | 'new' | null>(null);
   const [staffMembers, setStaffMembers] = useState<StaffMember[]>([]);
+  const refreshRequestId = useRef(0);
+  const mutationGeneration = useRef(0);
   const paymentInFlight = useRef(new Set<string>());
   const numberRepairInFlight = useRef(false);
 
   const refresh = async (quiet = false) => {
+    const requestId = ++refreshRequestId.current;
+    const mutationAtStart = mutationGeneration.current;
     if (!quiet) setLoading(true);
-    try { setStore(normalizeStore(await cloud.loadStore())); }
+    try {
+      const loaded = normalizeStore(await cloud.loadStore());
+      if (requestId !== refreshRequestId.current || mutationAtStart !== mutationGeneration.current) return;
+      setStore(loaded);
+    }
     catch (error) { if (!quiet) alert(`读取服务器失败：${error instanceof Error ? error.message : error}`); }
     finally { if (!quiet) setLoading(false); }
   };
@@ -143,12 +151,13 @@ function App({ cloud }: { cloud: CloudSession }) {
   };
 
   const persist = async <T extends { id: string }>(module: keyof AppStore, row: T) => {
+    mutationGeneration.current += 1;
     setSyncing(true);
     const previous = store;
     setStore(current => ({ ...current, [module]: upsertLocal(current[module] as unknown as T[], row) }));
     try { await cloud.upsertRecord(String(module), row as unknown as CloudRow); }
     catch (error) { setStore(previous); alert(`保存失败：${error instanceof Error ? error.message : error}`); throw error; }
-    finally { setSyncing(false); }
+    finally { mutationGeneration.current += 1; setSyncing(false); }
   };
 
   const remove = async (module: keyof AppStore, id: string) => {
@@ -637,7 +646,11 @@ function App({ cloud }: { cloud: CloudSession }) {
       setSearch('');
       setSearchDraft('');
       setPage('customers');
-      await refresh(true);
+      const verificationRequestId = ++refreshRequestId.current;
+      const confirmedStore = normalizeStore(await cloud.loadStore());
+      const confirmed = confirmedStore.customers.some(item => item.id === row.id && !(item as Customer & { archived?: boolean }).archived);
+      if (!confirmed) throw new Error('服务器没有确认客户记录，请检查网络后重新保存。');
+      if (verificationRequestId === refreshRequestId.current) setStore(confirmedStore);
       alert(`客户“${String(row.name || '')}”已保存并显示在客户列表。`);
     }
   };
