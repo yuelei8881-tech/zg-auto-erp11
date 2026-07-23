@@ -556,10 +556,9 @@ function App({ cloud }: { cloud: CloudSession }) {
     if (type === 'customer') {
       const phone = normalizePhone(row.phone);
       const email = normalizeText(row.email);
-      const name = normalizeText(row.name);
-      const duplicate = store.customers.find(item => item.id !== row.id && ((phone && normalizePhone(item.phone) === phone) || (email && normalizeText(item.email) === email) || (name && normalizeText(item.name) === name)));
+      const duplicate = store.customers.find(item => item.id !== row.id && ((phone && normalizePhone(item.phone) === phone) || (email && normalizeText(item.email) === email)));
       if (duplicate) {
-        const matchedBy = phone && normalizePhone(duplicate.phone) === phone ? `手机号 ${duplicate.phone}` : email && normalizeText(duplicate.email) === email ? `邮箱 ${duplicate.email}` : `客户名称 ${duplicate.name}`;
+        const matchedBy = phone && normalizePhone(duplicate.phone) === phone ? `手机号 ${duplicate.phone}` : `邮箱 ${duplicate.email}`;
         alert(`客户已经存在，不能重复添加。\n匹配信息：${matchedBy}\n现有客户：${duplicate.name}\n联系电话：${duplicate.phone || '未记录'}`);
         return;
       }
@@ -618,6 +617,13 @@ function App({ cloud }: { cloud: CloudSession }) {
     if (type === 'settings') await persist('settings', row as unknown as ShopSettings);
     else await persist(`${type}s` as keyof AppStore, row as { id: string });
     closeModal();
+    if (type === 'customer') {
+      setSearch('');
+      setSearchDraft('');
+      setPage('customers');
+      await refresh(true);
+      alert(`客户“${String(row.name || '')}”已保存并显示在客户列表。`);
+    }
   };
 
   if (editingOrder) return <WorkOrderEditor key={editingOrder === 'new' ? 'new-work-order' : editingOrder.id} value={editingOrder === 'new' ? undefined : editingOrder} customers={store.customers} vehicles={store.vehicles} fleets={store.fleets} drivers={store.drivers} workOrders={store.workOrders} parts={store.parts.filter(item => item.inventoryType !== '日常消耗品')} servicePackages={store.servicePackages} settings={settings} nextNumber={nextWorkOrderNumber(store.workOrders)} onCreateVehicle={vehicle => persist('vehicles', vehicle)} onSaveServicePackage={(item: ServicePackage) => persist('servicePackages', item)} onDeleteServicePackage={(id: string) => remove('servicePackages', id)} onPrint={(order, type) => printDocumentV077(recalculateWorkOrder(order), settings, type, store.payments)} onSave={saveWorkOrder} onCheckoutAndDeliver={checkoutAndDeliver} onCancel={() => setEditingOrder(null)} cloud={cloud} currentUser={actorName} currentUserId={cloud.user.id} technicians={staffMembers} canApproveReview={can(cloud, 'approve')} canAssignTechnician={can(cloud, 'assignTechnician')} canEditPricing={can(cloud, 'pricing')} canViewFinancials={can(cloud, 'pricing') || can(cloud, 'finance')} canCheckoutAndDeliver={can(cloud, 'collectPayment')} canPrintDocuments={can(cloud, 'printDocuments')} />;
