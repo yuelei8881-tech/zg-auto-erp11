@@ -114,12 +114,12 @@ function App({ cloud }: { cloud: CloudSession }) {
 
   const searchSuggestions = useMemo(() => {
     const query = normalizeSearch(searchDraft);
-    if (!query) return [] as Array<{ page: Page; label: string; meta: string; query: string }>;
-    const candidates: Array<{ page: Page; label: string; meta: string; query: string; haystack: string }> = [];
-    for (const item of store.customers) candidates.push({ page: 'customers', label: item.name, meta: `客户 · ${item.phone || ''}`, query: item.phone || item.name, haystack: `${item.name} ${item.phone} ${item.email || ''}` });
-    for (const item of store.fleets) candidates.push({ page: 'fleets', label: item.company, meta: `车队 · ${item.phone || ''}`, query: item.company, haystack: `${item.company} ${item.phone} ${item.billingEmail || ''}` });
-    for (const item of store.drivers) candidates.push({ page: 'fleets', label: item.name, meta: `司机 · ${item.phone || ''}`, query: item.phone || item.name, haystack: `${item.name} ${item.phone} ${item.company || ''}` });
-    for (const item of store.vehicles) candidates.push({ page: 'vehicles', label: item.plate || item.vin || `${item.year} ${item.make}`, meta: `${item.year} ${item.make} ${item.model} · ${item.vin || ''}`, query: item.plate || item.vin, haystack: `${item.plate} ${item.vin} ${item.year} ${item.make} ${item.model} ${item.ownerName || ''}` });
+    if (!query) return [] as Array<{ page: Page; label: string; meta: string; query: string; modalType?: NonNullable<ModalState>['type']; record?: object }>;
+    const candidates: Array<{ page: Page; label: string; meta: string; query: string; haystack: string; modalType?: NonNullable<ModalState>['type']; record?: object }> = [];
+    for (const item of store.customers) candidates.push({ page: 'customers', label: item.name, meta: `客户 · ${item.phone || ''} · ${item.email || '无邮箱'}`, query: item.phone || item.name, haystack: `${item.name} ${item.phone} ${item.email || ''} ${item.address || ''}`, modalType: 'customer', record: item });
+    for (const item of store.fleets) candidates.push({ page: 'fleets', label: item.company, meta: `公司/车队 · ${item.contact || '无联系人'} · ${item.phone || ''}`, query: item.company, haystack: `${item.company} ${item.contact || ''} ${item.phone} ${item.billingEmail || ''}`, modalType: 'fleet', record: item });
+    for (const item of store.drivers) candidates.push({ page: 'fleets', label: item.name, meta: `司机 · ${item.phone || ''} · ${item.company || ''}`, query: item.phone || item.name, haystack: `${item.name} ${item.phone} ${item.company || ''}`, modalType: 'driver', record: item });
+    for (const item of store.vehicles) candidates.push({ page: 'vehicles', label: item.plate || item.vin || `${item.year} ${item.make}`, meta: `${item.year} ${item.make} ${item.model} · VIN ${item.vin || '无'} · ${item.ownerName || ''}`, query: item.plate || item.vin, haystack: `${item.plate} ${item.vin} ${item.year} ${item.make} ${item.model} ${item.ownerName || ''}`, modalType: 'vehicle', record: item });
     for (const item of store.workOrders) candidates.push({ page: 'workOrders', label: item.number, meta: `${item.customer} · ${item.plate}`, query: item.number, haystack: `${item.number} ${item.customer} ${item.phone} ${item.plate} ${item.vin} ${item.driver || ''}` });
     return candidates.filter(item => normalizeSearch(item.haystack).includes(query)).slice(0, 8);
   }, [searchDraft, store]);
@@ -580,11 +580,11 @@ function App({ cloud }: { cloud: CloudSession }) {
             archiveReason: undefined,
           });
         }
-        closeModal();
-        setSearch(duplicate.name || duplicate.phone || '');
-        setSearchDraft(duplicate.name || duplicate.phone || '');
         setPage('customers');
-        alert(`${wasArchived ? '客户已经恢复' : '已找到现有客户'}：${duplicate.name}\n联系电话：${duplicate.phone || '未记录'}\n系统已为您打开客户列表。`);
+        setSearch('');
+        setSearchDraft('');
+        setModal({ type: 'customer', value: { ...duplicate } as Record<string, unknown> });
+        alert(`${wasArchived ? '客户已经恢复' : '已找到现有客户'}：${duplicate.name}\n联系电话：${duplicate.phone || '未记录'}\n已直接打开完整客户资料。`);
         return;
       }
     }
@@ -595,7 +595,9 @@ function App({ cloud }: { cloud: CloudSession }) {
       const duplicate = store.fleets.find(item => item.id !== row.id && ((phone && normalizePhone(item.phone) === phone) || (email && normalizeText(item.billingEmail) === email) || (company && normalizeText(item.company) === company)));
       if (duplicate) {
         const matchedBy = phone && normalizePhone(duplicate.phone) === phone ? `联系电话 ${duplicate.phone}` : email && normalizeText(duplicate.billingEmail) === email ? `账单邮箱 ${duplicate.billingEmail}` : `公司名称 ${duplicate.company}`;
-        alert(`车队/公司已经存在，不能重复添加。\n匹配信息：${matchedBy}\n现有公司：${duplicate.company}\n联系人：${duplicate.contact || '未记录'}`);
+        setPage('fleets');
+        setModal({ type: 'fleet', value: { ...duplicate } as Record<string, unknown> });
+        alert(`车队/公司已经存在。\n匹配信息：${matchedBy}\n已直接打开“${duplicate.company}”的完整资料。`);
         return;
       }
     }
@@ -605,7 +607,9 @@ function App({ cloud }: { cloud: CloudSession }) {
       const duplicate = store.vehicles.find(item => item.id !== row.id && ((vin && normalizeVehicleIdentifier(item.vin) === vin) || (plate && normalizeVehicleIdentifier(item.plate) === plate)));
       if (duplicate) {
         const matchedBy = vin && normalizeVehicleIdentifier(duplicate.vin) === vin ? `VIN ${duplicate.vin}` : `车牌 ${duplicate.plate}`;
-        alert(`车辆已经存在，不能重复添加。\n匹配信息：${matchedBy}\n现有车辆：${duplicate.year} ${duplicate.make} ${duplicate.model}\n所属客户：${duplicate.ownerName || '未记录'}`);
+        setPage('vehicles');
+        setModal({ type: 'vehicle', value: { ...duplicate } as Record<string, unknown> });
+        alert(`车辆已经存在。\n匹配信息：${matchedBy}\n已直接打开 ${duplicate.year} ${duplicate.make} ${duplicate.model} 的完整资料。`);
         return;
       }
       row.plate = plate;
@@ -662,7 +666,7 @@ function App({ cloud }: { cloud: CloudSession }) {
       <nav>{nav.filter(item => canOpenPage(cloud, item.id)).map(item => <button key={item.id} className={page === item.id ? 'active' : ''} onClick={() => { setPage(item.id); setSearch(''); setSearchDraft(''); }}><span>{item.icon}</span>{item.label}</button>)}</nav>
       <div className="side-foot"><small>{cloud.organizationName}</small><b>{actorName}</b><span>{cloud.user.email}</span><button onClick={() => confirm('确定退出当前账号？') && void cloud.signOut()}>退出登录</button></div>
     </aside>
-    <main className="main"><header className="topbar"><div className="global-search">⌕<input value={searchDraft} onChange={e => setSearchDraft(e.target.value)} onKeyDown={e => e.key === 'Enter' && runGlobalSearch()} placeholder="搜索客户、电话、VIN、车牌、工单、司机…" /><button type="button" onClick={runGlobalSearch}>搜索</button>{searchSuggestions.length > 0 && <div className="search-suggestions">{searchSuggestions.map((item, index) => <button type="button" key={`${item.page}-${item.label}-${index}`} onClick={() => { setSearchDraft(item.query); setSearch(item.query); setPage(item.page); }}><b>{item.label}</b><small>{item.meta}</small></button>)}</div>}</div><div className="top-status"><span className={syncing ? 'syncing' : ''}>{syncing ? '正在同步…' : '● 云端已同步'}</span><span>{actorName}</span><b>v0.82.4</b><button type="button" className="topbar-logout" onClick={() => confirm('确定退出当前账号？') && void cloud.signOut()}>退出</button></div></header>
+    <main className="main"><header className="topbar"><div className="global-search">⌕<input value={searchDraft} onChange={e => setSearchDraft(e.target.value)} onKeyDown={e => e.key === 'Enter' && runGlobalSearch()} placeholder="搜索客户、公司、电话、VIN、车牌、工单、司机…" /><button type="button" onClick={runGlobalSearch}>搜索</button>{searchSuggestions.length > 0 && <div className="search-suggestions">{searchSuggestions.map((item, index) => <button type="button" key={`${item.page}-${item.label}-${index}`} onClick={() => { setPage(item.page); setSearch(''); setSearchDraft(''); if (item.modalType && item.record) openModal(item.modalType, item.record); else { setSearchDraft(item.query); setSearch(item.query); } }}><b>{item.label}</b><small>{item.meta}</small></button>)}</div>}</div><div className="top-status"><span className={syncing ? 'syncing' : ''}>{syncing ? '正在同步…' : '● 云端已同步'}</span><span>{actorName}</span><b>v0.82.4</b><button type="button" className="topbar-logout" onClick={() => confirm('确定退出当前账号？') && void cloud.signOut()}>退出</button></div></header>
       {loading ? <div className="loading">正在读取正式服务器数据…</div> : <PageContent page={page} search={search} store={store} settings={settings} cloud={cloud} setPage={setPage} openModal={openModal} setEditingOrder={setEditingOrder} persist={persist} remove={remove} receiveStock={receiveStock} addPayment={addPayment} deleteWorkOrder={deleteWorkOrder} requestPaymentCorrection={requestPaymentCorrection} approveRequest={approveRequest} rejectRequest={rejectRequest} claimWorkOrder={claimWorkOrder} completeWorkOrder={completeWorkOrder} actorName={actorName} editOwnProfile={editOwnProfile} />}
     </main>
     {modal && <EntityModal state={modal} store={store} settings={settings} cloud={cloud} onClose={closeModal} onSave={saveModal} />}
@@ -759,7 +763,7 @@ function DetailPayments({ rows }: { rows: Payment[] }) { return <div className="
 function DetailExpenses({ rows }: { rows: Expense[] }) { return <div className="payment-detail-table metric-detail-section"><h3>支出组成（{rows.length} 笔）</h3><table><thead><tr><th>日期</th><th>类别 / 收款方</th><th>方式 / 备注</th><th>金额</th></tr></thead><tbody>{rows.map(expense => <tr key={expense.id}><td>{new Date(expense.date).toLocaleString('en-US', { timeZone: 'America/Los_Angeles', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}</td><td>{expense.category}<small>{expense.vendor || '—'}</small></td><td>{expense.method || '—'}<small>{expense.note || ''}</small></td><td className="warning-text"><b>{money(expense.amount)}</b></td></tr>)}</tbody></table></div>; }
 
 function Customers({ store, search, openModal, remove, settings, cloud }: ContentProps) {
-  const rows = filterRows(store.customers, search);
+  const rows = filterRows(store.customers, search).sort((a, b) => String((b as Customer & { _cloudUpdatedAt?: string })._cloudUpdatedAt || '').localeCompare(String((a as Customer & { _cloudUpdatedAt?: string })._cloudUpdatedAt || '')));
   const ordersFor = (item: Customer) => store.workOrders.filter(order => order.customerId === item.id || (!order.customerId && ((item.phone && order.phone === item.phone) || order.customer === item.name)));
   return <ListPage title="客户管理" subtitle="个人、公司和车队客户统一管理" action="＋ 添加客户" onAction={() => openModal('customer')}><table><thead><tr><th>客户</th><th>类型</th><th>电话</th><th>邮箱/地址</th><th>车辆</th><th /></tr></thead><tbody>{rows.map(item => <tr key={item.id}><td><b>{item.name}</b><small>{item.billingTerms || item.membership || '普通客户'}</small></td><td>{item.type}</td><td>{item.phone}<small>{item.secondaryPhone}</small></td><td>{item.email || '—'}<small>{item.address}</small></td><td>{store.vehicles.filter(vehicle => vehicle.ownerId === item.id).length}</td><td className="actions">{can(cloud, 'printDocuments') && <button className="primary-soft" onClick={() => printRepairHistory({ title: 'Customer Repair History / 客户维修档案', subtitle: item.name, contact: [item.phone, item.email].filter(Boolean).join(' · ') }, ordersFor(item), settings)}>打印维修档案</button>}<button onClick={() => openModal('customer', item)}>编辑</button><button className="danger-link" onClick={() => confirm('确定删除客户？') && remove('customers', item.id)}>删除</button></td></tr>)}</tbody></table>{!rows.length && <Empty text="没有找到客户。" />}</ListPage>;
 }
