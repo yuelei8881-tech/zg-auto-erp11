@@ -23,7 +23,7 @@ import './extra.css';
 import './v0770.css';
 import './v0780.css';
 
-type Page = 'dashboard' | 'customers' | 'fleets' | 'vehicles' | 'workOrders' | 'parts' | 'finance' | 'campaigns' | 'staff' | 'smart' | 'settings';
+type Page = 'dashboard' | 'customers' | 'fleets' | 'vehicles' | 'workOrders' | 'parts' | 'finance' | 'taxReports' | 'campaigns' | 'staff' | 'smart' | 'settings';
 type ModalState = { type: 'customer' | 'fleet' | 'driver' | 'vehicle' | 'part' | 'expense' | 'campaign' | 'warranty' | 'settings'; value?: Record<string, unknown> } | null;
 
 const emptyStore: AppStore = { customers: [], fleets: [], drivers: [], vehicles: [], workOrders: [], parts: [], inventoryLogs: [], payments: [], expenses: [], settings: [], campaigns: [], warranties: [], servicePackages: [], approvalRequests: [], changeLogs: [] };
@@ -33,7 +33,7 @@ const nav: Array<{ id: Page; icon: string; label: string }> = [
   { id: 'dashboard', icon: '⌂', label: '经营首页' }, { id: 'customers', icon: '👤', label: '客户管理' },
   { id: 'fleets', icon: '🚛', label: '车队与司机' }, { id: 'vehicles', icon: '🚗', label: '车辆管理' },
   { id: 'workOrders', icon: '▤', label: '维修工单' }, { id: 'parts', icon: '▦', label: '库存管理' },
-  { id: 'finance', icon: '$', label: '财务与收款' }, { id: 'smart', icon: '✦', label: '智能工具' },
+  { id: 'finance', icon: '$', label: '财务与收款' }, { id: 'taxReports', icon: '％', label: '税务数据库' }, { id: 'smart', icon: '✦', label: '智能工具' },
   { id: 'campaigns', icon: '★', label: '活动与保修' }, { id: 'staff', icon: '♙', label: '员工与权限' },
   { id: 'settings', icon: '⚙', label: '系统设置' },
 ];
@@ -55,7 +55,7 @@ function can(cloud: CloudSession, key: string) {
 
 function canOpenPage(cloud: CloudSession, page: Page) {
   if (page === 'dashboard') return true;
-  const map: Partial<Record<Page, string>> = { customers: 'customers', fleets: 'customers', vehicles: 'customers', workOrders: cloud.role === 'technician' ? 'assignedWorkOrders' : 'workOrders', parts: 'inventory', finance: 'finance', campaigns: 'campaigns', staff: 'staff', smart: 'smart', settings: 'settings' };
+  const map: Partial<Record<Page, string>> = { customers: 'customers', fleets: 'customers', vehicles: 'customers', workOrders: cloud.role === 'technician' ? 'assignedWorkOrders' : 'workOrders', parts: 'inventory', finance: 'finance', taxReports: 'finance', campaigns: 'campaigns', staff: 'staff', smart: 'smart', settings: 'settings' };
   return can(cloud, map[page] || page);
 }
 
@@ -695,6 +695,7 @@ function PageContent(props: ContentProps) {
   if (page === 'workOrders') return <WorkOrders {...props} />;
   if (page === 'parts') return <Inventory {...props} />;
   if (page === 'finance') return <Finance {...props} />;
+  if (page === 'taxReports') return <TaxReports {...props} />;
   if (page === 'campaigns') return <ActivityCenter organizationId={props.cloud.organizationId} campaigns={store.campaigns} warranties={store.warranties} vehicles={store.vehicles} onAddCampaign={() => props.openModal('campaign')} onEditCampaign={item => props.openModal('campaign', item)} onAddWarranty={() => props.openModal('warranty')} onEditWarranty={item => props.openModal('warranty', item)} onRemoveCampaign={id => props.remove('campaigns', id)} onRemoveWarranty={id => props.remove('warranties', id)} />;
   if (page === 'staff') return <StaffPage cloud={cloud} />;
   if (page === 'smart') return <SmartTools cloud={cloud} workOrders={store.workOrders} />;
@@ -970,6 +971,67 @@ function Finance({ store, openModal, persist, requestPaymentCorrection }: Conten
     alert('收入记录已保存到服务器。');
   };
   return <div className="page"><div className="page-title"><div><p className="eyebrow">Finance Center</p><h2>财务、收款与支出</h2></div><div className="title-actions"><button className="primary-soft" onClick={recordIncome}>＋ 记录收入</button><button className="primary" onClick={() => openModal('expense')}>＋ 记录支出</button></div></div><div className="kpi-grid"><Kpi label="今日实收" value={money(metrics.todayReceived)} tone="green" /><Kpi label="本月实收" value={money(metrics.monthReceived)} /><Kpi label="本月支出" value={money(metrics.monthExpenses)} tone="orange" /><Kpi label="本月净经营收益" value={money(metrics.monthNet)} tone="purple" /></div><div className="split-panels"><section className="panel"><h3>最近收款</h3><table><thead><tr><th>日期/工单</th><th>客户</th><th>方式</th><th>金额</th><th /></tr></thead><tbody>{[...store.payments].sort((a, b) => b.date.localeCompare(a.date)).map(item => <tr key={item.id}><td>{new Date(item.date).toLocaleDateString()}<small>{item.workOrderNumber}</small></td><td>{item.customer}<small>{item.status || '有效'}</small></td><td>{item.method}</td><td className={item.amount > 0 ? 'success-text' : 'muted'}><b>{money(item.amount)}</b>{item.originalAmount !== undefined && <small>原记录 {money(item.originalAmount)}</small>}</td><td><button onClick={() => void requestPaymentCorrection(item)}>申请更正</button></td></tr>)}</tbody></table></section><section className="panel"><h3>最近支出</h3><table><thead><tr><th>日期</th><th>类别/收款方</th><th>方式</th><th>金额</th></tr></thead><tbody>{[...store.expenses].sort((a, b) => b.date.localeCompare(a.date)).map(item => <tr key={item.id}><td>{item.date}</td><td>{item.category}<small>{item.vendor}</small></td><td>{item.method || '—'}</td><td className="warning-text"><b>{money(item.amount)}</b></td></tr>)}</tbody></table></section></div></div>;
+}
+
+function TaxReports({ store }: ContentProps) {
+  const currentQuarter = (() => {
+    const now = new Date();
+    return `${now.getFullYear()}-Q${Math.floor(now.getMonth() / 3) + 1}`;
+  })();
+  const quarterOptions = useMemo(() => {
+    const values = new Set<string>([currentQuarter]);
+    store.workOrders.forEach(order => {
+      const match = String(order.date || '').match(/^(\d{4})-(\d{2})/);
+      if (match) values.add(`${match[1]}-Q${Math.floor((Number(match[2]) - 1) / 3) + 1}`);
+    });
+    return [...values].sort().reverse();
+  }, [store.workOrders, currentQuarter]);
+  const [quarter, setQuarter] = useState(currentQuarter);
+  const report = useMemo(() => {
+    const match = quarter.match(/^(\d{4})-Q([1-4])$/);
+    const year = Number(match?.[1] || new Date().getFullYear());
+    const quarterNumber = Number(match?.[2] || 1);
+    const firstMonth = (quarterNumber - 1) * 3 + 1;
+    const monthKeys = [0, 1, 2].map(offset => `${year}-${String(firstMonth + offset).padStart(2, '0')}`);
+    const orders = store.workOrders.filter(order => order.status !== '已取消' && monthKeys.some(key => String(order.date || '').startsWith(key)));
+    const dailyMap = new Map<string, { date: string; orders: number; labor: number; parts: number; tax: number; outsource: number; total: number }>();
+    orders.forEach(order => {
+      const date = String(order.date || '').slice(0, 10);
+      const row = dailyMap.get(date) || { date, orders: 0, labor: 0, parts: 0, tax: 0, outsource: 0, total: 0 };
+      row.orders += 1;
+      row.labor += Number(order.laborTotal || 0);
+      row.parts += Number(order.partsTotal || 0);
+      row.tax += Number(order.tax || 0);
+      row.outsource += Number(order.outsource || 0);
+      row.total += Number(order.total || 0);
+      dailyMap.set(date, row);
+    });
+    const days = [...dailyMap.values()].sort((a, b) => b.date.localeCompare(a.date));
+    const totals = days.reduce((sum, row) => ({
+      orders: sum.orders + row.orders,
+      labor: sum.labor + row.labor,
+      parts: sum.parts + row.parts,
+      tax: sum.tax + row.tax,
+      outsource: sum.outsource + row.outsource,
+      total: sum.total + row.total,
+    }), { orders: 0, labor: 0, parts: 0, tax: 0, outsource: 0, total: 0 });
+    return { days, totals, orders };
+  }, [quarter, store.workOrders]);
+  const exportCsv = () => {
+    const rows = [
+      ['Date', 'Work Orders', 'Labor Revenue', 'Parts Sales', 'Sales Tax', 'Outsource', 'Invoice Total'],
+      ...report.days.map(row => [row.date, row.orders, row.labor.toFixed(2), row.parts.toFixed(2), row.tax.toFixed(2), row.outsource.toFixed(2), row.total.toFixed(2)]),
+      ['TOTAL', report.totals.orders, report.totals.labor.toFixed(2), report.totals.parts.toFixed(2), report.totals.tax.toFixed(2), report.totals.outsource.toFixed(2), report.totals.total.toFixed(2)],
+    ];
+    const csv = rows.map(row => row.map(value => `"${String(value).replaceAll('"', '""')}"`).join(',')).join('\r\n');
+    const url = URL.createObjectURL(new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8' }));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `ZG-AUTO-Tax-${quarter}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+  return <div className="page tax-report-page"><div className="page-title"><div><p className="eyebrow">Tax Reporting Database</p><h2>税务数据库 / 季度报税</h2><p>销售税与人工收入按工单日期逐日分开汇总。</p></div><div className="title-actions"><select value={quarter} onChange={event => setQuarter(event.target.value)}>{quarterOptions.map(item => <option key={item} value={item}>{item.replace('-', ' ')}</option>)}</select><button className="primary" onClick={exportCsv}>导出季度 CSV</button></div></div><div className="kpi-grid"><Kpi label={`${quarter} 配件销售税`} value={money(report.totals.tax)} tone="orange" /><Kpi label={`${quarter} 人工收入`} value={money(report.totals.labor)} tone="green" /><Kpi label={`${quarter} 配件销售额`} value={money(report.totals.parts)} tone="blue" /><Kpi label={`${quarter} 工单总额`} value={money(report.totals.total)} tone="purple" /></div><section className="panel tax-summary-note"><b>季度汇总：</b><span>{report.totals.orders} 张工单</span><span>外包 {money(report.totals.outsource)}</span><span>销售税 {money(report.totals.tax)}</span><span>人工收入 {money(report.totals.labor)}</span></section><section className="panel"><div className="section-title"><div><h3>每日税务明细</h3><p>Daily Sales Tax & Labor Revenue</p></div><b>{quarter.replace('-', ' ')}</b></div><table className="tax-report-table"><thead><tr><th>日期</th><th>工单数</th><th>人工收入</th><th>配件销售额</th><th>销售税</th><th>外包</th><th>工单总额</th></tr></thead><tbody>{report.days.map(row => <tr key={row.date}><td><b>{row.date}</b></td><td>{row.orders}</td><td>{money(row.labor)}</td><td>{money(row.parts)}</td><td className="warning-text"><b>{money(row.tax)}</b></td><td>{money(row.outsource)}</td><td><b>{money(row.total)}</b></td></tr>)}</tbody><tfoot><tr><th>季度合计</th><th>{report.totals.orders}</th><th>{money(report.totals.labor)}</th><th>{money(report.totals.parts)}</th><th>{money(report.totals.tax)}</th><th>{money(report.totals.outsource)}</th><th>{money(report.totals.total)}</th></tr></tfoot></table>{!report.days.length && <Empty text="这个季度还没有可汇总的工单。" />}</section><section className="panel tax-disclaimer"><b>报税提示</b><p>本报表依据系统工单中的人工、配件销售额和最终销售税生成；手动税额会按工单最终记录计入。正式申报前请由会计核对退货、作废、折扣及应税例外。</p></section></div>;
 }
 
 async function prepareReceiptImage(file: File) {
