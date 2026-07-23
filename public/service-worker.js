@@ -1,4 +1,4 @@
-const CACHE = 'zg-auto-erp-shell-v0888';
+const CACHE = 'zg-auto-erp-shell-v0889';
 const SHELL = ['/', '/manifest.webmanifest', '/icons/zg-auto-icon.svg'];
 self.addEventListener('install', event => { event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(SHELL))); self.skipWaiting(); });
 self.addEventListener('activate', event => {
