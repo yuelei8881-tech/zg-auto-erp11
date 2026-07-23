@@ -265,7 +265,10 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, w
   const fuzzyMatch = (source: string, query: string) => {
     const normalize = (text: string) => text.toLocaleLowerCase().replace(/[^a-z0-9\u3400-\u9fff]+/g, ' ').trim();
     const haystack = normalize(source);
-    return normalize(query).split(/\s+/).filter(Boolean).every(token => haystack.includes(token));
+    const normalizedQuery = normalize(query);
+    const compact = (text: string) => normalize(text).replace(/\s+/g, '');
+    return normalizedQuery.split(/\s+/).filter(Boolean).every(token => haystack.includes(token))
+      || Boolean(compact(query) && compact(source).includes(compact(query)));
   };
   const matchingVehicles = useMemo(() => {
     const query = vehicleSearch.trim();
