@@ -8,6 +8,7 @@
 
 .workflow-strip{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:8px;margin:14px 0 18px}
 .workflow-step{position:relative;min-height:68px;padding:12px 12px 10px 42px;border:1px solid #d8e2ef;border-radius:13px;background:#f8fafc;color:#64748b}
+.workflow-strip button.workflow-step{display:block;width:100%;font:inherit;text-align:left;cursor:pointer}.workflow-strip button.workflow-step:hover{border-color:#8fb5f4;background:#f0f6ff}.workflow-strip button.workflow-step:focus-visible{outline:3px solid rgba(21,94,239,.22);outline-offset:2px}
 .workflow-step strong{display:block;color:#1e293b;font-size:13px}.workflow-step small{font-size:11px}
 .workflow-step .step-number{position:absolute;left:12px;top:13px;width:22px;height:22px;border-radius:50%;display:grid;place-items:center;background:#e2e8f0;color:#475569;font-weight:800;font-size:11px}
 .workflow-step.active{border-color:#2563eb;background:#eff6ff;color:#1d4ed8;box-shadow:0 0 0 2px rgba(37,99,235,.08)}
