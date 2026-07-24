@@ -800,7 +800,11 @@ function DetailExpenses({ rows }: { rows: Expense[] }) { return <div className="
 
 function Customers({ store, search, openModal, remove, settings, cloud }: ContentProps) {
   const rows = filterRows(store.customers, search).sort((a, b) => String((b as Customer & { _cloudUpdatedAt?: string })._cloudUpdatedAt || '').localeCompare(String((a as Customer & { _cloudUpdatedAt?: string })._cloudUpdatedAt || '')));
-  const ordersFor = (item: Customer) => store.workOrders.filter(order => order.customerId === item.id || (!order.customerId && ((item.phone && order.phone === item.phone) || order.customer === item.name)));
+  const ordersFor = (item: Customer) => {
+    const phone = normalizePhone(item.phone);
+    const name = normalizeText(item.name);
+    return store.workOrders.filter(order => order.customerId === item.id || (!!phone && normalizePhone(order.phone) === phone) || (!!name && normalizeText(order.customer) === name));
+  };
   return <ListPage title="客户管理" subtitle="个人、公司和车队客户统一管理" action="＋ 添加客户" onAction={() => openModal('customer')}><table><thead><tr><th>客户</th><th>类型</th><th>电话</th><th>邮箱/地址</th><th>车辆</th><th /></tr></thead><tbody>{rows.map(item => <tr key={item.id}><td><b>{item.name}</b><small>{item.billingTerms || item.membership || '普通客户'}</small></td><td>{item.type}</td><td>{item.phone}<small>{item.secondaryPhone}</small></td><td>{item.email || '—'}<small>{item.address}</small></td><td>{store.vehicles.filter(vehicle => vehicle.ownerId === item.id).length}</td><td className="actions">{can(cloud, 'printDocuments') && <button className="primary-soft" onClick={() => printRepairHistory({ title: 'Customer Repair History / 客户维修档案', subtitle: item.name, contact: [item.phone, item.email].filter(Boolean).join(' · ') }, ordersFor(item), settings)}>打印维修档案</button>}<button onClick={() => openModal('customer', item)}>编辑</button><button className="danger-link" onClick={() => confirm('确定删除客户？') && remove('customers', item.id)}>删除</button></td></tr>)}</tbody></table>{!rows.length && <Empty text="没有找到客户。" />}</ListPage>;
 }
 
@@ -1401,7 +1405,7 @@ function normalizeStore(raw: CloudStore): AppStore {
   });
   result.parts = result.parts.map(item => ({ ...item, cost: Number(item.cost || 0), price: Number(item.price || 0), qty: Number(item.qty || 0), minimum: Number(item.minimum || 0) }));
   const seenCustomerKeys = new Set<string>();
-  result.customers = result.customers.filter(item => {
+  result.customers = result.customers.filter(item => !(item as Customer & { archived?: boolean }).archived).filter(item => {
     const phone = normalizePhone(item.phone);
     const email = normalizeText(item.email);
     const key = phone ? `phone:${phone}` : email ? `email:${email}` : `id:${item.id}`;
