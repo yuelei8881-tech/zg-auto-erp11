@@ -458,7 +458,7 @@ function App({ cloud }: { cloud: CloudSession }) {
   const addPayment = async (order: WorkOrder) => {
     if (!can(cloud, 'collectPayment')) return alert('当前员工账号没有“收款并交车”权限。');
     if (paymentInFlight.current.has(order.id)) return alert('这张工单的收款正在处理中，请不要重复点击。');
-    if (order.status === '已交车') return alert('这张工单已经完成交车，请勿重复收款。');
+    if (order.status === '已交车' && order.balance <= 0.009) return alert('这张工单已经完成交车并已付清。如需修改已有收款，请点击“修改收款”。');
     if (order.balance <= 0.009) {
       if (!confirm(`工单 ${order.number} 已经付清。\n确认现在完成交车？`)) return;
       await checkoutAndDeliver(order, order.paymentMethod || '现金');
