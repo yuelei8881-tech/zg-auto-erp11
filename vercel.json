@@ -5,7 +5,8 @@
   "outputDirectory": "dist",
   "headers": [
     { "source": "/service-worker.js", "headers": [{ "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" }] },
-    { "source": "/", "headers": [{ "key": "Cache-Control", "value": "no-cache" }] }
+    { "source": "/", "headers": [{ "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" }] },
+    { "source": "/index.html", "headers": [{ "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" }] }
   ],
   "rewrites": [
     { "source": "/(.*)", "destination": "/index.html" }

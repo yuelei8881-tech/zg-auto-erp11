@@ -16,6 +16,18 @@
   </head>
   <body>
     <div id="root"></div>
+    <script>
+      if (new URLSearchParams(location.search).has('force-update')) {
+        Promise.all([
+          'serviceWorker' in navigator
+            ? navigator.serviceWorker.getRegistrations().then(items => Promise.all(items.map(item => item.unregister())))
+            : Promise.resolve(),
+          'caches' in window
+            ? caches.keys().then(keys => Promise.all(keys.map(key => caches.delete(key))))
+            : Promise.resolve()
+        ]).finally(() => location.replace('/?updated=v0.89.2'));
+      }
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
