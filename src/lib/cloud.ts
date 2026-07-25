@@ -85,14 +85,27 @@ export async function openCloudSession(user: User): Promise<CloudSession> {
   if (organizationError) throw organizationError;
 
   const loadStore = async () => {
-    const { data, error } = await client
-      .from('zg_erp_records')
-      .select('module, record_id, payload, updated_at')
-      .eq('organization_id', organizationId)
-      .order('updated_at', { ascending: false });
-    if (error) throw error;
+    // Supabase limits a select response to 1,000 rows by default. The ERP now
+    // contains more than that across all modules, so a single request silently
+    // omitted older payments, expenses, customers and work orders. Read every
+    // page to keep financial totals and historical records complete.
+    const data: Array<{ module: string; record_id: string; payload: JsonValue; updated_at: string }> = [];
+    const pageSize = 1000;
+    for (let from = 0; ; from += pageSize) {
+      const { data: page, error } = await client
+        .from('zg_erp_records')
+        .select('module, record_id, payload, updated_at')
+        .eq('organization_id', organizationId)
+        .order('updated_at', { ascending: false })
+        .order('record_id', { ascending: false })
+        .range(from, from + pageSize - 1);
+      if (error) throw error;
+      const rows = (page || []) as typeof data;
+      data.push(...rows);
+      if (rows.length < pageSize) break;
+    }
     const store: CloudStore = {};
-    for (const item of data || []) {
+    for (const item of data) {
       const module = String(item.module);
       const payload = (item.payload || {}) as Omit<CloudRow, 'id'>;
       (store[module] ||= []).push({ ...payload, id: String(item.record_id), _cloudUpdatedAt: String(item.updated_at || '') });

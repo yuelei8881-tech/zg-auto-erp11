@@ -12,7 +12,7 @@
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="icon" href="/icons/zg-auto-icon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="/icons/zg-auto-icon.svg" />
-    <title>Z&G AUTO ERP v0.90.2</title>
+    <title>Z&G AUTO ERP v0.90.3</title>
   </head>
   <body>
     <div id="root"></div>
@@ -25,7 +25,7 @@
           'caches' in window
             ? caches.keys().then(keys => Promise.all(keys.map(key => caches.delete(key))))
             : Promise.resolve()
-        ]).finally(() => location.replace('/?updated=v0.90.2'));
+        ]).finally(() => location.replace('/?updated=v0.90.3'));
       }
     </script>
     <script type="module" src="/src/main.tsx"></script>

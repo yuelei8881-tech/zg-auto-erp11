@@ -55,3 +55,4 @@
 @media(max-width:760px){.daily-date-toolbar{display:grid;grid-template-columns:1fr 1fr}.daily-date-toolbar label{grid-column:span 2}.daily-reconciliation{align-items:stretch;flex-direction:column}.customer-ledger-summary{grid-template-columns:1fr;padding:12px}.customer-ledger-results button{min-width:165px}}
 .top-status>b::after{content:"v0.90.1"}
 .top-status>b::after{content:"v0.90.2"}
+.top-status>b::after{content:"v0.90.3"}
