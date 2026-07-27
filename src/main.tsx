@@ -532,6 +532,12 @@ function App({ cloud }: { cloud: CloudSession }) {
   };
 
   const receiveStock = async (part: Part, entry?: { qty: number; unitCost: number; reference: string }) => {
+    if (!entry) {
+      const action = prompt(`${part.partNo} ${part.name}\n请选择库存操作：\n1 = 采购入库\n2 = 采购退货 / 供应商退款`, '1');
+      if (action === null) return;
+      if (action.trim() === '2') return returnStock(part);
+      if (action.trim() !== '1') return alert('请输入 1 或 2。');
+    }
     const raw = entry ? String(entry.qty) : prompt(`${part.partNo} ${part.name}\n当前库存：${part.qty}\n请输入入库数量：`, '1');
     if (!raw) return; const qty = Number(raw); if (!qty || qty <= 0) return alert('请输入正确数量。');
     const rawCost = entry ? String(entry.unitCost) : prompt(`请输入本次真实采购单价（仅内部可见）：`, String(part.cost || 0));
@@ -543,6 +549,44 @@ function App({ cloud }: { cloud: CloudSession }) {
     await persist('parts', { ...part, qty: next, cost: unitCost });
     await persist('inventoryLogs', { id: uid(), date: new Date().toISOString(), partId: part.id, partNo: part.partNo, partName: part.name, type: '采购入库', change: qty, before: part.qty, after: next, reference, unitCost, totalCost: qty * unitCost } as InventoryLog);
   };
+
+  async function returnStock(part: Part) {
+    const purchases = store.inventoryLogs
+      .filter(log => log.partId === part.id && log.type === '采购入库' && log.change > 0)
+      .sort((a, b) => b.date.localeCompare(a.date));
+    if (!purchases.length) return alert('这件物品没有可关联的采购入库记录。请先完成采购入库。');
+    const list = purchases.slice(0, 20).map((log, index) => `${index + 1}. ${new Date(log.date).toLocaleDateString()} · 入库 ${log.change} · ${money(log.unitCost || part.cost)}/件 · ${log.reference || '无单号'}`).join('\n');
+    const selectedRaw = prompt(`请选择要退货的原采购批次：\n${list}`, '1');
+    if (selectedRaw === null) return;
+    const purchase = purchases[Number(selectedRaw) - 1];
+    if (!purchase) return alert('请选择正确的采购批次编号。');
+    const returned = store.inventoryLogs
+      .filter(log => log.partId === part.id && log.type === '采购退货' && (log.note || '').includes(`[原采购:${purchase.id}]`))
+      .reduce((sum, log) => sum + Math.abs(Math.min(0, Number(log.change || 0))), 0);
+    const available = Math.max(0, Math.min(Number(part.qty || 0), Number(purchase.change || 0) - returned));
+    if (available <= 0) return alert('该采购批次已经全部退货，或者当前库存不足，不能继续退货。');
+    const qtyRaw = prompt(`当前库存：${part.qty}\n该批次尚可退：${available}\n请输入本次退货数量：`, String(available));
+    if (qtyRaw === null) return;
+    const qty = Number(qtyRaw);
+    if (!Number.isFinite(qty) || qty <= 0 || qty > available) return alert(`退货数量必须大于 0，并且不能超过 ${available}。`);
+    const defaultRefund = Math.round(qty * Number(purchase.unitCost ?? part.cost ?? 0) * 100) / 100;
+    const refundRaw = prompt('请输入供应商实际退回的金额：', String(defaultRefund));
+    if (refundRaw === null) return;
+    const refundAmount = Number(refundRaw);
+    if (!Number.isFinite(refundAmount) || refundAmount < 0) return alert('请输入正确的退款金额。');
+    const method = prompt('退款进入方式：现金 / 银行转账 / 银行卡 / 支票 / Zelle / 其他', '银行转账')?.trim();
+    if (!method) return;
+    const reason = prompt('请输入退货原因：', '多余配件退回供应商')?.trim();
+    if (!reason) return;
+    const refundReference = prompt('请输入供应商退货单或退款编号（可选）：', '')?.trim() || '';
+    if (!confirm(`确认采购退货？\n${part.partNo} ${part.name} × ${qty}\n退款 ${money(refundAmount)} · ${method}\n库存将从 ${part.qty} 减少到 ${Number(part.qty || 0) - qty}`)) return;
+    const now = new Date().toISOString();
+    const after = Number(part.qty || 0) - qty;
+    await persist('parts', { ...part, qty: after });
+    await persist('inventoryLogs', { id: uid(), date: now, partId: part.id, partNo: part.partNo, partName: part.name, type: '采购退货', change: -qty, before: part.qty, after, reference: refundReference || purchase.reference || '', note: `[原采购:${purchase.id}] ${reason} · 退款方式 ${method}`, unitCost: qty ? refundAmount / qty : 0, totalCost: -refundAmount } as InventoryLog);
+    await persist('expenses', { id: uid(), date: now, category: '采购退款', vendor: part.supplier || '配件供应商', amount: -refundAmount, method, note: `${part.partNo} ${part.name} × ${qty} · ${reason}${refundReference ? ` · 退款号 ${refundReference}` : ''}` } as Expense);
+    alert(`采购退货已完成。\n库存已减少 ${qty}，采购支出已冲减 ${money(refundAmount)}，${method}余额已增加。`);
+  }
 
   const claimWorkOrder = async (order: WorkOrder) => {
     if (order.archivedAt || ['已完成', '已交车', '已取消'].includes(order.status)) {
