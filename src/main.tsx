@@ -1100,7 +1100,39 @@ function Finance({ store, openModal, persist, requestPaymentCorrection, cloud, a
     await persist('payments', { id: uid(), date: new Date().toISOString(), workOrderId: '', workOrderNumber: '手工收入', customer: customer.trim() || '其他收入', amount, method, note });
     alert('收入记录已保存到服务器。');
   };
-  return <div className="page finance-page"><div className="page-title"><div><p className="eyebrow">Finance Center</p><h2>每日财务与客户账单</h2><p>可回看任意洛杉矶日期，并由两个不同账号补做对账。</p></div><div className="title-actions"><button className="primary-soft" onClick={recordIncome}>＋ 记录收入</button><button className="primary" onClick={() => openModal('expense')}>＋ 记录支出</button></div></div>
+  const refundReceipt = async () => {
+    const originals = expenseRows.filter(item => Number(item.amount) > 0 && item.category !== '采购退款' && !item.category.endsWith('退款')).slice(0, 50);
+    if (!originals.length) return alert('目前没有可以退款的原支出或小票记录。');
+    const list = originals.map((item, index) => `${index + 1}. ${new Date(item.date).toLocaleDateString()} · ${item.vendor || item.category} · ${money(item.amount)} · ${item.note || '无备注'}`).join('\n');
+    const selectedRaw = prompt(`请选择发生退款的原小票/支出：\n${list}`, '1');
+    if (selectedRaw === null) return;
+    const original = originals[Number(selectedRaw) - 1];
+    if (!original) return alert('请选择正确的小票编号。');
+    const refunded = Math.abs(expenseRows
+      .filter(item => Number(item.amount) < 0 && (item.note || '').includes(`[原支出:${original.id}]`))
+      .reduce((sum, item) => sum + Number(item.amount || 0), 0));
+    const remaining = Math.max(0, Math.round((Number(original.amount) - refunded) * 100) / 100);
+    if (remaining <= 0.009) return alert('这张小票已经全额退款，不能再次退款。');
+    if (original.category === '配件采购' && !confirm('这张小票属于配件采购。\n如果退回的商品已经录入库存，应当同时在“库存管理 → 采购入库 → 采购退货”中扣减库存。\n\n确认本次只处理小票财务退款吗？')) return;
+    const amountRaw = prompt(`原支出：${money(original.amount)}\n已经退款：${money(refunded)}\n最多还可退款：${money(remaining)}\n\n请输入本次实际退款金额：`, String(remaining));
+    if (amountRaw === null) return;
+    const amount = Number(amountRaw);
+    if (!Number.isFinite(amount) || amount <= 0 || amount > remaining + 0.009) return alert(`退款必须大于 0，并且不能超过 ${money(remaining)}。`);
+    const method = prompt('退款进入方式：现金 / 银行转账 / 银行卡 / 支票 / Zelle / 其他', original.method || '银行卡')?.trim();
+    if (!method) return;
+    const reason = prompt('请输入退款原因：', '商品退回商家')?.trim();
+    if (!reason) return;
+    const reference = prompt('请输入退款凭证或退款编号（可选）：', '')?.trim() || '';
+    const fullRefund = amount >= remaining - 0.009;
+    if (!confirm(`确认${fullRefund ? '全额' : '部分'}退款？\n原小票：${original.vendor || original.category}\n本次退款：${money(amount)}\n进入：${method}`)) return;
+    await persist('expenses', {
+      id: uid(), date: new Date().toISOString(), category: `${original.category}退款`,
+      vendor: original.vendor || '原商家', amount: -amount, method,
+      note: `[原支出:${original.id}] ${fullRefund ? '全额退款' : '部分退款'} · ${reason}${reference ? ` · 退款号 ${reference}` : ''}`,
+    } as Expense);
+    alert(`小票退款已保存。\n原支出已冲减 ${money(amount)}，${method}余额已增加；原小票记录仍然保留。`);
+  };
+  return <div className="page finance-page"><div className="page-title"><div><p className="eyebrow">Finance Center</p><h2>每日财务与客户账单</h2><p>可回看任意洛杉矶日期，并由两个不同账号补做对账。</p></div><div className="title-actions"><button onClick={refundReceipt}>↩ 小票退款</button><button className="primary-soft" onClick={recordIncome}>＋ 记录收入</button><button className="primary" onClick={() => openModal('expense')}>＋ 记录支出</button></div></div>
     <section className="panel daily-finance-panel"><div className="daily-date-toolbar"><button onClick={() => changeDate(-1)}>‹ 前一天</button><label>查看日期（洛杉矶）<input type="date" value={selectedDate} onChange={event => setSelectedDate(event.target.value)} /></label><button onClick={() => setSelectedDate(losAngelesDateKey(new Date().toISOString()))}>今天</button><button onClick={() => changeDate(1)}>后一天 ›</button></div>
       <div className="kpi-grid"><Kpi label={`${selectedDate} 实收`} value={money(dailyIncome)} tone="green" /><Kpi label="当日支出" value={money(dailyExpense)} tone="orange" /><Kpi label="当日净额" value={money(dailyIncome - dailyExpense)} tone="purple" /><Kpi label="流水数量" value={`${dailyPayments.length} 收 / ${dailyExpenses.length} 支`} /></div>
       <div className="daily-reconciliation"><div><b>双人每日对账</b><span>{reconciliation?.status === '已执行' ? `已完成：${reconciliation.requestedBy} ＋ ${reconciliation.approvedBy}` : reconciliation?.status === '待授权' ? `等待第二人审核；第一确认人：${reconciliation.requestedBy}` : '尚未对账；即使错过当天，也可以选择日期补做。'}</span></div><button className={reconciliation?.status === '已执行' ? '' : 'primary'} onClick={() => void requestDailyReconciliation()}>{reconciliation?.status === '已执行' ? '查看对账状态' : reconciliation?.status === '待授权' ? '等待第二人审核' : '第一人确认并提交'}</button></div>
