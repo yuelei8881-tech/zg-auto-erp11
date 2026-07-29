@@ -862,11 +862,55 @@ function Customers({ store, search, openModal, remove, settings, cloud }: Conten
   return <ListPage title="客户管理" subtitle="个人、公司和车队客户统一管理" action="＋ 添加客户" onAction={() => openModal('customer')}><table><thead><tr><th>客户</th><th>类型</th><th>电话</th><th>邮箱/地址</th><th>车辆</th><th /></tr></thead><tbody>{rows.map(item => <tr key={item.id}><td><b>{item.name}</b><small>{item.billingTerms || item.membership || '普通客户'}</small></td><td>{item.type}</td><td>{item.phone}<small>{item.secondaryPhone}</small></td><td>{item.email || '—'}<small>{item.address}</small></td><td>{store.vehicles.filter(vehicle => vehicle.ownerId === item.id).length}</td><td className="actions">{can(cloud, 'printDocuments') && <button className="primary-soft" onClick={() => printRepairHistory({ title: 'Customer Repair History / 客户维修档案', subtitle: item.name, contact: [item.phone, item.email].filter(Boolean).join(' · ') }, ordersFor(item), settings)}>打印维修档案</button>}<button onClick={() => openModal('customer', item)}>编辑</button><button className="danger-link" onClick={() => confirm('确定删除客户？') && remove('customers', item.id)}>删除</button></td></tr>)}</tbody></table>{!rows.length && <Empty text="没有找到客户。" />}</ListPage>;
 }
 
-function Fleets({ store, search, openModal, remove }: ContentProps) {
-  const fleets = filterRows(store.fleets, search); const drivers = filterRows(store.drivers, search);
-  return <div className="page"><div className="page-title"><div><p className="eyebrow">Fleet Management</p><h2>车队公司与司机</h2></div><div className="toolbar"><button onClick={() => openModal('driver')}>＋ 添加司机</button><button className="primary" onClick={() => openModal('fleet')}>＋ 添加车队公司</button></div></div>
-    <div className="split-panels"><section className="panel"><h3>车队公司</h3><table><thead><tr><th>公司</th><th>联系人</th><th>月结</th><th /></tr></thead><tbody>{fleets.map(item => <tr key={item.id}><td><b>{item.company}</b><small>{item.phone}</small></td><td>{item.contact}<small>{item.billingEmail}</small></td><td>{item.terms || '现场付款'}</td><td className="actions"><button onClick={() => openModal('fleet', item)}>编辑</button><button className="danger-link" onClick={() => confirm('确定删除？') && remove('fleets', item.id)}>删除</button></td></tr>)}</tbody></table>{!fleets.length && <Empty text="尚未添加车队公司。" />}</section>
-    <section className="panel"><h3>司机</h3><table><thead><tr><th>司机</th><th>公司</th><th>授权</th><th /></tr></thead><tbody>{drivers.map(item => <tr key={item.id}><td><b>{item.name}</b><small>{item.phone}</small></td><td>{item.company || '—'}</td><td>{item.authorized ? '可签字' : '仅送车'}</td><td className="actions"><button onClick={() => openModal('driver', item)}>编辑</button><button className="danger-link" onClick={() => confirm('确定删除？') && remove('drivers', item.id)}>删除</button></td></tr>)}</tbody></table>{!drivers.length && <Empty text="尚未添加司机。" />}</section></div></div>;
+function Fleets({ store, search, openModal, remove, cloud, setEditingOrder, addPayment }: ContentProps) {
+  const fleets = filterRows(store.fleets, search);
+  const drivers = filterRows(store.drivers, search);
+  const [selectedFleet, setSelectedFleet] = useState<Fleet | null>(null);
+  const [showAllFleetOrders, setShowAllFleetOrders] = useState(false);
+  const canViewFleetFinance = can(cloud, 'pricing') || can(cloud, 'finance');
+
+  const ordersForFleet = (fleet: Fleet) => {
+    const company = normalizeText(fleet.company);
+    const fleetVehicles = store.vehicles.filter(vehicle =>
+      vehicle.ownerId === fleet.id || (!!company && normalizeText(vehicle.ownerName) === company)
+    );
+    const vehicleIds = new Set(fleetVehicles.map(vehicle => vehicle.id));
+    const plates = new Set(fleetVehicles.map(vehicle => normalizeText(vehicle.plate)).filter(Boolean));
+    const vins = new Set(fleetVehicles.map(vehicle => normalizeText(vehicle.vin)).filter(Boolean));
+    return store.workOrders.filter(order =>
+      order.fleetId === fleet.id ||
+      order.customerId === fleet.id ||
+      (!!company && (normalizeText(order.company) === company || normalizeText(order.customer) === company)) ||
+      (!!order.vehicleId && vehicleIds.has(order.vehicleId)) ||
+      (!!order.plate && plates.has(normalizeText(order.plate))) ||
+      (!!order.vin && vins.has(normalizeText(order.vin)))
+    ).sort((a, b) => `${b.date}${b.number}`.localeCompare(`${a.date}${a.number}`));
+  };
+
+  const fleetOrders = selectedFleet ? ordersForFleet(selectedFleet) : [];
+  const unpaidFleetOrders = fleetOrders.filter(order => !order.archivedAt && order.status !== '已取消' && Number(order.balance || 0) > .009);
+  const visibleFleetOrders = showAllFleetOrders ? fleetOrders : unpaidFleetOrders;
+  const fleetVehicles = selectedFleet ? store.vehicles.filter(vehicle =>
+    vehicle.ownerId === selectedFleet.id || normalizeText(vehicle.ownerName) === normalizeText(selectedFleet.company)
+  ) : [];
+  const fleetBilled = fleetOrders.filter(order => !order.archivedAt && order.status !== '已取消').reduce((sum, order) => sum + Number(order.total || 0), 0);
+  const fleetPaid = fleetOrders.filter(order => !order.archivedAt && order.status !== '已取消').reduce((sum, order) => sum + Number(order.paid || 0), 0);
+  const fleetBalance = unpaidFleetOrders.reduce((sum, order) => sum + Number(order.balance || 0), 0);
+
+  const openFleetFinance = (fleet: Fleet) => {
+    setSelectedFleet(fleet);
+    setShowAllFleetOrders(false);
+  };
+
+  return <><div className="page"><div className="page-title"><div><p className="eyebrow">Fleet Management</p><h2>车队公司与司机</h2></div><div className="toolbar"><button onClick={() => openModal('driver')}>＋ 添加司机</button><button className="primary" onClick={() => openModal('fleet')}>＋ 添加车队公司</button></div></div>
+    <div className="split-panels"><section className="panel"><h3>车队公司</h3><table><thead><tr><th>公司</th><th>联系人</th><th>月结</th><th /></tr></thead><tbody>{fleets.map(item => { const unpaid = ordersForFleet(item).filter(order => !order.archivedAt && order.status !== '已取消' && Number(order.balance || 0) > .009); return <tr key={item.id}><td><button type="button" className="table-link" onClick={() => canViewFleetFinance && openFleetFinance(item)}><b>{item.company}</b></button><small>{item.phone}</small>{canViewFleetFinance && <small className={unpaid.length ? 'warning-text' : 'success-text'}>{unpaid.length ? `${unpaid.length} 张未付款工单` : '无未付款工单'}</small>}</td><td>{item.contact}<small>{item.billingEmail}</small></td><td>{item.terms || '现场付款'}</td><td className="actions">{canViewFleetFinance && <button className={unpaid.length ? 'primary' : 'primary-soft'} onClick={() => openFleetFinance(item)}>账务明细</button>}<button onClick={() => openModal('fleet', item)}>编辑</button><button className="danger-link" onClick={() => confirm('确定删除？') && remove('fleets', item.id)}>删除</button></td></tr>})}</tbody></table>{!fleets.length && <Empty text="尚未添加车队公司。" />}</section>
+    <section className="panel"><h3>司机</h3><table><thead><tr><th>司机</th><th>公司</th><th>授权</th><th /></tr></thead><tbody>{drivers.map(item => <tr key={item.id}><td><b>{item.name}</b><small>{item.phone}</small></td><td>{item.company || '—'}</td><td>{item.authorized ? '可签字' : '仅送车'}</td><td className="actions"><button onClick={() => openModal('driver', item)}>编辑</button><button className="danger-link" onClick={() => confirm('确定删除？') && remove('drivers', item.id)}>删除</button></td></tr>)}</tbody></table>{!drivers.length && <Empty text="尚未添加司机。" />}</section></div></div>
+    {selectedFleet && <div className="modal-backdrop" onMouseDown={event => event.target === event.currentTarget && setSelectedFleet(null)}><div className="modal fleet-finance-modal"><div className="modal-head"><div><p className="eyebrow">Fleet Account / 车队账务</p><h2>{selectedFleet.company}</h2><span>{selectedFleet.contact} · {selectedFleet.phone} · {selectedFleet.terms || '现场付款'}</span></div><button type="button" onClick={() => setSelectedFleet(null)}>×</button></div>
+      <div className="fleet-account-summary"><div><span>车辆</span><b>{fleetVehicles.length}</b></div><div><span>全部工单</span><b>{fleetOrders.length}</b></div><div><span>累计开单</span><b>{money(fleetBilled)}</b></div><div><span>累计已付</span><b>{money(fleetPaid)}</b></div><div className={fleetBalance > .009 ? 'warning' : 'settled'}><span>当前欠款</span><b>{money(fleetBalance)}</b></div></div>
+      <div className="fleet-account-toolbar"><div><button type="button" className={!showAllFleetOrders ? 'primary' : ''} onClick={() => setShowAllFleetOrders(false)}>未付款工单（{unpaidFleetOrders.length}）</button><button type="button" className={showAllFleetOrders ? 'primary' : ''} onClick={() => setShowAllFleetOrders(true)}>全部历史（{fleetOrders.length}）</button></div><b>当前列表合计：{money(visibleFleetOrders.reduce((sum, order) => sum + (showAllFleetOrders ? Number(order.total || 0) : Number(order.balance || 0)), 0))}</b></div>
+      <div className="fleet-account-orders"><table><thead><tr><th>工单/日期</th><th>车辆</th><th>总价</th><th>已付</th><th>欠款</th><th /></tr></thead><tbody>{visibleFleetOrders.map(order => <tr key={order.id}><td><b>{order.number}</b><small>{order.date}</small></td><td>{order.plate || '—'}<small>{order.vehicle}</small></td><td>{money(order.total)}</td><td>{money(order.paid)}</td><td className={Number(order.balance || 0) > .009 ? 'warning-text' : 'success-text'}><b>{money(Math.max(0, Number(order.balance || 0)))}</b></td><td className="actions"><button onClick={() => { setSelectedFleet(null); setEditingOrder(order); }}>打开工单</button>{Number(order.balance || 0) > .009 && can(cloud, 'collectPayment') && <button className="primary" onClick={() => addPayment(order)}>收款</button>}</td></tr>)}</tbody></table>{!visibleFleetOrders.length && <Empty text={showAllFleetOrders ? '这个车队还没有工单记录。' : '这个车队目前没有未付款工单。'} />}</div>
+    </div></div>}
+  </>;
 }
 
 function Vehicles({ store, search, openModal, remove, setEditingOrder, settings, cloud }: ContentProps) {
