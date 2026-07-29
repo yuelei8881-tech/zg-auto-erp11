@@ -14,7 +14,7 @@ type Props = {
     onCreateVehicle: (vehicle: Vehicle) => Promise<void>;
     onSaveServicePackage: (item: ServicePackage) => Promise<void>;
     onDeleteServicePackage: (id: string) => Promise<void>;
-    onPrint: (order: WorkOrder, documentType: string) => void;
+    onPrint: (order: WorkOrder, documentType: string, hidePrices?: boolean) => void;
     canPrintDocuments: boolean;
   cloud: CloudSession;
   currentUser: string;
@@ -814,12 +814,12 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, w
     const next = visibleMobileSteps[Math.max(0, Math.min(visibleMobileSteps.length - 1, mobileStepIndex + direction))];
     if (next) selectMobileStep(next.key);
   };
-  const printCurrentOrder = () => {
+  const printCurrentOrder = (hidePrices = false) => {
     if (!calculated.number || calculated.number === '保存时自动分配') {
       alert('这张工单还没有正式编号。请先点击“保存进度”或“保存工单”，服务器分配编号后再打印。');
       return;
     }
-    onPrint(calculated, 'Repair Order');
+    onPrint(calculated, 'Repair Order', hidePrices);
   };
   const selectWorkflowStage = (stage: NonNullable<WorkOrder['workflowStage']>) => {
     const destination: Record<NonNullable<WorkOrder['workflowStage']>, MobileStep> = {
@@ -834,7 +834,7 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, w
   };
 
   return <div className="editor-screen focused-editor" data-panel={activePanel} data-mobile-step={mobileStep}>
-    <div className="editor-head"><div><p className="eyebrow">维修工单 / Repair Order</p><h2>{value ? `编辑 ${order.number}` : '新建维修工单'}</h2>{value && <small>已明确选择此工单；只有点击“保存工单”或“保存进度”才会写入服务器。</small>}</div><div className="toolbar">{canPrintDocuments && <button type="button" onClick={printCurrentOrder}>打印工单</button>}<button type="button" onClick={cancelEditor}>取消</button><button type="button" className="primary" onClick={submit} disabled={saving}>{saving ? '保存中…' : '保存工单'}</button></div></div>
+    <div className="editor-head"><div><p className="eyebrow">维修工单 / Repair Order</p><h2>{value ? `编辑 ${order.number}` : '新建维修工单'}</h2>{value && <small>已明确选择此工单；只有点击“保存工单”或“保存进度”才会写入服务器。</small>}</div><div className="toolbar">{canPrintDocuments && <><button type="button" onClick={() => printCurrentOrder(false)}>打印工单</button><button type="button" onClick={() => printCurrentOrder(true)}>内部施工单（无价格）</button></>}<button type="button" onClick={cancelEditor}>取消</button><button type="button" className="primary" onClick={submit} disabled={saving}>{saving ? '保存中…' : '保存工单'}</button></div></div>
     <div className="workflow-strip">{visibleWorkflowStages.map((stage, index) => <button type="button" key={stage} onClick={() => selectWorkflowStage(stage)} className={`workflow-step ${workflowStages.indexOf(workflowStage) >= workflowStages.indexOf(stage) ? 'done' : ''} ${workflowStage === stage ? 'active' : ''}`}><span className="step-number">{index + 1}</span><strong>{stage}</strong><small>{['前两项即可保存','员工领取并诊断','配件工时与确认','施工及证据留存','等待授权账号结账'][index]}</small></button>)}</div>
 
     <nav className="editor-section-nav" aria-label="工单填写步骤">
