@@ -862,11 +862,12 @@ function Customers({ store, search, openModal, remove, settings, cloud }: Conten
   return <ListPage title="客户管理" subtitle="个人、公司和车队客户统一管理" action="＋ 添加客户" onAction={() => openModal('customer')}><table><thead><tr><th>客户</th><th>类型</th><th>电话</th><th>邮箱/地址</th><th>车辆</th><th /></tr></thead><tbody>{rows.map(item => <tr key={item.id}><td><b>{item.name}</b><small>{item.billingTerms || item.membership || '普通客户'}</small></td><td>{item.type}</td><td>{item.phone}<small>{item.secondaryPhone}</small></td><td>{item.email || '—'}<small>{item.address}</small></td><td>{store.vehicles.filter(vehicle => vehicle.ownerId === item.id).length}</td><td className="actions">{can(cloud, 'printDocuments') && <button className="primary-soft" onClick={() => printRepairHistory({ title: 'Customer Repair History / 客户维修档案', subtitle: item.name, contact: [item.phone, item.email].filter(Boolean).join(' · ') }, ordersFor(item), settings)}>打印维修档案</button>}<button onClick={() => openModal('customer', item)}>编辑</button><button className="danger-link" onClick={() => confirm('确定删除客户？') && remove('customers', item.id)}>删除</button></td></tr>)}</tbody></table>{!rows.length && <Empty text="没有找到客户。" />}</ListPage>;
 }
 
-function Fleets({ store, search, openModal, remove, cloud, setEditingOrder, addPayment }: ContentProps) {
+function Fleets({ store, search, openModal, remove, cloud, setEditingOrder, addPayment, settings }: ContentProps) {
   const fleets = filterRows(store.fleets, search);
   const drivers = filterRows(store.drivers, search);
   const [selectedFleet, setSelectedFleet] = useState<Fleet | null>(null);
   const [showAllFleetOrders, setShowAllFleetOrders] = useState(false);
+  const [sendingFleetStatement, setSendingFleetStatement] = useState<'all' | 'unpaid' | null>(null);
   const canViewFleetFinance = can(cloud, 'pricing') || can(cloud, 'finance');
 
   const ordersForFleet = (fleet: Fleet) => {
@@ -902,12 +903,47 @@ function Fleets({ store, search, openModal, remove, cloud, setEditingOrder, addP
     setShowAllFleetOrders(false);
   };
 
+  const sendFleetStatement = async (scope: 'all' | 'unpaid') => {
+    if (!selectedFleet) return;
+    const source = scope === 'unpaid'
+      ? unpaidFleetOrders
+      : fleetOrders.filter(order => !order.archivedAt && order.status !== '已取消');
+    if (!source.length) {
+      alert(scope === 'unpaid' ? '这个车队目前没有未付款工单。' : '这个车队目前没有可发送的账单。');
+      return;
+    }
+    const email = prompt('发送到车队账单邮箱：', selectedFleet.billingEmail || '');
+    if (!email?.trim()) return;
+    const total = source.reduce((sum, order) => sum + Number(order.total || 0), 0);
+    const paid = source.reduce((sum, order) => sum + Number(order.paid || 0), 0);
+    const balance = source.reduce((sum, order) => sum + Math.max(0, Number(order.balance || 0)), 0);
+    const label = scope === 'unpaid' ? '未付款账单 / Outstanding Invoices' : '全部账单 / All Invoices';
+    if (!confirm(`确认将“${label}”发送到 ${email.trim()}？\n共 ${source.length} 张工单，当前欠款 ${money(balance)}。`)) return;
+    const rows = source.map(order => `<tr><td>${escapeHtml(order.date)}</td><td>${escapeHtml(order.number)}</td><td>${escapeHtml(order.plate || '')}<br><small>${escapeHtml(order.vehicle || '')}</small></td><td style="text-align:right">${money(order.total)}</td><td style="text-align:right">${money(order.paid)}</td><td style="text-align:right;font-weight:700;color:${Number(order.balance || 0) > .009 ? '#b42318' : '#067647'}">${money(Math.max(0, Number(order.balance || 0)))}</td></tr>`).join('');
+    const details = source.map(order => {
+      const labor = order.laborItems?.map(item => `${escapeHtml(item.description)} (${money(item.total)})`).join('；') || '—';
+      const parts = order.partItems?.map(item => `${escapeHtml(item.name)} × ${Number(item.qty || 0)} (${money(item.total)})`).join('；') || '—';
+      return `<div style="margin:16px 0;padding:12px;border:1px solid #d0d5dd;border-radius:8px"><h3 style="margin:0 0 8px">${escapeHtml(order.number)} · ${escapeHtml(order.plate || order.vehicle || '')}</h3><p style="margin:4px 0"><b>Repair / 维修：</b>${escapeHtml(order.workPerformed || order.diagnosis || order.complaint || '—')}</p><p style="margin:4px 0"><b>Labor / 人工：</b>${labor}</p><p style="margin:4px 0"><b>Parts / 配件：</b>${parts}</p><p style="margin:8px 0 0"><b>Total / 总价：</b>${money(order.total)} &nbsp; <b>Paid / 已付：</b>${money(order.paid)} &nbsp; <b>Balance / 欠款：</b>${money(Math.max(0, Number(order.balance || 0)))}</p></div>`;
+    }).join('');
+    const html = `<div style="font-family:Arial,'Microsoft YaHei',sans-serif;color:#172033;max-width:900px;margin:auto"><h1>${escapeHtml(settings.shopName || 'Z&G AUTO REPAIR')}</h1><p>${escapeHtml(settings.address || '')}<br>Tel / 电话：${escapeHtml(settings.phone || '')}</p><hr><h2>${escapeHtml(selectedFleet.company)} · ${label}</h2><p>Contact / 联系人：${escapeHtml(selectedFleet.contact || '')} · ${escapeHtml(selectedFleet.phone || '')}</p><table style="width:100%;border-collapse:collapse"><thead><tr><th style="text-align:left;border:1px solid #d0d5dd;padding:7px">Date</th><th style="text-align:left;border:1px solid #d0d5dd;padding:7px">Invoice</th><th style="text-align:left;border:1px solid #d0d5dd;padding:7px">Vehicle</th><th style="text-align:right;border:1px solid #d0d5dd;padding:7px">Total</th><th style="text-align:right;border:1px solid #d0d5dd;padding:7px">Paid</th><th style="text-align:right;border:1px solid #d0d5dd;padding:7px">Balance</th></tr></thead><tbody>${rows}</tbody></table><div style="margin:14px 0;padding:12px;background:#f2f4f7"><b>Invoice total / 账单总额：${money(total)}</b><br><b>Paid / 已付款：${money(paid)}</b><br><b style="color:#b42318">Balance due / 当前欠款：${money(balance)}</b></div>${details}<p>如有问题，请联系 ${escapeHtml(settings.phone || '')}。<br>Please contact us with any questions.</p></div>`;
+    setSendingFleetStatement(scope);
+    try {
+      await cloud.invokeFunction('zg-notify', { channel: 'email', type: 'email', to: email.trim(), subject: `${settings.shopName || 'Z&G AUTO REPAIR'} · ${selectedFleet.company} · ${label}`, html });
+      alert(`发送成功。\n${source.length} 张账单已发送到 ${email.trim()}。\n当前欠款：${money(balance)}`);
+    } catch (error) {
+      alert(`发送失败：${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setSendingFleetStatement(null);
+    }
+  };
+
   return <><div className="page"><div className="page-title"><div><p className="eyebrow">Fleet Management</p><h2>车队公司与司机</h2></div><div className="toolbar"><button onClick={() => openModal('driver')}>＋ 添加司机</button><button className="primary" onClick={() => openModal('fleet')}>＋ 添加车队公司</button></div></div>
     <div className="split-panels"><section className="panel"><h3>车队公司</h3><table><thead><tr><th>公司</th><th>联系人</th><th>月结</th><th /></tr></thead><tbody>{fleets.map(item => { const unpaid = ordersForFleet(item).filter(order => !order.archivedAt && order.status !== '已取消' && Number(order.balance || 0) > .009); return <tr key={item.id}><td><button type="button" className="table-link" onClick={() => canViewFleetFinance && openFleetFinance(item)}><b>{item.company}</b></button><small>{item.phone}</small>{canViewFleetFinance && <small className={unpaid.length ? 'warning-text' : 'success-text'}>{unpaid.length ? `${unpaid.length} 张未付款工单` : '无未付款工单'}</small>}</td><td>{item.contact}<small>{item.billingEmail}</small></td><td>{item.terms || '现场付款'}</td><td className="actions">{canViewFleetFinance && <button className={unpaid.length ? 'primary' : 'primary-soft'} onClick={() => openFleetFinance(item)}>账务明细</button>}<button onClick={() => openModal('fleet', item)}>编辑</button><button className="danger-link" onClick={() => confirm('确定删除？') && remove('fleets', item.id)}>删除</button></td></tr>})}</tbody></table>{!fleets.length && <Empty text="尚未添加车队公司。" />}</section>
     <section className="panel"><h3>司机</h3><table><thead><tr><th>司机</th><th>公司</th><th>授权</th><th /></tr></thead><tbody>{drivers.map(item => <tr key={item.id}><td><b>{item.name}</b><small>{item.phone}</small></td><td>{item.company || '—'}</td><td>{item.authorized ? '可签字' : '仅送车'}</td><td className="actions"><button onClick={() => openModal('driver', item)}>编辑</button><button className="danger-link" onClick={() => confirm('确定删除？') && remove('drivers', item.id)}>删除</button></td></tr>)}</tbody></table>{!drivers.length && <Empty text="尚未添加司机。" />}</section></div></div>
     {selectedFleet && <div className="modal-backdrop" onMouseDown={event => event.target === event.currentTarget && setSelectedFleet(null)}><div className="modal fleet-finance-modal"><div className="modal-head"><div><p className="eyebrow">Fleet Account / 车队账务</p><h2>{selectedFleet.company}</h2><span>{selectedFleet.contact} · {selectedFleet.phone} · {selectedFleet.terms || '现场付款'}</span></div><button type="button" onClick={() => setSelectedFleet(null)}>×</button></div>
       <div className="fleet-account-summary"><div><span>车辆</span><b>{fleetVehicles.length}</b></div><div><span>全部工单</span><b>{fleetOrders.length}</b></div><div><span>累计开单</span><b>{money(fleetBilled)}</b></div><div><span>累计已付</span><b>{money(fleetPaid)}</b></div><div className={fleetBalance > .009 ? 'warning' : 'settled'}><span>当前欠款</span><b>{money(fleetBalance)}</b></div></div>
       <div className="fleet-account-toolbar"><div><button type="button" className={!showAllFleetOrders ? 'primary' : ''} onClick={() => setShowAllFleetOrders(false)}>未付款工单（{unpaidFleetOrders.length}）</button><button type="button" className={showAllFleetOrders ? 'primary' : ''} onClick={() => setShowAllFleetOrders(true)}>全部历史（{fleetOrders.length}）</button></div><b>当前列表合计：{money(visibleFleetOrders.reduce((sum, order) => sum + (showAllFleetOrders ? Number(order.total || 0) : Number(order.balance || 0)), 0))}</b></div>
+      {(can(cloud, 'customerContact') || can(cloud, 'workOrders')) && <div className="fleet-statement-actions"><button type="button" className="primary" disabled={sendingFleetStatement !== null || !unpaidFleetOrders.length} onClick={() => void sendFleetStatement('unpaid')}>{sendingFleetStatement === 'unpaid' ? '发送中…' : `一键发送未付款账单（${unpaidFleetOrders.length}）`}</button><button type="button" disabled={sendingFleetStatement !== null || !fleetOrders.length} onClick={() => void sendFleetStatement('all')}>{sendingFleetStatement === 'all' ? '发送中…' : `一键发送全部账单（${fleetOrders.filter(order => !order.archivedAt && order.status !== '已取消').length}）`}</button><small>发送到车队账单邮箱；发送前可以确认或修改收件地址。</small></div>}
       <div className="fleet-account-orders"><table><thead><tr><th>工单/日期</th><th>车辆</th><th>总价</th><th>已付</th><th>欠款</th><th /></tr></thead><tbody>{visibleFleetOrders.map(order => <tr key={order.id}><td><b>{order.number}</b><small>{order.date}</small></td><td>{order.plate || '—'}<small>{order.vehicle}</small></td><td>{money(order.total)}</td><td>{money(order.paid)}</td><td className={Number(order.balance || 0) > .009 ? 'warning-text' : 'success-text'}><b>{money(Math.max(0, Number(order.balance || 0)))}</b></td><td className="actions"><button onClick={() => { setSelectedFleet(null); setEditingOrder(order); }}>打开工单</button>{Number(order.balance || 0) > .009 && can(cloud, 'collectPayment') && <button className="primary" onClick={() => addPayment(order)}>收款</button>}</td></tr>)}</tbody></table>{!visibleFleetOrders.length && <Empty text={showAllFleetOrders ? '这个车队还没有工单记录。' : '这个车队目前没有未付款工单。'} />}</div>
     </div></div>}
   </>;
