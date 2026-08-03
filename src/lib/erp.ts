@@ -15,18 +15,25 @@ export const uid = () => crypto.randomUUID();
 export const num = (value: unknown) => Number(value || 0);
 
 export function recalculateWorkOrder(order: Partial<WorkOrder>): WorkOrder {
+  const partItems = (order.partItems || []).map((item: PartItem) => ({
+    ...item, qty: num(item.qty), cost: num(item.cost), price: num(item.price),
+    total: num(item.qty) * num(item.price), costTotal: num(item.qty) * num(item.cost),
+  }));
+  const partItemIds = new Set(partItems.map(item => item.id));
   const laborItems = (order.laborItems || []).map((item: LaborItem) => {
     const billingMode = item.billingMode === 'flat' ? 'flat' : 'hourly';
     const qty = Math.max(0, num(item.qty ?? 1));
     const hours = num(item.hours);
     const rate = num(item.rate);
     const flatAmount = num(item.flatAmount);
-    return { ...item, billingMode, qty, hours, rate, flatAmount, total: qty * (billingMode === 'flat' ? flatAmount : hours * rate) };
+    // A deleted part must never leave a linked labor charge hidden in totals.
+    // Stale links are converted to standalone labor so the charge remains
+    // visible and can be reviewed or deleted before saving.
+    const linkedPartItemId = item.linkedPartItemId && partItemIds.has(item.linkedPartItemId)
+      ? item.linkedPartItemId
+      : undefined;
+    return { ...item, linkedPartItemId, billingMode, qty, hours, rate, flatAmount, total: qty * (billingMode === 'flat' ? flatAmount : hours * rate) };
   });
-  const partItems = (order.partItems || []).map((item: PartItem) => ({
-    ...item, qty: num(item.qty), cost: num(item.cost), price: num(item.price),
-    total: num(item.qty) * num(item.price), costTotal: num(item.qty) * num(item.cost),
-  }));
   const laborTotal = laborItems.reduce((sum, item) => sum + item.total, 0);
   const partsTotal = partItems.reduce((sum, item) => sum + item.total, 0);
   const partsCost = partItems.reduce((sum, item) => sum + item.costTotal, 0);
