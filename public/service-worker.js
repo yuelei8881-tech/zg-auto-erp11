@@ -1,4 +1,4 @@
-const CACHE = 'zg-auto-erp-shell-v0909';
+const CACHE = 'zg-auto-erp-shell-v0917';
 const SHELL = ['/', '/manifest.webmanifest', '/icons/zg-auto-icon.svg'];
 self.addEventListener('install', event => { event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(SHELL))); self.skipWaiting(); });
 self.addEventListener('activate', event => {
@@ -7,7 +7,7 @@ self.addEventListener('activate', event => {
     await Promise.all(keys.filter(key => key.startsWith('zg-auto-erp-shell-') && key !== CACHE).map(key => caches.delete(key)));
     await self.clients.claim();
     const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
-    await Promise.all(windows.map(client => client.navigate('/?updated=v0.90.9')));
+    await Promise.all(windows.map(client => client.navigate('/?updated=v0.91.7')));
   })());
 });
 self.addEventListener('fetch', event => {
