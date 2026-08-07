@@ -64,3 +64,4 @@
 .top-status>b::after{content:"v0.91.7"}
 .top-status>b::after{content:"v0.91.8"}
 .top-status>b::after{content:"v0.91.9"}
+.tax-report-table tbody tr{cursor:pointer}.tax-report-table tbody tr:hover td{background:#eef5ff}.tax-report-table tbody tr td:first-child{text-decoration:underline;text-decoration-color:#98a2b3;text-underline-offset:3px}.top-status>b::after{content:"v0.92.0"}

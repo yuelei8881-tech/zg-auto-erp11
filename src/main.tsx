@@ -1289,6 +1289,24 @@ function TaxReports({ store }: ContentProps) {
     }), { orders: 0, labor: 0, parts: 0, tax: 0, outsource: 0, total: 0 });
     return { days, totals, orders };
   }, [quarter, store.workOrders]);
+  useEffect(() => {
+    const table = document.querySelector<HTMLTableElement>('.tax-report-table');
+    const body = table?.tBodies[0];
+    if (!body) return;
+    const openDetails = (event: Event) => {
+      const row = (event.target as HTMLElement).closest('tr');
+      const date = row?.cells[0]?.textContent?.trim();
+      if (!date) return;
+      const orders = report.orders.filter(order => String(order.date || '').slice(0, 10) === date);
+      const lines = orders.map(order => `<tr><td><b>${escapeHtml(order.number || '—')}</b></td><td>${escapeHtml(order.customer || order.company || '—')}<small>${escapeHtml(order.plate || '')} ${escapeHtml(order.vehicle || '')}</small></td><td>${money(order.laborTotal || 0)}</td><td>${money(order.partsTotal || 0)}</td><td>${money(order.tax || 0)}</td><td>${money(order.outsource || 0)}</td><td><b>${money(order.total || 0)}</b></td></tr>`).join('');
+      const popup = window.open('', '_blank', 'width=1100,height=760');
+      if (!popup) return alert('浏览器阻止了明细窗口，请允许本站打开弹出窗口。');
+      popup.document.write(`<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>${escapeHtml(date)} 税务明细</title><style>body{font-family:Arial,"Microsoft YaHei",sans-serif;color:#172033;padding:28px}h1{margin:0 0 5px}.sub{color:#667085;margin-bottom:22px}table{width:100%;border-collapse:collapse}th,td{border:1px solid #d8dee9;padding:10px;text-align:right}th{background:#f2f6fc}th:nth-child(-n+2),td:nth-child(-n+2){text-align:left}small{display:block;color:#667085;margin-top:4px}.actions{margin-bottom:18px}.actions button{padding:9px 16px;border:1px solid #b8c2d2;border-radius:8px;background:#fff;cursor:pointer}@media print{.actions{display:none}}</style></head><body><div class="actions"><button onclick="window.print()">打印明细</button></div><h1>${escapeHtml(date)} 每日税务明细</h1><div class="sub">Daily Sales Tax & Labor Revenue · ${orders.length} 张工单</div><table><thead><tr><th>工单</th><th>客户 / 车辆</th><th>人工</th><th>配件</th><th>销售税</th><th>外包</th><th>总额</th></tr></thead><tbody>${lines}</tbody></table></body></html>`);
+      popup.document.close();
+    };
+    body.addEventListener('click', openDetails);
+    return () => body.removeEventListener('click', openDetails);
+  }, [report.orders]);
   const exportCsv = () => {
     const rows = [
       ['Date', 'Work Orders', 'Labor Revenue', 'Parts Sales', 'Sales Tax', 'Outsource', 'Invoice Total'],
