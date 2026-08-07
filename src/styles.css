@@ -63,3 +63,4 @@
 .fleet-statement-actions{margin:0 20px 14px;padding:12px;border:1px solid #b2ccff;background:#eff4ff;border-radius:10px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}.fleet-statement-actions small{color:#475467}@media(max-width:760px){.fleet-statement-actions{margin:0 14px 12px;display:grid}.fleet-statement-actions button{width:100%}}
 .top-status>b::after{content:"v0.91.7"}
 .top-status>b::after{content:"v0.91.8"}
+.top-status>b::after{content:"v0.91.9"}
