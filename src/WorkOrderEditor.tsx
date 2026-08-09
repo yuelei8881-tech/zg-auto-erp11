@@ -254,7 +254,7 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, w
         });
       }));
     const query = repairLibrarySearch.trim().toLocaleLowerCase();
-    return [...remembered.values()].filter(item => !query || [item.name, ...item.parts.flatMap(part => [part.partNo, part.name])].some(text => String(text || '').toLocaleLowerCase().includes(query))).slice(0, 30);
+    return [...remembered.values()].filter(item => !query || [item.name, ...item.parts.flatMap(part => [part.partNo, part.name])].some(text => String(text || '').toLocaleLowerCase().includes(query)));
   }, [parts, repairLibrarySearch, servicePackages, value?.id, workOrders]);
   const selectedVehicle = vehicles.find(v => v.id === order.vehicleId);
   const vehicleOptions = useMemo(() => vehicles.map(item => ({
