@@ -114,7 +114,7 @@ export function CustomerApprovalPage({ token }: { token: string }) {
         {!!laborItems.length && <div className="approval-line-items"><h2>人工项目 / Labor</h2>{laborItems.map((item: any, index: number) => <div key={item.id || index}><span>{item.description || '人工'}{item.descriptionEn ? <small>{item.descriptionEn}</small> : null}</span><b>{money(item.total)}</b></div>)}</div>}
         {!!partItems.length && <div className="approval-line-items"><h2>配件项目 / Parts</h2>{partItems.map((item: any, index: number) => <div key={item.id || index}><span>{item.name || item.partNo || '配件'}{item.nameEn ? <small>{item.nameEn}</small> : null}</span><b>{Number(item.qty || 0)} × {money(item.price)}</b></div>)}</div>}
 
-        <div className="approval-total-breakdown"><span>人工 / Labor <b>{money(order.laborTotal)}</b></span><span>配件 / Parts <b>{money(order.partsTotal)}</b></span><span>税费 / Tax <b>{money(order.tax)}</b></span><strong>总计 / Total <b>{money(order.total)}</b></strong></div>
+        <div className="approval-total-breakdown"><span>人工 / Labor <b>{money(order.laborTotal)}</b></span><span>配件 / Parts <b>{money(order.partsTotal)}</b></span>{Number(order.outsource || 0) > 0 && <span>{order.outsourceDescription ? `外包：${order.outsourceDescription}` : '外包 / Outsource'} <b>{money(order.outsource)}</b></span>}<span>税费 / Tax <b>{money(order.tax)}</b></span><strong>总计 / Total <b>{money(order.total)}</b></strong></div>
       </section>}
 
       {finished ? <div className={data.status === 'approved' ? 'approval-result approved' : 'approval-result rejected'}>

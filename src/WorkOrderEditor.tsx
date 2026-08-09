@@ -947,6 +947,7 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, w
     </section>
 
     {canViewFinancials && <section className="form-section totals-section"><div><div className="form-grid four compact">
+      <label>外包项目名称（可选）<input value={order.outsourceDescription || ''} placeholder="例如：四轮定位、拖车、玻璃安装" onChange={e => patch({ outsourceDescription: e.target.value })} /></label>
       <label>外包费用<input type="number" inputMode="decimal" step="0.01" value={editableNumber(order.outsource)} onChange={e => patch({ outsource: Number(e.target.value) })} /></label>
       <label>折扣<input type="number" inputMode="decimal" step="0.01" value={editableNumber(order.discount)} onChange={e => patch({ discount: Number(e.target.value) })} /></label>
       <label>配件销售税率 %（人工不计税）<input type="number" inputMode="decimal" step="0.01" value={editableNumber(order.taxRate)} onChange={e => patch({ taxRate: Number(e.target.value) })} /></label>

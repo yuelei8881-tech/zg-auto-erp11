@@ -18,6 +18,7 @@ import { printDocumentV077 } from './printDocument';
 import { printRepairHistory } from './printRepairHistory';
 import { PublicWebsite } from './PublicWebsite';
 import './styles.css';
+import './version.css';
 import './v0763.css';
 import './extra.css';
 import './v0770.css';
