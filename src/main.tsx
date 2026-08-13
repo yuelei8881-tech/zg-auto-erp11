@@ -389,6 +389,19 @@ function App({ cloud }: { cloud: CloudSession }) {
     alert('作废归档申请已提交。第二人批准后会标记作废，但原始工单和修改记录永久保留。');
   };
 
+  const applyPaymentCorrection = async (payment: Payment, proposed: Payment, approvalLabel: string) => {
+    const order = store.workOrders.find(item => item.id === payment.workOrderId);
+    if (!order) throw new Error('关联工单不存在，无法修改收款。');
+    const otherPaid = store.payments.filter(item => item.workOrderId === order.id && item.id !== payment.id && !item.archivedAt).reduce((sum, item) => sum + Number(item.amount || 0), 0);
+    const paid = Math.round((otherPaid + Number(proposed.amount || 0)) * 100) / 100;
+    const recalculated = recalculateWorkOrder({ ...order, paid });
+    const reopened = recalculated.balance > 0.009 && order.status === '已交车' ? recalculateWorkOrder({ ...recalculated, status: '已完成', workflowStage: '完工待结账' }) : recalculated;
+    await persist('payments', proposed);
+    await persist('workOrders', reopened);
+    await writeChangeLog(reopened, `${approvalLabel}收款更正`, `收款由 ${money(payment.amount)} 更正为 ${money(proposed.amount)}；修改人 ${actorName}。原因：${proposed.correctionReason || '未填写'}`, order, reopened);
+    return reopened;
+  };
+
   const requestPaymentCorrection = async (payment: Payment) => {
     if (store.approvalRequests.some(item => item.paymentId === payment.id && item.type === '收款更正' && item.status === '待授权')) return alert('这笔收款已经有待处理的双人审核申请。');
     const rawAmount = prompt(`收款更正申请\n工单：${payment.workOrderNumber}\n当前实收：${money(payment.amount)}\n\n请输入更正后的实收金额；输入 0 表示作废：`, String(payment.amount));
@@ -399,8 +412,18 @@ function App({ cloud }: { cloud: CloudSession }) {
     const reason = prompt('请输入更正原因（必填）：', '收款录入错误');
     if (!reason?.trim()) return;
     const proposedPayment: Payment = { ...payment, amount, method, splits: undefined, status: amount <= 0 ? '已作废' : '已更正', originalAmount: payment.originalAmount ?? payment.amount, correctedAt: new Date().toISOString(), correctedBy: actorName, correctionReason: reason.trim(), archivedAt: amount <= 0 ? new Date().toISOString() : undefined };
+    if (Number(payment.amount || 0) < 10) {
+      if (!confirm(`这笔入账低于 $10，可由当前账号单人审批修改。\n\n工单：${payment.workOrderNumber}\n原实收：${money(payment.amount)}\n更正后：${money(amount)}\n原因：${reason.trim()}\n\n确认立即执行？`)) return;
+      try {
+        const reopened = await applyPaymentCorrection(payment, proposedPayment, '单人审批');
+        alert(`小额收款已由当前账号审批并更正为 ${money(proposedPayment.amount)}。${reopened.balance > 0.009 ? `工单已重新打开，当前欠款 ${money(reopened.balance)}。` : '工单仍为结清状态。'}`);
+      } catch (error) {
+        alert(`小额收款修改失败：${error instanceof Error ? error.message : error}`);
+      }
+      return;
+    }
     await requestApproval({ workOrderId: payment.workOrderId, workOrderNumber: payment.workOrderNumber, type: '收款更正', reason: reason.trim(), oldValue: payment.amount, newValue: amount, paymentId: payment.id, proposedPayment });
-    alert('收款更正申请已提交。必须由另一位有审核权限的员工批准后才会生效。');
+    alert('这笔入账为 $10 或以上，收款更正申请已提交。必须由另一位有审核权限的员工批准后才会生效。');
   };
 
   const approveRequest = async (request: ApprovalRequest) => {
@@ -418,14 +441,9 @@ function App({ cloud }: { cloud: CloudSession }) {
       const order = store.workOrders.find(item => item.id === request.workOrderId);
       if (!payment || !proposed || !order) return alert('收款更正资料不完整，无法批准。');
       if (!confirm(`批准收款更正？\n工单：${request.workOrderNumber}\n原实收：${money(payment.amount)}\n更正后：${money(proposed.amount)}\n申请人：${request.requestedBy}\n原因：${request.reason}`)) return;
-      const otherPaid = store.payments.filter(item => item.workOrderId === order.id && item.id !== payment.id && !item.archivedAt).reduce((sum, item) => sum + Number(item.amount || 0), 0);
-      const paid = Math.round((otherPaid + Number(proposed.amount || 0)) * 100) / 100;
-      const recalculated = recalculateWorkOrder({ ...order, paid });
-      const reopened = recalculated.balance > 0.009 && order.status === '已交车' ? recalculateWorkOrder({ ...recalculated, status: '已完成', workflowStage: '完工待结账' }) : recalculated;
-      await persist('payments', proposed);
-      await persist('workOrders', reopened);
+      const reopened = await applyPaymentCorrection(payment, proposed, '双人授权');
       await persist('approvalRequests', { ...request, status: '已执行', approvedBy: actorName, approvedById: cloud.user.id, approvedAt: new Date().toISOString() });
-      await writeChangeLog(reopened, '双人授权收款更正', `收款由 ${money(payment.amount)} 更正为 ${money(proposed.amount)}；申请人 ${request.requestedBy}，批准人 ${actorName}。原因：${request.reason}`, order, reopened);
+      await writeChangeLog(reopened, '双人授权批准记录', `申请人 ${request.requestedBy}，批准人 ${actorName}。`, order, reopened);
       return alert(`收款已更正为 ${money(proposed.amount)}。${reopened.balance > 0.009 ? `工单已重新打开，当前欠款 ${money(reopened.balance)}。` : '工单仍为结清状态。'}`);
     }
     if (request.type === '支出') {
