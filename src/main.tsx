@@ -412,18 +412,19 @@ function App({ cloud }: { cloud: CloudSession }) {
     const reason = prompt('请输入更正原因（必填）：', '收款录入错误');
     if (!reason?.trim()) return;
     const proposedPayment: Payment = { ...payment, amount, method, splits: undefined, status: amount <= 0 ? '已作废' : '已更正', originalAmount: payment.originalAmount ?? payment.amount, correctedAt: new Date().toISOString(), correctedBy: actorName, correctionReason: reason.trim(), archivedAt: amount <= 0 ? new Date().toISOString() : undefined };
-    if (Number(payment.amount || 0) < 10) {
-      if (!confirm(`这笔入账低于 $10，可由当前账号单人审批修改。\n\n工单：${payment.workOrderNumber}\n原实收：${money(payment.amount)}\n更正后：${money(amount)}\n原因：${reason.trim()}\n\n确认立即执行？`)) return;
+    const correctionDifference = Math.round(Math.abs(Number(payment.amount || 0) - amount) * 100) / 100;
+    if (correctionDifference < 10) {
+      if (!confirm(`本次收款修改浮动为 ${money(correctionDifference)}，低于 $10，无需审批。\n\n工单：${payment.workOrderNumber}\n原实收：${money(payment.amount)}\n更正后：${money(amount)}\n原因：${reason.trim()}\n\n确认立即修改？`)) return;
       try {
-        const reopened = await applyPaymentCorrection(payment, proposedPayment, '单人审批');
-        alert(`小额收款已由当前账号审批并更正为 ${money(proposedPayment.amount)}。${reopened.balance > 0.009 ? `工单已重新打开，当前欠款 ${money(reopened.balance)}。` : '工单仍为结清状态。'}`);
+        const reopened = await applyPaymentCorrection(payment, proposedPayment, '小额免审批');
+        alert(`收款已免审批更正为 ${money(proposedPayment.amount)}，修改浮动 ${money(correctionDifference)}。${reopened.balance > 0.009 ? `工单已重新打开，当前欠款 ${money(reopened.balance)}。` : '工单仍为结清状态。'}`);
       } catch (error) {
         alert(`小额收款修改失败：${error instanceof Error ? error.message : error}`);
       }
       return;
     }
     await requestApproval({ workOrderId: payment.workOrderId, workOrderNumber: payment.workOrderNumber, type: '收款更正', reason: reason.trim(), oldValue: payment.amount, newValue: amount, paymentId: payment.id, proposedPayment });
-    alert('这笔入账为 $10 或以上，收款更正申请已提交。必须由另一位有审核权限的员工批准后才会生效。');
+    alert(`本次收款修改浮动为 ${money(correctionDifference)}，达到 $10，已提交双人审批。必须由另一位有审核权限的员工批准后才会生效。`);
   };
 
   const approveRequest = async (request: ApprovalRequest) => {
