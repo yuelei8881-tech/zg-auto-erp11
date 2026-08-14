@@ -228,9 +228,11 @@ function App({ cloud }: { cloud: CloudSession }) {
     const old = store.workOrders.find(item => item.id === order.id);
     const oldComputed = old ? recalculateWorkOrder({ ...old, settlementTotal: undefined }) : undefined;
     const discountNeedsApproval = Number(order.discount || 0) !== Number(old?.discount || 0);
-    const newHasOverride = rawOrder.settlementTotal !== undefined && Math.abs(Number(rawOrder.settlementTotal) - computedOrder.total) > 0.009;
     const oldHasOverride = !!old && old.settlementTotal !== undefined && Math.abs(Number(old.settlementTotal) - Number(oldComputed?.total || 0)) > 0.009;
-    const settlementNeedsApproval = newHasOverride && (!oldHasOverride || Number(rawOrder.settlementTotal) !== Number(old?.settlementTotal));
+    const newSettlementAdjustment = rawOrder.settlementTotal === undefined ? 0 : Number(rawOrder.settlementTotal) - computedOrder.total;
+    const oldSettlementAdjustment = old?.settlementTotal === undefined ? 0 : Number(old.settlementTotal) - Number(oldComputed?.total || 0);
+    const settlementAdjustmentDifference = Math.round(Math.abs(newSettlementAdjustment - oldSettlementAdjustment) * 100) / 100;
+    const settlementNeedsApproval = settlementAdjustmentDifference > 10;
     // Payment totals are controlled by the payment ledger. An editor that was
     // opened before a payment must never be allowed to write an older `paid`
     // value back over the settled work order.
@@ -247,7 +249,11 @@ function App({ cloud }: { cloud: CloudSession }) {
       ...order, paid: authoritativePaid, paymentMethod: authoritativePaymentMethod, billingDueDate: authoritativeBillingDueDate,
       status: deliveredOnServer ? '已交车' : order.status, workflowStage: deliveredOnServer ? '已结账' : order.workflowStage,
     });
-    const safeOrder = recalculateWorkOrder({ ...currentOrder, discount: old?.discount || 0, settlementTotal: oldHasOverride ? old?.settlementTotal : undefined });
+    const safeOrder = recalculateWorkOrder({
+      ...currentOrder,
+      discount: discountNeedsApproval ? old?.discount || 0 : currentOrder.discount,
+      settlementTotal: settlementNeedsApproval ? (oldHasOverride ? old?.settlementTotal : undefined) : currentOrder.settlementTotal,
+    });
     const oldUsage = usageMap(old && old.status !== '已取消' ? old : undefined);
     const newUsage = usageMap(order.status !== '已取消' ? order : undefined);
     const partChanges: Array<{ part: Part; nextQty: number; delta: number }> = [];
@@ -272,7 +278,7 @@ function App({ cloud }: { cloud: CloudSession }) {
       await persist('workOrders', { ...savedOrder, inventoryCommitted: savedOrder.status !== '已取消' });
       await writeChangeLog(savedOrder, old ? '修改工单' : '新建工单', old ? '工单内容已更新并保存到服务器' : '工单已建立并保存到服务器', old, savedOrder);
       if (discountNeedsApproval) await requestApproval({ workOrderId: order.id, workOrderNumber: order.number, type: '工单折扣', reason: `折扣由 ${money(old?.discount || 0)} 调整为 ${money(order.discount)}`, oldValue: old?.discount || 0, newValue: order.discount, proposedOrder: savedOrder });
-      if (settlementNeedsApproval) await requestApproval({ workOrderId: order.id, workOrderNumber: order.number, type: '实际结账金额', reason: `实际结账金额申请调整为 ${money(order.settlementTotal)}`, oldValue: old?.settlementTotal ?? order.total, newValue: order.settlementTotal, proposedOrder: savedOrder });
+      if (settlementNeedsApproval) await requestApproval({ workOrderId: order.id, workOrderNumber: order.number, type: '实际结账金额', reason: `实际结账金额申请调整为 ${money(order.settlementTotal ?? computedOrder.total)}；修改浮动 ${money(settlementAdjustmentDifference)}`, oldValue: old?.settlementTotal ?? oldComputed?.total ?? computedOrder.total, newValue: order.settlementTotal ?? computedOrder.total, proposedOrder: savedOrder });
       if (keepOpen) setEditingOrder(savedOrder);
       else { setEditingOrder(null); setPage('workOrders'); }
       alert(keepOpen ? `工单 ${order.number} 当前进度已保存，可以继续填写。` : discountNeedsApproval || settlementNeedsApproval ? `工单 ${order.number} 已保存到服务器；折扣/结账金额将在第二人授权后生效。` : `工单 ${order.number} 已保存到正式服务器，其他账号会自动同步。`);
