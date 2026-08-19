@@ -91,7 +91,16 @@ export async function openCloudSession(user: User): Promise<CloudSession> {
     // page to keep financial totals and historical records complete.
     const data: Array<{ module: string; record_id: string; payload: JsonValue; updated_at: string }> = [];
     const pageSize = 1000;
-    for (let from = 0; ; from += pageSize) {
+    const { count, error: countError } = await client
+      .from('zg_erp_records')
+      .select('record_id', { count: 'exact', head: true })
+      .eq('organization_id', organizationId);
+    if (countError) throw countError;
+    const pageCount = Math.max(1, Math.ceil(Number(count || 0) / pageSize));
+    // Pages are independent. Loading them concurrently prevents every extra
+    // 1,000 historical records from adding another full network round trip.
+    const pages = await Promise.all(Array.from({ length: pageCount }, async (_, pageIndex) => {
+      const from = pageIndex * pageSize;
       const { data: page, error } = await client
         .from('zg_erp_records')
         .select('module, record_id, payload, updated_at')
@@ -100,10 +109,9 @@ export async function openCloudSession(user: User): Promise<CloudSession> {
         .order('record_id', { ascending: false })
         .range(from, from + pageSize - 1);
       if (error) throw error;
-      const rows = (page || []) as typeof data;
-      data.push(...rows);
-      if (rows.length < pageSize) break;
-    }
+      return (page || []) as typeof data;
+    }));
+    pages.forEach(page => data.push(...page));
     const store: CloudStore = {};
     for (const item of data) {
       const module = String(item.module);
@@ -118,10 +126,13 @@ export async function openCloudSession(user: User): Promise<CloudSession> {
     const now = Date.now();
     const missingPaths = paths.filter(path => !evidenceUrlCache.has(path) || (evidenceUrlCache.get(path)?.expiresAt || 0) <= now);
     if (missingPaths.length) {
-      const { data: signedRows, error: signedError } = await client.storage.from('zg-evidence').createSignedUrls(missingPaths, 3600);
-      if (!signedError) {
-        (signedRows || []).forEach(item => evidenceUrlCache.set(String(item.path), { url: String(item.signedUrl || ''), expiresAt: now + 50 * 60 * 1000 }));
-      }
+      // Keep storage requests bounded and concurrent. A single very large
+      // signing request becomes noticeably slow once years of photos exist.
+      const chunks = Array.from({ length: Math.ceil(missingPaths.length / 100) }, (_, index) => missingPaths.slice(index * 100, index * 100 + 100));
+      const signedPages = await Promise.all(chunks.map(paths => client.storage.from('zg-evidence').createSignedUrls(paths, 3600)));
+      signedPages.forEach(({ data: signedRows, error: signedError }) => {
+        if (!signedError) (signedRows || []).forEach(item => evidenceUrlCache.set(String(item.path), { url: String(item.signedUrl || ''), expiresAt: now + 50 * 60 * 1000 }));
+      });
     }
     storedPhotos.forEach(photo => { photo.dataUrl = evidenceUrlCache.get(String(photo.storagePath))?.url || ''; });
     return store;

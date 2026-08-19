@@ -85,7 +85,7 @@ const quickRepairItems: Array<{ name: string; hours: number }> = [
 ];
 const paymentMethods = ['未记录', '现金', '刷卡', '银行转账 / ACH', '支票', 'Zelle', '扫码支付', '在线付款', MONTHLY_PAYMENT_METHOD, '其他'];
 
-async function compressEvidence(file: File): Promise<string> {
+async function compressEvidence(file: File): Promise<Blob> {
   const source = await new Promise<string>((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve(String(reader.result));
@@ -100,11 +100,12 @@ async function compressEvidence(file: File): Promise<string> {
   const canvas = document.createElement('canvas');
   canvas.width = Math.max(1, Math.round(image.width * scale)); canvas.height = Math.max(1, Math.round(image.height * scale));
   canvas.getContext('2d')?.drawImage(image, 0, 0, canvas.width, canvas.height);
+  const encode = (quality: number) => new Promise<Blob>((resolve, reject) => canvas.toBlob(blob => blob ? resolve(blob) : reject(new Error('照片压缩失败。')), 'image/jpeg', quality));
   let quality = 0.68;
-  let compressed = canvas.toDataURL('image/jpeg', quality);
-  while (compressed.length > 600_000 && quality > 0.42) {
+  let compressed = await encode(quality);
+  while (compressed.size > 450_000 && quality > 0.42) {
     quality -= 0.08;
-    compressed = canvas.toDataURL('image/jpeg', quality);
+    compressed = await encode(quality);
   }
   return compressed;
 }
@@ -727,16 +728,22 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, w
     try {
       const additions: EvidencePhoto[] = [];
       const failedFiles: string[] = [];
-      for (const file of Array.from(files)) {
-        if (!file.type.startsWith('image/')) continue;
-        const id = uid();
-        try {
-          const compressed = await compressEvidence(file);
-          const blob = await (await fetch(compressed)).blob();
-          const uploaded = await cloud.uploadEvidencePhoto(order.id, id, blob);
-          additions.push({ id, category: forcedCategory || evidenceCategory, dataUrl: uploaded.dataUrl, storagePath: uploaded.storagePath, fileName: file.name, capturedAt: new Date().toISOString(), capturedBy: currentUser });
-        } catch { failedFiles.push(file.name); }
-      }
+      const pending = Array.from(files).filter(file => file.type.startsWith('image/'));
+      // Two workers keep mobile memory under control while avoiding the old
+      // one-photo-at-a-time upload bottleneck.
+      let nextIndex = 0;
+      const worker = async () => {
+        while (nextIndex < pending.length) {
+          const file = pending[nextIndex++];
+          const id = uid();
+          try {
+            const blob = await compressEvidence(file);
+            const uploaded = await cloud.uploadEvidencePhoto(order.id, id, blob);
+            additions.push({ id, category: forcedCategory || evidenceCategory, dataUrl: uploaded.dataUrl, storagePath: uploaded.storagePath, fileName: file.name, capturedAt: new Date().toISOString(), capturedBy: currentUser });
+          } catch { failedFiles.push(file.name); }
+        }
+      };
+      await Promise.all(Array.from({ length: Math.min(2, pending.length) }, worker));
       if (failedFiles.length) alert(`${failedFiles.length} 张照片上传失败，未写入工单。请检查网络后重新选择：\n${failedFiles.join('\n')}`);
       if (!additions.length) return;
       const evidencePhotos = [...(order.evidencePhotos || []), ...additions];
