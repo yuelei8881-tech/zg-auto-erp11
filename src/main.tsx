@@ -891,6 +891,8 @@ function greetingForNow() {
 function Dashboard({ store, setPage, setEditingOrder, cloud, actorName, editOwnProfile }: ContentProps) {
   const metrics = useMemo(() => dashboardMetrics(store), [store]);
   const [selectedMetric, setSelectedMetric] = useState<string | null>(null);
+  const [trendMode, setTrendMode] = useState<'daily' | 'monthly'>('daily');
+  const financialTrend = useMemo(() => buildFinancialTrend(store, trendMode), [store, trendMode]);
   const laToday = losAngelesDateKey(new Date().toISOString());
   const laMonth = laToday.slice(0, 7);
   const validOrders = useMemo(() => store.workOrders.filter(item => item.status !== '已取消'), [store.workOrders]);
@@ -964,6 +966,7 @@ function Dashboard({ store, setPage, setEditingOrder, cloud, actorName, editOwnP
     <div className="dashboard-actions">{can(cloud, 'workOrders') && <button onClick={() => setPage('workOrders')}><b>维修工单</b><span>接车、检查、施工与结账</span></button>}{can(cloud, 'inventory') && <button onClick={() => setPage('parts')}><b>库存查询</b><span>配件编号、名称、库存与进货价</span></button>}{can(cloud, 'finance') && <button onClick={() => setPage('finance')}><b>财务收款</b><span>收入、支出与欠款</span></button>}{can(cloud, 'campaigns') && <button onClick={() => setPage('campaigns')}><b>活动与保修</b><span>优惠活动和车辆保修</span></button>}</div>
     {showFinance ? <div className="kpi-grid"><Kpi label="今日开单营业额" value={money(metrics.todaySales)} tone="blue" onClick={() => setSelectedMetric('todaySales')} hint="点击查看金额组成" /><Kpi label="今日实收" value={money(metrics.todayReceived)} tone="green" onClick={() => setSelectedMetric('todayReceived')} hint="点击查看收款组合明细" /><Kpi label="今日毛利润" value={money(metrics.todayGross)} tone="purple" onClick={() => setSelectedMetric('todayGross')} hint="点击查看金额组成" /><Kpi label="未收款总额" value={money(metrics.receivables)} tone="orange" onClick={() => setSelectedMetric('receivables')} hint="点击查看欠款工单" /><Kpi label="本月营业额" value={money(metrics.monthSales)} onClick={() => setSelectedMetric('monthSales')} hint="点击查看金额组成" /><Kpi label="本月实收" value={money(metrics.monthReceived)} onClick={() => setSelectedMetric('monthReceived')} hint="点击查看收款明细" /><Kpi label="本月支出" value={money(metrics.monthExpenses)} onClick={() => setSelectedMetric('monthExpenses')} hint="点击查看支出明细" /><Kpi label="本月净经营收益" value={money(metrics.monthNet)} onClick={() => setSelectedMetric('monthNet')} hint="点击查看计算组成" /></div> : <div className="kpi-grid technician-kpis"><Kpi label="分配给我的工单" value={String(visibleOrders.length)} tone="blue" /><Kpi label="等待检查" value={String(visibleOrders.filter(item => item.status === '等待检查').length)} /><Kpi label="维修中" value={String(visibleOrders.filter(item => item.status === '维修中').length)} tone="purple" /><Kpi label="今日完成" value={String(visibleOrders.filter(item => item.date === today() && item.status === '已完成').length)} tone="green" /></div>}
     {showFinance && <div className="kpi-grid today-expense-kpi"><Kpi label="今日支出（洛杉矶时间）" value={money(metrics.todayExpenses)} tone="orange" onClick={() => setSelectedMetric('todayExpenses')} hint="点击查看支出明细" /><Kpi label="今日配件支出总额" value={money(metrics.todayPartsExpenses)} tone="purple" onClick={() => setSelectedMetric('todayPartsExpenses')} hint="点击查看配件支出" /><Kpi label="累计账面余额（实收－支出）" value={money(metrics.monthBookBalance)} tone="green" onClick={() => setSelectedMetric('monthBookBalance')} hint="点击查看现金、转账、POS等余额" /></div>}
+    {showFinance && <FinancialTrendChart rows={financialTrend} mode={trendMode} onModeChange={setTrendMode} />}
     <div className="dashboard-grid"><section className="panel wide"><div className="section-title"><h3>最近工单</h3><button onClick={() => setPage('workOrders')}>查看全部</button></div><table><thead><tr><th>工单</th><th>客户/车辆</th><th>状态</th>{showFinance && <><th>总价</th><th>欠款</th></>}</tr></thead><tbody>{recent.map(order => <tr key={order.id}><td><b>{order.number}</b><small>{order.date}</small></td><td>{order.customer}<small>{order.plate} · {order.vehicle}</small></td><td><Status value={order.status} /></td>{showFinance && <><td>{money(order.total)}</td><td className={order.balance > 0 ? 'warning-text' : ''}>{money(order.balance)}</td></>}</tr>)}</tbody></table>{!recent.length && <Empty text="还没有分配给您的工单。" />}</section>
       <section className="panel"><h3>今日车间</h3><div className="count-list"><div><span>等待批准</span><b>{visibleOrders.filter(item => item.status === '等待批准').length}</b></div><div><span>等待配件</span><b>{visibleOrders.filter(item => item.status === '等待配件').length}</b></div><div><span>维修中</span><b>{visibleOrders.filter(item => item.status === '维修中').length}</b></div><div><span>今日完成</span><b>{visibleOrders.filter(item => item.date === today() && item.status === '已完成').length}</b></div></div></section>
       {can(cloud, 'inventory') && <section className="panel"><h3>库存提醒</h3><div className="count-list"><div><span>低库存配件</span><b className="warning-text">{store.parts.filter(item => item.qty <= item.minimum).length}</b></div><div><span>库存品种</span><b>{store.parts.length}</b></div><div><span>库存成本</span><b>{money(store.parts.reduce((sum, item) => sum + item.qty * item.cost, 0))}</b></div></div><button className="full" onClick={() => setPage('parts')}>打开库存中心</button></section>}
@@ -1611,6 +1614,46 @@ function normalizeText(value: unknown) {
 
 function ListPage({ title, subtitle, action, onAction, children }: { title: string; subtitle: string; action: string; onAction: () => void; children: React.ReactNode }) { return <div className="page"><div className="page-title"><div><p className="eyebrow">Z&G AUTO ERP</p><h2>{title}</h2><p>{subtitle}</p></div><button className="primary" onClick={onAction}>{action}</button></div><section className="panel">{children}</section></div>; }
 function Kpi({ label, value, tone = '', onClick, hint }: { label: string; value: string; tone?: string; onClick?: () => void; hint?: string }) { const content = <><span>{label}</span><b>{value}</b>{hint && <small>{hint}</small>}</>; return onClick ? <button type="button" className={`kpi kpi-button ${tone}`} onClick={onClick}>{content}</button> : <div className={`kpi ${tone}`}>{content}</div>; }
+
+type FinancialTrendRow = { key: string; label: string; sales: number; received: number; expenses: number; net: number };
+function buildFinancialTrend(store: AppStore, mode: 'daily' | 'monthly'): FinancialTrendRow[] {
+  const current = losAngelesDateKey(new Date().toISOString());
+  const keys: string[] = [];
+  if (mode === 'daily') {
+    const anchor = new Date(`${current}T12:00:00`);
+    for (let offset = 29; offset >= 0; offset--) {
+      const date = new Date(anchor); date.setDate(anchor.getDate() - offset);
+      keys.push(`${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`);
+    }
+  } else {
+    const [year, month] = current.split('-').map(Number);
+    for (let offset = 11; offset >= 0; offset--) {
+      const date = new Date(year, month - 1 - offset, 1);
+      keys.push(`${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`);
+    }
+  }
+  const rows = new Map(keys.map(key => [key, { key, label: mode === 'daily' ? key.slice(5).replace('-', '/') : key.slice(2).replace('-', '/'), sales: 0, received: 0, expenses: 0, net: 0 }]));
+  const period = (value: string) => { const key = losAngelesDateKey(value); return mode === 'daily' ? key : key.slice(0, 7); };
+  store.workOrders.filter(item => item.status !== '已取消').forEach(item => { const row = rows.get(period(item.date)); if (row) row.sales += Number(item.total || 0); });
+  store.payments.forEach(item => { const row = rows.get(period(item.date)); if (row) row.received += Number(item.amount || 0); });
+  store.expenses.forEach(item => { const row = rows.get(period(item.date)); if (row) row.expenses += Number(item.amount || 0); });
+  return [...rows.values()].map(row => ({ ...row, net: row.received - row.expenses }));
+}
+
+function FinancialTrendChart({ rows, mode, onModeChange }: { rows: FinancialTrendRow[]; mode: 'daily' | 'monthly'; onModeChange: (mode: 'daily' | 'monthly') => void }) {
+  const width = 900, height = 290, left = 64, right = 20, top = 22, bottom = 42;
+  const values = rows.flatMap(row => [row.sales, row.received, row.expenses, row.net]);
+  const min = Math.min(0, ...values), max = Math.max(1, ...values);
+  const range = Math.max(1, max - min);
+  const x = (index: number) => left + index * ((width - left - right) / Math.max(1, rows.length - 1));
+  const y = (value: number) => top + (max - value) / range * (height - top - bottom);
+  const pathFor = (field: keyof Pick<FinancialTrendRow, 'sales' | 'received' | 'expenses' | 'net'>) => rows.map((row, index) => `${index ? 'L' : 'M'}${x(index).toFixed(1)},${y(row[field]).toFixed(1)}`).join(' ');
+  const latest = rows.at(-1), previous = rows.at(-2);
+  const change = previous && latest ? latest.net - previous.net : 0;
+  const percent = previous && Math.abs(previous.net) > .009 ? change / Math.abs(previous.net) * 100 : null;
+  const ticks = Array.from({ length: 5 }, (_, index) => max - index * range / 4);
+  return <section className="panel finance-trend-panel"><div className="section-title"><div><h3>财务业绩趋势</h3><p>{mode === 'daily' ? '最近30天每日汇总' : '最近12个月月度汇总'} · 洛杉矶时间</p></div><div className="trend-mode-tabs"><button className={mode === 'daily' ? 'primary' : ''} onClick={() => onModeChange('daily')}>每日</button><button className={mode === 'monthly' ? 'primary' : ''} onClick={() => onModeChange('monthly')}>每月</button></div></div><div className="trend-summary"><div><span>本期营业额</span><b>{money(latest?.sales || 0)}</b></div><div><span>本期实收</span><b>{money(latest?.received || 0)}</b></div><div><span>本期支出</span><b>{money(latest?.expenses || 0)}</b></div><div className={change >= 0 ? 'trend-up' : 'trend-down'}><span>净现金较上期</span><b>{change >= 0 ? '↑' : '↓'} {money(Math.abs(change))}{percent == null ? '' : ` (${Math.abs(percent).toFixed(1)}%)`}</b></div></div><div className="trend-legend"><span className="sales">营业额</span><span className="received">实收</span><span className="expenses">支出</span><span className="net">净现金（实收－支出）</span></div><div className="trend-chart-scroll"><svg className="finance-trend-chart" viewBox={`0 0 ${width} ${height}`} role="img" aria-label="财务业绩趋势曲线图">{ticks.map((tick, index) => <g key={index}><line x1={left} x2={width - right} y1={y(tick)} y2={y(tick)} className="trend-grid-line" /><text x={left - 8} y={y(tick) + 4} textAnchor="end">{Math.abs(tick) >= 1000 ? `$${(tick / 1000).toFixed(1)}k` : `$${tick.toFixed(0)}`}</text></g>)}<line x1={left} x2={width - right} y1={y(0)} y2={y(0)} className="trend-zero-line" /><path d={pathFor('sales')} className="trend-line sales" /><path d={pathFor('received')} className="trend-line received" /><path d={pathFor('expenses')} className="trend-line expenses" /><path d={pathFor('net')} className="trend-line net" />{rows.map((row, index) => (index % (mode === 'daily' ? 5 : 2) === 0 || index === rows.length - 1) && <text key={row.key} x={x(index)} y={height - 14} textAnchor="middle" className="trend-x-label">{row.label}</text>)}</svg></div></section>;
+}
 function Status({ value }: { value: string }) { return <span className={`status status-${value.replace(/\s/g, '')}`}>{value}</span>; }
 function Empty({ text }: { text: string }) { return <div className="empty"><b>暂无数据</b><span>{text}</span></div>; }
 
