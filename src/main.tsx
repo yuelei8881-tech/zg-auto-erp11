@@ -100,7 +100,19 @@ function App({ cloud }: { cloud: CloudSession }) {
       if (requestId !== refreshRequestId.current || mutationAtStart !== mutationGeneration.current) return;
       setStore(loaded);
     }
-    catch (error) { if (!quiet) alert(`读取服务器失败：${error instanceof Error ? error.message : error}`); }
+    catch (error) {
+      if (!quiet) {
+        const details = error instanceof Error
+          ? error.message
+          : error && typeof error === 'object'
+            ? String((error as { message?: unknown; details?: unknown; hint?: unknown; code?: unknown }).message
+              || (error as { details?: unknown }).details
+              || (error as { hint?: unknown }).hint
+              || JSON.stringify(error))
+            : String(error || '未知错误');
+        alert(`读取服务器失败：${details}`);
+      }
+    }
     finally { if (!quiet) setLoading(false); }
   };
 
