@@ -30,6 +30,39 @@ type ModalState = { type: 'customer' | 'fleet' | 'driver' | 'vehicle' | 'part' |
 const emptyStore: AppStore = { customers: [], fleets: [], drivers: [], vehicles: [], workOrders: [], parts: [], inventoryLogs: [], payments: [], expenses: [], settings: [], campaigns: [], warranties: [], servicePackages: [], approvalRequests: [], changeLogs: [] };
 const defaultSettings: ShopSettings = { id: '00000000-0000-4000-8000-000000000075', shopName: 'Z&G AUTO REPAIR', address: '319 Agostino Rd, San Gabriel, CA 91776', phone: '626-508-0888', email: '', defaultLaborRate: 165, defaultTaxRate: 9.5, invoiceTerms: 'Thank you for your business.' };
 
+const STORE_CACHE_DB = 'zg-auto-erp-cache-v1';
+function openStoreCache() {
+  return new Promise<IDBDatabase>((resolve, reject) => {
+    const request = indexedDB.open(STORE_CACHE_DB, 1);
+    request.onupgradeneeded = () => {
+      if (!request.result.objectStoreNames.contains('stores')) request.result.createObjectStore('stores');
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+async function readStoreCache(organizationId: string): Promise<CloudStore | null> {
+  try {
+    const db = await openStoreCache();
+    return await new Promise((resolve, reject) => {
+      const request = db.transaction('stores', 'readonly').objectStore('stores').get(organizationId);
+      request.onsuccess = () => resolve((request.result?.store as CloudStore | undefined) || null);
+      request.onerror = () => reject(request.error);
+    });
+  } catch { return null; }
+}
+async function writeStoreCache(organizationId: string, store: CloudStore) {
+  try {
+    const db = await openStoreCache();
+    await new Promise<void>((resolve, reject) => {
+      const transaction = db.transaction('stores', 'readwrite');
+      transaction.objectStore('stores').put({ savedAt: Date.now(), store }, organizationId);
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error);
+    });
+  } catch { /* Cache failure must never affect the authoritative server. */ }
+}
+
 const nav: Array<{ id: Page; icon: string; label: string }> = [
   { id: 'dashboard', icon: '⌂', label: '经营首页' }, { id: 'customers', icon: '👤', label: '客户管理' },
   { id: 'fleets', icon: '🚛', label: '车队与司机' }, { id: 'vehicles', icon: '🚗', label: '车辆管理' },
@@ -99,6 +132,7 @@ function App({ cloud }: { cloud: CloudSession }) {
       const loaded = normalizeStore(await cloud.loadStore());
       if (requestId !== refreshRequestId.current || mutationAtStart !== mutationGeneration.current) return;
       setStore(loaded);
+      void writeStoreCache(cloud.organizationId, loaded as unknown as CloudStore);
     }
     catch (error) {
       if (!quiet) {
@@ -117,9 +151,19 @@ function App({ cloud }: { cloud: CloudSession }) {
   };
 
   useEffect(() => {
-    void refresh();
+    let active = true;
+    void (async () => {
+      const cached = await readStoreCache(cloud.organizationId);
+      if (!active) return;
+      if (cached) {
+        setStore(normalizeStore(cached));
+        setLoading(false);
+      }
+      await refresh(Boolean(cached));
+    })();
     void cloud.listStaff().then(data => setStaffMembers(data.members.filter(item => item.status === 'active'))).catch(() => undefined);
-    return cloud.subscribe(() => { void refresh(true); });
+    const unsubscribe = cloud.subscribe(() => { void refresh(true); });
+    return () => { active = false; unsubscribe(); };
   }, [cloud.organizationId]);
 
   const settings = store.settings[0] || defaultSettings;
