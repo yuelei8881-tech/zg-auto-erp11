@@ -121,21 +121,28 @@ export async function openCloudSession(user: User): Promise<CloudSession> {
     const paths = [...new Set(storedPhotos.map(photo => String(photo.storagePath || '')).filter(Boolean))];
     const now = Date.now();
     const missingPaths = paths.filter(path => !evidenceUrlCache.has(path) || (evidenceUrlCache.get(path)?.expiresAt || 0) <= now);
+    const applyCachedPhotoUrls = () => storedPhotos.forEach(photo => {
+      photo.dataUrl = evidenceUrlCache.get(String(photo.storagePath))?.url || '';
+    });
     if (missingPaths.length) {
-      // Keep storage requests bounded and concurrent. A single very large
-      // signing request becomes noticeably slow once years of photos exist.
-      const chunks = Array.from({ length: Math.ceil(missingPaths.length / 100) }, (_, index) => missingPaths.slice(index * 100, index * 100 + 100));
-      // Photo previews are optional during initial login. If one storage
-      // request is interrupted on a phone, keep the ERP data available and
-      // simply leave those photos unsigned until the next refresh.
-      const signedPages = await Promise.allSettled(chunks.map(paths => client.storage.from('zg-evidence').createSignedUrls(paths, 3600)));
-      signedPages.forEach(result => {
-        if (result.status !== 'fulfilled') return;
-        const { data: signedRows, error: signedError } = result.value;
+      const signPaths = async (paths: string[]) => {
+        const { data: signedRows, error: signedError } = await client.storage.from('zg-evidence').createSignedUrls(paths, 3600);
         if (!signedError) (signedRows || []).forEach(item => evidenceUrlCache.set(String(item.path), { url: String(item.signedUrl || ''), expiresAt: now + 50 * 60 * 1000 }));
-      });
-    }
-    storedPhotos.forEach(photo => { photo.dataUrl = evidenceUrlCache.get(String(photo.storagePath))?.url || ''; });
+      };
+      // Only the newest photo batch may delay login. Years of historical
+      // evidence are signed after the ERP is already usable; opening a work
+      // order causes React to render the URLs that have arrived meanwhile.
+      const immediatePaths = missingPaths.slice(0, 100);
+      const backgroundPaths = missingPaths.slice(100);
+      try { await signPaths(immediatePaths); } catch { /* Core ERP data must still open. */ }
+      applyCachedPhotoUrls();
+      if (backgroundPaths.length) void (async () => {
+        for (let index = 0; index < backgroundPaths.length; index += 100) {
+          try { await signPaths(backgroundPaths.slice(index, index + 100)); } catch { /* Retry on the next refresh. */ }
+          applyCachedPhotoUrls();
+        }
+      })();
+    } else applyCachedPhotoUrls();
     return store;
   };
 
