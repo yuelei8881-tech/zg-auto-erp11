@@ -779,6 +779,7 @@ function App({ cloud }: { cloud: CloudSession }) {
       }
     }
     if (type === 'vehicle') {
+      if (!store.vehicles.some(item => item.id === row.id) && !row.createdAt) row.createdAt = new Date().toISOString();
       const plate = normalizeVehicleIdentifier(row.plate);
       const vin = normalizeVehicleIdentifier(row.vin);
       const duplicate = store.vehicles.find(item => item.id !== row.id && ((vin && normalizeVehicleIdentifier(item.vin) === vin) || (plate && normalizeVehicleIdentifier(item.plate) === plate)));
@@ -968,16 +969,25 @@ function Dashboard({ store, setPage, setEditingOrder, cloud, actorName, editOwnP
     const fleets = store.fleets.filter(isActive);
     const vehicles = store.vehicles.filter(isActive);
     const servicedVehicleIds = new Set(validOrders.map(order => order.vehicleId).filter(Boolean));
+    const newVehiclesThisMonth = vehicles.filter(vehicle => {
+      if (vehicle.createdAt) return losAngelesDateKey(vehicle.createdAt).startsWith(laMonth);
+      const plate = normalizeVehicleIdentifier(vehicle.plate);
+      const vin = normalizeVehicleIdentifier(vehicle.vin);
+      const firstOrder = validOrders
+        .filter(order => order.vehicleId === vehicle.id || (plate && normalizeVehicleIdentifier(order.plate) === plate) || (vin && normalizeVehicleIdentifier(order.vin) === vin))
+        .sort((a, b) => a.date.localeCompare(b.date))[0];
+      return Boolean(firstOrder && losAngelesDateKey(firstOrder.date).startsWith(laMonth));
+    }).length;
     return {
       customers: customers.length,
       fleets: fleets.length,
       vehicles: vehicles.length,
       servicedVehicles: vehicles.filter(vehicle => servicedVehicleIds.has(vehicle.id)).length,
+      newVehiclesThisMonth,
     };
-  }, [store.customers, store.fleets, store.vehicles, validOrders]);
-  return <div className="page"><div className="hero"><div><button type="button" className="greeting-name" onClick={() => void editOwnProfile()}><h1>{greetingForNow()}，{actorName || 'Z&G AUTO REPAIR'}</h1></button></div><div className="toolbar">{can(cloud, 'customers') && <button onClick={() => setPage('customers')}>＋ 新客户</button>}{can(cloud, 'createWorkOrders') && <button className="primary" onClick={() => setEditingOrder('new')}>＋ 新建工单</button>}</div></div>
+  }, [store.customers, store.fleets, store.vehicles, validOrders, laMonth]);
+  return <div className="page">{showFinance && <section className="relationship-overview"><div className="section-title"><div><h3>客户与车辆统计</h3><p>读取正式服务器中的有效档案，已归档资料不计入。</p></div></div><div className="kpi-grid relationship-kpis"><Kpi label="客户档案" value={String(relationshipStats.customers)} tone="blue" onClick={() => setPage('customers')} hint="点击查看客户明细" /><Kpi label="公司 / 车队" value={String(relationshipStats.fleets)} tone="purple" onClick={() => setPage('fleets')} hint="点击查看车队与司机" /><Kpi label="车辆档案" value={String(relationshipStats.vehicles)} tone="green" onClick={() => setPage('vehicles')} hint="点击查看车辆明细" /><Kpi label="本月新增车辆（新客户）" value={String(relationshipStats.newVehiclesThisMonth)} tone="blue" onClick={() => setPage('vehicles')} hint="按车辆首次录入日期统计" /><Kpi label="有维修记录车辆" value={String(relationshipStats.servicedVehicles)} tone="orange" onClick={() => setPage('vehicles')} hint="点击进入车辆维修档案" /></div></section>}<div className="hero"><div><button type="button" className="greeting-name" onClick={() => void editOwnProfile()}><h1>{greetingForNow()}，{actorName || 'Z&G AUTO REPAIR'}</h1></button></div><div className="toolbar">{can(cloud, 'customers') && <button onClick={() => setPage('customers')}>＋ 新客户</button>}{can(cloud, 'createWorkOrders') && <button className="primary" onClick={() => setEditingOrder('new')}>＋ 新建工单</button>}</div></div>
     <div className="dashboard-actions">{can(cloud, 'workOrders') && <button onClick={() => setPage('workOrders')}><b>维修工单</b><span>接车、检查、施工与结账</span></button>}{can(cloud, 'inventory') && <button onClick={() => setPage('parts')}><b>库存查询</b><span>配件编号、名称、库存与进货价</span></button>}{can(cloud, 'finance') && <button onClick={() => setPage('finance')}><b>财务收款</b><span>收入、支出与欠款</span></button>}{can(cloud, 'campaigns') && <button onClick={() => setPage('campaigns')}><b>活动与保修</b><span>优惠活动和车辆保修</span></button>}</div>
-    {showFinance && <section className="relationship-overview"><div className="section-title"><div><h3>客户与车辆统计</h3><p>读取正式服务器中的有效档案，已归档资料不计入。</p></div></div><div className="kpi-grid relationship-kpis"><Kpi label="客户档案" value={String(relationshipStats.customers)} tone="blue" onClick={() => setPage('customers')} hint="点击查看客户明细" /><Kpi label="公司 / 车队" value={String(relationshipStats.fleets)} tone="purple" onClick={() => setPage('fleets')} hint="点击查看车队与司机" /><Kpi label="车辆档案" value={String(relationshipStats.vehicles)} tone="green" onClick={() => setPage('vehicles')} hint="点击查看车辆明细" /><Kpi label="有维修记录车辆" value={String(relationshipStats.servicedVehicles)} tone="orange" onClick={() => setPage('vehicles')} hint="点击进入车辆维修档案" /></div></section>}
     {showFinance ? <div className="kpi-grid"><Kpi label="今日开单营业额" value={money(metrics.todaySales)} tone="blue" onClick={() => setSelectedMetric('todaySales')} hint="点击查看金额组成" /><Kpi label="今日实收" value={money(metrics.todayReceived)} tone="green" onClick={() => setSelectedMetric('todayReceived')} hint="点击查看收款组合明细" /><Kpi label="今日毛利润" value={money(metrics.todayGross)} tone="purple" onClick={() => setSelectedMetric('todayGross')} hint="点击查看金额组成" /><Kpi label="未收款总额" value={money(metrics.receivables)} tone="orange" onClick={() => setSelectedMetric('receivables')} hint="点击查看欠款工单" /><Kpi label="本月营业额" value={money(metrics.monthSales)} onClick={() => setSelectedMetric('monthSales')} hint="点击查看金额组成" /><Kpi label="本月实收" value={money(metrics.monthReceived)} onClick={() => setSelectedMetric('monthReceived')} hint="点击查看收款明细" /><Kpi label="本月支出" value={money(metrics.monthExpenses)} onClick={() => setSelectedMetric('monthExpenses')} hint="点击查看支出明细" /><Kpi label="本月净经营收益" value={money(metrics.monthNet)} onClick={() => setSelectedMetric('monthNet')} hint="点击查看计算组成" /></div> : <div className="kpi-grid technician-kpis"><Kpi label="分配给我的工单" value={String(visibleOrders.length)} tone="blue" /><Kpi label="等待检查" value={String(visibleOrders.filter(item => item.status === '等待检查').length)} /><Kpi label="维修中" value={String(visibleOrders.filter(item => item.status === '维修中').length)} tone="purple" /><Kpi label="今日完成" value={String(visibleOrders.filter(item => item.date === today() && item.status === '已完成').length)} tone="green" /></div>}
     {showFinance && <div className="kpi-grid today-expense-kpi"><Kpi label="今日支出（洛杉矶时间）" value={money(metrics.todayExpenses)} tone="orange" onClick={() => setSelectedMetric('todayExpenses')} hint="点击查看支出明细" /><Kpi label="今日配件支出总额" value={money(metrics.todayPartsExpenses)} tone="purple" onClick={() => setSelectedMetric('todayPartsExpenses')} hint="点击查看配件支出" /><Kpi label="累计账面余额（实收－支出）" value={money(metrics.monthBookBalance)} tone="green" onClick={() => setSelectedMetric('monthBookBalance')} hint="点击查看现金、转账、POS等余额" /></div>}
     {showFinance && <FinancialTrendChart rows={financialTrend} mode={trendMode} onModeChange={setTrendMode} />}

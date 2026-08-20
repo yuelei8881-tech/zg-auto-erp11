@@ -17,7 +17,7 @@ export type Vehicle = {
   id: string; ownerType: '个人' | '公司' | '车队'; ownerId?: string; ownerName: string;
   unit?: string; plate: string; state?: string; vin: string; year: string; make: string;
   model: string; engine?: string; color?: string; mileage?: number; driverId?: string;
-  driverName?: string; driverPhone?: string; notes?: string;
+  driverName?: string; driverPhone?: string; notes?: string; createdAt?: string;
 };
 
 export type Part = {
