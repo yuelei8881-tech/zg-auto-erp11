@@ -1,5 +1,5 @@
 import { BRAND_LOGO_SVG } from './brandLogo';
-import { escapeHtml, money } from './lib/erp';
+import { escapeHtml, money, recalculateWorkOrder } from './lib/erp';
 import type { Payment, ShopSettings, WorkOrder } from './types';
 
 const labels: Record<string, string> = {
@@ -16,6 +16,10 @@ export function printDocumentV077(
   payments: Payment[] = [],
   options: { hidePrices?: boolean } = {},
 ) {
+  // Every print entry point must use the same calculation. Some list views can
+  // briefly hold a server row whose derived totals predate settlementTotal;
+  // printing that row directly made the same invoice appear to change.
+  order = recalculateWorkOrder(order);
   if (!/^RO-\d{4}-\d+$/i.test(String(order.number || ''))) {
     alert('打印预览需要正式工单编号。请先保存工单，看到 RO-年份-编号 后再打开预览。');
     return;
@@ -24,6 +28,11 @@ export function printDocumentV077(
   const hidePrices = Boolean(options.hidePrices);
   const receipt = kind === 'Receipt';
   const showPaymentMethod = (kind === 'Invoice' || receipt) && Boolean(order.paymentMethod);
+  const grossBeforeDiscount = order.laborTotal + order.partsTotal + order.outsource + order.tax;
+  // settlementTotal is a valid final-price override. Show its effect on the
+  // document so the visible line items always add up exactly to the saved total.
+  const displayedDiscount = Math.max(0, grossBeforeDiscount - order.total);
+  const displayedSurcharge = Math.max(0, order.total - grossBeforeDiscount);
   const prefix = kind === 'Estimate' ? 'EST' : kind === 'Invoice' ? 'INV' : kind === 'Receipt' ? 'RCPT' : 'RO';
   const numberTail = order.number.replace(/^[A-Z]+-?/i, '');
   const documentNumber = `${prefix}-${numberTail}`;
@@ -56,7 +65,7 @@ export function printDocumentV077(
 <div class="section"><div class="section-title">Work Performed / 完成的维修</div><div class="text-box">${bilingual(order.workPerformed, order.workPerformedEn)}</div>${order.workTimeNote ? `<div class="work-time">Work time / 做工时间：${escapeHtml(order.workTimeNote)}</div>` : ''}</div>
 ${laborRows ? `<div class="section"><div class="line-title">Labor / 人工</div><table><thead><tr><th>Description / 项目</th><th class="n">Hours</th><th class="n">Rate</th><th class="n">Amount</th></tr></thead><tbody>${laborRows}</tbody></table></div>` : ''}
 ${partRows ? `<div class="section"><div class="line-title">Parts / 配件</div><table><thead><tr><th>Part #</th><th>Description / 名称</th><th class="n">Qty</th><th class="n">Price</th><th class="n">Amount</th></tr></thead><tbody>${partRows}</tbody></table></div>` : ''}
-<table class="totals"><tr><td>Labor</td><td class="n">${money(order.laborTotal)}</td></tr><tr><td>Parts</td><td class="n">${money(order.partsTotal)}</td></tr><tr><td>${order.outsourceDescription ? `Outsource / ${escapeHtml(order.outsourceDescription)}` : 'Outsource'}</td><td class="n">${money(order.outsource)}</td></tr><tr><td>Parts Sales Tax / 配件销售税</td><td class="n">${money(order.tax)}</td></tr><tr><td>Discount</td><td class="n">-${money(order.discount)}</td></tr><tr class="total"><td>${receipt ? 'Amount Paid' : 'Total'}</td><td class="n">${money(receipt ? order.paid : order.total)}</td></tr>${receipt ? '' : `<tr><td>Paid</td><td class="n">${money(order.paid)}</td></tr><tr><td>Balance Due</td><td class="n">${money(order.balance)}</td></tr>`}${showPaymentMethod ? `<tr><td>Payment Method / 支付方式</td><td class="n">${escapeHtml(order.paymentMethod || 'Not recorded / 未记录')}</td></tr>` : ''}</table>
+<table class="totals"><tr><td>Labor</td><td class="n">${money(order.laborTotal)}</td></tr><tr><td>Parts</td><td class="n">${money(order.partsTotal)}</td></tr><tr><td>${order.outsourceDescription ? `Outsource / ${escapeHtml(order.outsourceDescription)}` : 'Outsource'}</td><td class="n">${money(order.outsource)}</td></tr><tr><td>Parts Sales Tax / 配件销售税</td><td class="n">${money(order.tax)}</td></tr><tr><td>Discount / 结账折扣</td><td class="n">-${money(displayedDiscount)}</td></tr>${displayedSurcharge > .009 ? `<tr><td>Settlement Adjustment / 结账调整</td><td class="n">${money(displayedSurcharge)}</td></tr>` : ''}<tr class="total"><td>${receipt ? 'Amount Paid' : 'Total'}</td><td class="n">${money(receipt ? order.paid : order.total)}</td></tr>${receipt ? '' : `<tr><td>Paid</td><td class="n">${money(order.paid)}</td></tr><tr><td>Balance Due</td><td class="n">${money(order.balance)}</td></tr>`}${showPaymentMethod ? `<tr><td>Payment Method / 支付方式</td><td class="n">${escapeHtml(order.paymentMethod || 'Not recorded / 未记录')}</td></tr>` : ''}</table>
 ${paymentRows ? `<div class="section"><div class="line-title">Payment History / 付款记录（Los Angeles Time）</div><table><thead><tr><th>Date & Time / 支付时间</th><th>Method / 方式</th><th class="n">Amount / 金额</th></tr></thead><tbody>${paymentRows}</tbody></table></div>` : ''}<div class="signatures"><div class="sig">${signed}<b>Customer Signature / Date · 客户签字/日期</b></div><div class="sig"><b>Authorized By / Date · 授权人/日期</b></div></div><div class="footer">${escapeHtml(settings.invoiceTerms || 'Thank you for your business.')}</div><div class="document-footer"><span>zgautorepair.com</span><span>Page 1 of 1</span></div>
 <script>function returnToOrder(){if(window.opener&&!window.opener.closed){window.close();return}if(history.length>1){history.back();return}location.replace('/')}</script></body></html>`;
   const win = window.open('', '_blank');
