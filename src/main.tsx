@@ -75,6 +75,7 @@ const nav: Array<{ id: Page; icon: string; label: string }> = [
 const roleDefaults: Record<string, string[]> = {
   owner: ['*'],
   manager: ['customers', 'customerContact', 'workOrders', 'createWorkOrders', 'diagnosis', 'pricing', 'assignTechnician', 'collectPayment', 'printDocuments', 'finance', 'inventory', 'campaigns', 'staff', 'archive', 'approve', 'smart', 'settings'],
+  workshop_supervisor: ['customers', 'customerContact', 'workOrders', 'createWorkOrders', 'diagnosis', 'assignTechnician', 'printDocuments', 'inventory', 'archive', 'approve', 'smart'],
   frontdesk: ['customers', 'customerContact', 'workOrders', 'createWorkOrders', 'diagnosis', 'pricing', 'assignTechnician', 'collectPayment', 'printDocuments', 'campaigns', 'smart'],
   technician: ['assignedWorkOrders', 'claimWorkOrders', 'completeWorkOrders', 'diagnosis', 'smart'],
   finance: ['customers', 'customerContact', 'workOrders', 'pricing', 'collectPayment', 'printDocuments', 'finance', 'approve'],
