@@ -308,9 +308,22 @@ export async function openCloudSession(user: User): Promise<CloudSession> {
   };
 
   const createStaffInvite = async (email: string, role: string) => {
+    const normalizedEmail = email.trim().toLowerCase();
     const bytes = crypto.getRandomValues(new Uint8Array(5));
     const activationCode = Array.from(bytes, value => value.toString(16).padStart(2, '0')).join('').slice(0, 8).toUpperCase();
-    const { error } = await client.from('zg_staff_invites').insert({ organization_id: organizationId, email: email.trim().toLowerCase(), role, invited_by: user.id, status: 'pending', activation_code: activationCode });
+    const { data: existing, error: lookupError } = await client.from('zg_staff_invites')
+      .select('id')
+      .eq('organization_id', organizationId)
+      .eq('email', normalizedEmail)
+      .eq('status', 'pending')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (lookupError) throw lookupError;
+    const payload = { role, invited_by: user.id, status: 'pending', activation_code: activationCode, expires_at: new Date(Date.now() + 7 * 86400000).toISOString() };
+    const { error } = existing?.id
+      ? await client.from('zg_staff_invites').update(payload).eq('organization_id', organizationId).eq('id', existing.id)
+      : await client.from('zg_staff_invites').insert({ organization_id: organizationId, email: normalizedEmail, ...payload });
     if (error) throw error;
     return { activationCode };
   };

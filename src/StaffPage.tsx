@@ -26,6 +26,20 @@ const rolePermissionDefaults: Record<string, string[]> = {
   technician: ['assignedWorkOrders', 'diagnosis', 'printInternalWorkOrder'], finance: ['customers', 'customerContact', 'workOrders', 'pricing', 'collectPayment', 'printInternalWorkOrder', 'finance', 'approve'], warehouse: ['workOrders', 'inventory'],
 };
 
+const readableError = (error: unknown) => {
+  if (error instanceof Error && error.message) return error.message;
+  if (typeof error === 'string') return error;
+  if (error && typeof error === 'object') {
+    const value = error as Record<string, unknown>;
+    const parts = [value.message, value.details, value.hint, value.code]
+      .filter(Boolean)
+      .map(item => String(item));
+    if (parts.length) return parts.join(' · ');
+    try { return JSON.stringify(error); } catch { return '未知错误'; }
+  }
+  return '未知错误';
+};
+
 export function StaffPage({ cloud }: { cloud: CloudSession }) {
   const [members, setMembers] = useState<StaffMember[]>([]);
   const [invites, setInvites] = useState<StaffInvite[]>([]);
@@ -34,17 +48,17 @@ export function StaffPage({ cloud }: { cloud: CloudSession }) {
   const [loading, setLoading] = useState(true); const [busy, setBusy] = useState(false);
   const [deleteEmail, setDeleteEmail] = useState(''); const [deleteBusy, setDeleteBusy] = useState(false);
   const canManage = cloud.role === 'owner' || Boolean(cloud.permissions.staff);
-  const refresh = async () => { setLoading(true); try { const data = await cloud.listStaff(); setMembers(data.members); setInvites(data.invites); } catch (error) { alert(`读取员工资料失败：${error instanceof Error ? error.message : error}`); } finally { setLoading(false); } };
+  const refresh = async () => { setLoading(true); try { const data = await cloud.listStaff(); setMembers(data.members); setInvites(data.invites); } catch (error) { alert(`读取员工资料失败：${readableError(error)}`); } finally { setLoading(false); } };
   useEffect(() => { void refresh(); }, [cloud.organizationId]);
 
   const invite = async () => {
     if (!email.trim() || !email.includes('@')) return alert('请输入正确的员工邮箱。');
     const selectedRole = role === '__custom__' ? customRole.trim() : role;
     if (!selectedRole) return alert('请输入自定义角色名称。');
-    setBusy(true); try { const result = await cloud.createStaffInvite(email, selectedRole); setLastInvite({ email: email.trim().toLowerCase(), activationCode: result.activationCode }); setEmail(''); setCustomRole(''); setRole('technician'); await refresh(); } catch (error) { alert(`建立邀请失败：${error instanceof Error ? error.message : error}`); } finally { setBusy(false); }
+    setBusy(true); try { const result = await cloud.createStaffInvite(email, selectedRole); setLastInvite({ email: email.trim().toLowerCase(), activationCode: result.activationCode }); setEmail(''); setCustomRole(''); setRole('technician'); await refresh(); } catch (error) { alert(`建立邀请失败：${readableError(error)}`); } finally { setBusy(false); }
   };
   const update = async (member: StaffMember, changes: Partial<StaffMember>) => {
-    try { await cloud.updateStaff(member.userId, changes); setMembers(items => items.map(item => item.userId === member.userId ? { ...item, ...changes } : item)); } catch (error) { alert(`更新权限失败：${error instanceof Error ? error.message : error}`); }
+    try { await cloud.updateStaff(member.userId, changes); setMembers(items => items.map(item => item.userId === member.userId ? { ...item, ...changes } : item)); } catch (error) { alert(`更新权限失败：${readableError(error)}`); }
   };
 
   const customRoles = [...new Set([...members.map(item => item.role), ...invites.map(item => item.role)].filter(item => !roles.some(roleItem => roleItem.value === item)))];
