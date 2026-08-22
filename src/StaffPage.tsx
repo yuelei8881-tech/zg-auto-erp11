@@ -12,15 +12,18 @@ const permissionItems = [
   ['workOrders', '查看全部工单'], ['assignedWorkOrders', '仅查看分配给自己的工单'],
   ['createWorkOrders', '新建工单'], ['diagnosis', '填写诊断与维修记录'],
   ['pricing', '查看和修改价格'], ['assignTechnician', '分配技师'],
-  ['collectPayment', '收款与结账'], ['printDocuments', '打印工单、报价单、发票和收据'], ['finance', '财务与利润'],
+  ['collectPayment', '收款与结账'],
+  ['printInternalWorkOrder', '打印内部施工单（无价格）'],
+  ['printPricedDocuments', '打印带价格的报价单、工单、发票和收据'],
+  ['exportCustomerData', '下载/导出客户与系统资料'], ['finance', '财务与利润'],
   ['inventory', '库存与采购'], ['campaigns', '活动与保修'], ['staff', '员工与授权'],
   ['archive', '申请作废/归档资料'], ['approve', '审批与双人授权'],
 ] as const;
 const rolePermissionDefaults: Record<string, string[]> = {
-  manager: ['customers', 'customerContact', 'workOrders', 'createWorkOrders', 'diagnosis', 'pricing', 'assignTechnician', 'collectPayment', 'printDocuments', 'finance', 'inventory', 'campaigns', 'staff', 'archive', 'approve'],
-  workshop_supervisor: ['customers', 'customerContact', 'workOrders', 'createWorkOrders', 'diagnosis', 'assignTechnician', 'printDocuments', 'inventory', 'archive', 'approve'],
-  frontdesk: ['customers', 'customerContact', 'workOrders', 'createWorkOrders', 'diagnosis', 'pricing', 'assignTechnician', 'collectPayment', 'printDocuments', 'campaigns'],
-  technician: ['assignedWorkOrders', 'diagnosis'], finance: ['customers', 'customerContact', 'workOrders', 'pricing', 'collectPayment', 'printDocuments', 'finance', 'approve'], warehouse: ['workOrders', 'inventory'],
+  manager: ['customers', 'customerContact', 'workOrders', 'createWorkOrders', 'diagnosis', 'assignTechnician', 'printInternalWorkOrder', 'inventory', 'campaigns', 'archive', 'approve'],
+  workshop_supervisor: ['customers', 'customerContact', 'workOrders', 'createWorkOrders', 'diagnosis', 'assignTechnician', 'printInternalWorkOrder', 'inventory', 'archive', 'approve'],
+  frontdesk: ['customers', 'customerContact', 'workOrders', 'createWorkOrders', 'diagnosis', 'assignTechnician', 'printInternalWorkOrder', 'campaigns'],
+  technician: ['assignedWorkOrders', 'diagnosis', 'printInternalWorkOrder'], finance: ['customers', 'customerContact', 'workOrders', 'pricing', 'collectPayment', 'printInternalWorkOrder', 'finance', 'approve'], warehouse: ['workOrders', 'inventory'],
 };
 
 export function StaffPage({ cloud }: { cloud: CloudSession }) {
@@ -30,7 +33,7 @@ export function StaffPage({ cloud }: { cloud: CloudSession }) {
   const [lastInvite, setLastInvite] = useState<{ email: string; activationCode: string } | null>(null);
   const [loading, setLoading] = useState(true); const [busy, setBusy] = useState(false);
   const [deleteEmail, setDeleteEmail] = useState(''); const [deleteBusy, setDeleteBusy] = useState(false);
-  const canManage = cloud.role === 'owner' || cloud.role === 'manager' || Boolean(cloud.permissions.staff);
+  const canManage = cloud.role === 'owner' || Boolean(cloud.permissions.staff);
   const refresh = async () => { setLoading(true); try { const data = await cloud.listStaff(); setMembers(data.members); setInvites(data.invites); } catch (error) { alert(`读取员工资料失败：${error instanceof Error ? error.message : error}`); } finally { setLoading(false); } };
   useEffect(() => { void refresh(); }, [cloud.organizationId]);
 
@@ -57,7 +60,7 @@ export function StaffPage({ cloud }: { cloud: CloudSession }) {
   };
 
   return <div className="page"><div className="page-title"><div><p className="eyebrow">STAFF & ACCESS</p><h2>员工子账号与权限</h2><p>支持老板、经理、车间主管、前台、技师、财务、仓库以及自定义角色。</p></div></div>
-    {!canManage && <section className="panel"><div className="empty"><b>没有管理员权限</b><span>只有老板或经理可以设置员工账号和权限。</span></div></section>}
+    {!canManage && <section className="panel"><div className="empty"><b>没有管理员权限</b><span>只有老板或被老板单独授权的账号可以设置员工权限。</span></div></section>}
     {canManage && <>
       <section className="panel"><div className="section-title"><h3>邀请新员工</h3><span>员工使用自己的邮箱和激活码设置密码</span></div><div className="form-grid"><label><span>员工邮箱</span><input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="employee@example.com" /></label><label><span>默认角色</span><select value={role} onChange={e => setRole(e.target.value)}>{roleOptions.filter(item => item.value !== 'owner').map(item => <option key={item.value} value={item.value}>{item.label}</option>)}<option value="__custom__">＋ 添加自定义角色</option></select></label>{role === '__custom__' && <label><span>自定义角色名称</span><input value={customRole} onChange={e => setCustomRole(e.target.value)} placeholder="例如：服务顾问" maxLength={40} /></label>}<div className="form-actions"><button className="primary" disabled={busy} onClick={() => void invite()}>{busy ? '正在保存…' : '生成员工激活码'}</button></div></div>{lastInvite && <div className="staff-invite-result"><div><b>员工激活码：{lastInvite.activationCode}</b><span>{lastInvite.email}</span></div><button onClick={async () => { const text = `Z&G AUTO ERP 员工账号激活\n网址：https://zg-auto-erp-v2.vercel.app\n邮箱：${lastInvite.email}\n激活码：${lastInvite.activationCode}\n请点击“收到邀请？首次建立员工账号”设置密码。`; if (navigator.share) await navigator.share({ title: 'Z&G AUTO ERP 员工邀请', text }); else { await navigator.clipboard.writeText(text); alert('邀请信息已复制。'); } }}>分享给员工</button></div>}<p className="muted">车间主管默认不能查看财务或管理员工；自定义角色激活后，请在下方勾选实际权限。</p></section>
       <section className="panel"><div className="section-title"><h3>已启用员工</h3><span>{members.length} 人</span></div>{loading ? <div className="loading">正在读取员工资料…</div> : <div className="staff-list">{members.map(member => <article className="staff-card" key={member.userId}><div className="staff-head"><div><b>{member.displayName || (member.userId === cloud.user.email ? cloud.user.email : '员工账号')}</b><small>{member.phone || `ID ${member.userId.slice(0, 8)}…`}</small></div><label className="inline-field"><span>角色</span><select value={member.role} disabled={member.role === 'owner'} onChange={e => void changeRole(member, e.target.value)}>{roleOptions.map(item => <option key={item.value} value={item.value}>{item.label}</option>)}<option value="__custom__">＋ 添加自定义角色</option></select></label><label className="inline-field"><span>状态</span><select value={member.status} disabled={member.role === 'owner'} onChange={e => void update(member, { status: e.target.value })}><option value="active">启用</option><option value="disabled">停用</option></select></label></div><div className="permission-grid">{permissionItems.map(([key, label]) => <label key={key}><input type="checkbox" checked={member.role === 'owner' || permissionChecked(member, key)} disabled={member.role === 'owner'} onChange={e => void update(member, { permissions: { ...member.permissions, [key]: e.target.checked } })} /> {label}</label>)}</div></article>)}</div>}
