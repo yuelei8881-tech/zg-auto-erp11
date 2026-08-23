@@ -10,18 +10,18 @@ type RewardProgress = {
   vehicles: Array<{ id: string; vinLast6?: string; plate?: string; year?: number; make?: string; model?: string; count?: number; rewardEarnedAt?: string; rewardExpiresAt?: string; rewardRedeemedAt?: string; status?: string }>;
 };
 const blankVehicle = (): VehicleForm => ({ vin: '', plate: '', state: 'CA', year: '', make: '', model: '', engine: '', unit: '', driverName: '', driverPhone: '' });
-const termsVersion = '2026-08-23-maintenance-v2';
+const termsVersion = '2026-08-23-maintenance-v3';
 
 const copy = {
   zh: {
-    eyebrow: 'Z&G 小保养奖励计划', title: '5 次小保养，送 1 次小保养', subtitle: '小保养包含：更换机油和机油滤芯、按需添加防冻液和玻璃水，并检查皮带、刹车片、轮胎等。每辆车单独累计。',
+    eyebrow: 'Z&G 小保养奖励计划', title: '5 次小保养，送 1 次小保养', subtitle: '活动使用嘉实多 Castrol 5W-30 机油；包含更换机油滤芯、按需添加防冻液和玻璃水，并检查皮带、刹车片、轮胎等。每辆车单独累计。',
     personal: '个人客户', fleet: '公司 / 车队', contact: '联系人姓名', phone: '手机号码', email: '电子邮箱', company: '公司名称', tcp: 'TCP 号码', optional: '选填',
     vehicles: '参加活动的车辆', addVehicle: '添加另一辆车', remove: '删除', vin: 'VIN 车架号', plate: '车牌号码', state: '州', year: '年份', make: '品牌', model: '车型', engine: '发动机（选填）', unit: '车队编号（选填）', driver: '实际司机（选填）', driverPhone: '司机电话（选填）', vehicleNotice: '此处为客户预登记资料。车辆到店后，以本店扫描 VIN、识别车牌并由员工核对录入的正式车辆资料为准。',
     termsTitle: '活动规则与免责声明', agree: '我已阅读并同意中英文活动条款；如两种语言有冲突，以英文版本为准。', sms: '我同意接收本活动进度、奖励和维修相关短信。此项为选填；同意短信不是购买服务或参加活动的条件。可回复 STOP 退订。',
     submit: '登记参加活动', submitting: '正在安全提交…', success: '登记已收到', successText: '我们会核对客户与车辆资料。通过后，登记日期之后符合条件的小保养将按车辆分别累计；完成 5 次后，第 6 次同等小保养免费。', saveLink: '请保存您的专属进度查询链接', copyLink: '复制链接', copied: '已复制', error: '提交失败，请检查资料后重试。',
   },
   en: {
-    eyebrow: 'Z&G Minor Maintenance Rewards', title: 'Complete 5 minor services. Get the 6th free.', subtitle: 'Includes engine oil and filter replacement, coolant and washer-fluid top-off as needed, plus belt, brake-pad, and tire checks. Progress is tracked separately for each vehicle.',
+    eyebrow: 'Z&G Minor Maintenance Rewards', title: 'Complete 5 minor services. Get the 6th free.', subtitle: 'Program service uses Castrol 5W-30 motor oil and includes an oil-filter replacement, coolant and washer-fluid top-off as needed, plus belt, brake-pad, and tire checks. Progress is tracked separately for each vehicle.',
     personal: 'Individual', fleet: 'Business / Fleet', contact: 'Contact name', phone: 'Mobile number', email: 'Email address', company: 'Legal business name', tcp: 'TCP number', optional: 'Optional',
     vehicles: 'Participating vehicles', addVehicle: 'Add another vehicle', remove: 'Remove', vin: 'VIN', plate: 'License plate', state: 'State', year: 'Year', make: 'Make', model: 'Model', engine: 'Engine (optional)', unit: 'Fleet unit (optional)', driver: 'Driver name (optional)', driverPhone: 'Driver phone (optional)', vehicleNotice: 'Customer-entered information is preliminary. After arrival, the shop’s VIN scan, plate recognition, and staff-verified vehicle record will control.',
     termsTitle: 'Program Terms & Disclosures', agree: 'I have read and agree to the bilingual program terms. If the two versions conflict, the English version controls.', sms: 'I agree to receive transactional program progress, reward, and repair-related text messages. Optional; SMS consent is not a condition of purchase or participation. Reply STOP to opt out.',
@@ -33,9 +33,9 @@ function ProgramTerms() {
   return <div className="reward-terms-copy">
     <section lang="zh"><h3>中文活动条款</h3><ol>
       <li>客户成功登记后，每辆登记车辆完成五次符合条件的付费小保养，可获得同一车辆第六次同等小保养免费；不同车辆的次数不得合并或转让。</li>
-      <li>每次符合条件的小保养包含：依车辆制造商规格及实际车型所需数量更换本店常规全合成机油、更换适用的本店常用机油滤芯、按需添加防冻液和玻璃水，并对皮带、刹车片、轮胎及其他常规安全项目进行目视检查；同时包含标准人工、税费及环保费。</li>
+      <li>每次符合条件的小保养使用嘉实多 Castrol 5W-30 机油，机油数量依实际车型所需确定；同时更换适用的本店常用机油滤芯、按需添加防冻液和玻璃水，并对皮带、刹车片、轮胎及其他常规安全项目进行目视检查；标准人工、税费及环保费均包含在内。</li>
       <li>防冻液和玻璃水仅为正常范围内的按需补充；检查不包含检查后发现的零件更换、维修或专项诊断。发现需要额外维修或配件时，本店将另行报价并取得客户批准。</li>
-      <li>机油粘度、认证标准、数量及滤芯适用性以 VIN、发动机和制造商要求为准。特殊滤芯、柴油车及欧洲车型在本活动内不另收补差价，但服务须属于本店可正常、安全提供的范围。</li>
+      <li>本活动指定使用嘉实多 Castrol 5W-30 机油；机油数量和滤芯适用性以 VIN、发动机及实际车型为准。特殊滤芯、柴油车及欧洲车型在本活动内不另收补差价，但车辆必须适合安全使用本活动指定机油，且服务须属于本店可正常、安全提供的范围。</li>
       <li>客户填写的车辆信息属于预登记资料。车辆到店后，以本店通过 VIN 扫描、车牌识别及员工核对后录入 ERP 的正式车辆资料为准。</li><li>只有成功登记后，在 Z&G Auto Body And Repair 完成并结清的正式工单才计数。经批准的月结车队工单在完工并记入月结账户后计数。取消、退款、冲销、重复或欺诈交易不计数，并可被撤销。</li>
       <li>奖励在第五次合格服务完成时取得，自取得日起十二个月内有效；不可兑换现金、出售、转让或与其他车辆进度合并。</li>
       <li>Z&G 可为防止欺诈、纠正错误或符合法律而审核、暂停或更正记录，并可在合理通知后对未来交易修改或终止活动，但不会无理取消已经取得且尚未过期的奖励。</li>
@@ -43,9 +43,9 @@ function ProgramTerms() {
     </ol><p><b>重要：</b>本中文版本仅为便利翻译。如与英文版本存在差异，以英文版本为准，但不限制适用法律下不可放弃的消费者权利。</p></section>
     <section lang="en"><h3>English Program Terms (Controlling Version)</h3><ol>
       <li>After successful enrollment, each registered vehicle earns one complimentary sixth minor maintenance service after five qualifying paid minor maintenance services. Progress is vehicle-specific and may not be combined or transferred.</li>
-      <li>Each qualifying minor service includes replacement of the shop's regular full-synthetic motor oil in the quantity required by the vehicle manufacturer, replacement of an applicable commonly stocked oil filter, coolant and windshield-washer-fluid top-off as needed, and visual checks of belts, brake pads, tires, and other routine safety items. Standard labor, taxes, and environmental fees are included.</li>
+      <li>Each qualifying minor service uses Castrol 5W-30 motor oil in the quantity required by the applicable vehicle, replaces an applicable commonly stocked oil filter, tops off coolant and windshield-washer fluid as needed, and includes visual checks of belts, brake pads, tires, and other routine safety items. Standard labor, taxes, and environmental fees are included.</li>
       <li>Coolant and washer fluid are limited to normal top-off quantities. Inspections do not include replacement, repair, disassembly, or advanced diagnosis of any item found to need attention. Any additional repair or part requires a separate estimate and customer approval.</li>
-      <li>Oil viscosity, approvals, quantity, and filter fitment are determined from the VIN, engine, and manufacturer requirements. No surcharge is added solely because a vehicle uses a specialty filter, is diesel-powered, or is a European model, provided the service can be performed safely within the shop's normal capabilities.</li>
+      <li>This program specifically uses Castrol 5W-30 motor oil. Oil quantity and filter fitment are determined from the VIN, engine, and actual vehicle configuration. No surcharge is added solely because a vehicle uses a specialty filter, is diesel-powered, or is a European model, but the vehicle must be suitable for safe use of the program oil and the service must be within the shop's normal capabilities.</li>
       <li>Vehicle information entered by a customer is preliminary. After arrival, the official ERP vehicle record verified by the shop through VIN scanning, plate recognition, and staff review controls.</li><li>Only qualifying repair orders completed after successful enrollment and fully settled count. Approved monthly-account fleet work counts when completed and posted to the monthly account. Canceled, refunded, reversed, duplicate, or fraudulent transactions do not count and may be removed.</li>
       <li>A reward is earned when the fifth qualifying service is completed and expires 12 months later. Rewards have no cash value and may not be sold, transferred, or combined with another vehicle.</li>
       <li>Z&G may review, suspend, or correct records to prevent fraud, correct errors, or comply with law. Z&G may prospectively modify or end the program after reasonable notice, but will not unreasonably revoke an earned, unexpired reward.</li>
