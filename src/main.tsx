@@ -41,22 +41,28 @@ function openStoreCache() {
     request.onerror = () => reject(request.error);
   });
 }
-async function readStoreCache(organizationId: string): Promise<CloudStore | null> {
+type StoreCache = { store: CloudStore; savedAt: number; fullSyncedAt: number };
+async function readStoreCache(organizationId: string): Promise<StoreCache | null> {
   try {
     const db = await openStoreCache();
     return await new Promise((resolve, reject) => {
       const request = db.transaction('stores', 'readonly').objectStore('stores').get(organizationId);
-      request.onsuccess = () => resolve((request.result?.store as CloudStore | undefined) || null);
+      request.onsuccess = () => {
+        const value = request.result as Partial<StoreCache> | undefined;
+        if (!value?.store) return resolve(null);
+        const savedAt = Number(value.savedAt || 0);
+        resolve({ store: value.store, savedAt, fullSyncedAt: Number(value.fullSyncedAt || savedAt || 0) });
+      };
       request.onerror = () => reject(request.error);
     });
   } catch { return null; }
 }
-async function writeStoreCache(organizationId: string, store: CloudStore) {
+async function writeStoreCache(organizationId: string, store: CloudStore, fullSyncedAt = Date.now()) {
   try {
     const db = await openStoreCache();
     await new Promise<void>((resolve, reject) => {
       const transaction = db.transaction('stores', 'readwrite');
-      transaction.objectStore('stores').put({ savedAt: Date.now(), store }, organizationId);
+      transaction.objectStore('stores').put({ savedAt: Date.now(), fullSyncedAt, store }, organizationId);
       transaction.oncomplete = () => resolve();
       transaction.onerror = () => reject(transaction.error);
     });
@@ -124,16 +130,46 @@ function App({ cloud }: { cloud: CloudSession }) {
   const mutationGeneration = useRef(0);
   const paymentInFlight = useRef(new Set<string>());
   const numberRepairInFlight = useRef(false);
+  const lastCloudSyncAt = useRef(0);
+  const lastFullSyncAt = useRef(0);
 
-  const refresh = async (quiet = false) => {
+  const mergeCloudStore = (current: AppStore, changes: CloudStore) => {
+    const merged = { ...current } as AppStore;
+    for (const key of Object.keys(changes)) {
+      const existing = (current[key] || []) as Array<{ id: string }>;
+      const incoming = (changes[key] || []) as Array<{ id: string }>;
+      const byId = new Map(existing.map(row => [row.id, row]));
+      for (const row of incoming) byId.set(row.id, row);
+      merged[key] = [...byId.values()];
+    }
+    return normalizeStore(merged as unknown as CloudStore);
+  };
+
+  const refresh = async (quiet = false, forceFull = false) => {
     const requestId = ++refreshRequestId.current;
     const mutationAtStart = mutationGeneration.current;
     if (!quiet) setLoading(true);
     try {
-      const loaded = normalizeStore(await cloud.loadStore());
+      const shouldLoadFull = forceFull || !lastCloudSyncAt.current || Date.now() - lastFullSyncAt.current >= 6 * 60 * 60 * 1000;
+      // Overlap two minutes so records committed near the cache timestamp can
+      // never be skipped because of device/server clock differences.
+      const updatedSince = shouldLoadFull ? undefined : new Date(Math.max(0, lastCloudSyncAt.current - 120_000)).toISOString();
+      const changes = await cloud.loadStore(updatedSince);
       if (requestId !== refreshRequestId.current || mutationAtStart !== mutationGeneration.current) return;
-      setStore(loaded);
-      void writeStoreCache(cloud.organizationId, loaded as unknown as CloudStore);
+      const syncedAt = Date.now();
+      if (shouldLoadFull) {
+        const loaded = normalizeStore(changes);
+        setStore(loaded);
+        lastFullSyncAt.current = syncedAt;
+        void writeStoreCache(cloud.organizationId, loaded as unknown as CloudStore, syncedAt);
+      } else {
+        setStore(current => {
+          const loaded = mergeCloudStore(current, changes);
+          void writeStoreCache(cloud.organizationId, loaded as unknown as CloudStore, lastFullSyncAt.current);
+          return loaded;
+        });
+      }
+      lastCloudSyncAt.current = syncedAt;
     }
     catch (error) {
       if (!quiet) {
@@ -157,13 +193,15 @@ function App({ cloud }: { cloud: CloudSession }) {
       const cached = await readStoreCache(cloud.organizationId);
       if (!active) return;
       if (cached) {
-        setStore(normalizeStore(cached));
+        setStore(normalizeStore(cached.store));
+        lastCloudSyncAt.current = cached.savedAt;
+        lastFullSyncAt.current = cached.fullSyncedAt;
         setLoading(false);
       }
       await refresh(Boolean(cached));
     })();
     void cloud.listStaff().then(data => setStaffMembers(data.members.filter(item => item.status === 'active'))).catch(() => undefined);
-    const unsubscribe = cloud.subscribe(() => { void refresh(true); });
+    const unsubscribe = cloud.subscribe(requiresFullRefresh => { void refresh(true, Boolean(requiresFullRefresh)); });
     return () => { active = false; unsubscribe(); };
   }, [cloud.organizationId]);
 

@@ -15,12 +15,12 @@ export type CloudSession = {
   organizationName: string;
   role: string;
   permissions: Record<string, boolean>;
-  loadStore: () => Promise<CloudStore>;
+  loadStore: (updatedSince?: string) => Promise<CloudStore>;
   upsertRecord: (module: string, row: CloudRow) => Promise<void>;
   reserveWorkOrderNumber: (recordId: string) => Promise<string>;
   recordPayment: (workOrderId: string, payment: CloudRow) => Promise<CloudRow>;
   deleteRecord: (module: string, id: string) => Promise<void>;
-  subscribe: (refresh: () => void) => () => void;
+  subscribe: (refresh: (requiresFullRefresh?: boolean) => void) => () => void;
   invokeFunction: <T = unknown>(name: string, body: Record<string, unknown>) => Promise<T>;
   uploadEvidencePhoto: (workOrderId: string, photoId: string, blob: Blob) => Promise<{ storagePath: string; dataUrl: string }>;
   createCustomerApproval: (workOrderId: string, customerEmail: string, customerName: string, snapshot: Record<string, unknown>) => Promise<{ token: string }>;
@@ -84,7 +84,7 @@ export async function openCloudSession(user: User): Promise<CloudSession> {
     .from('zg_organizations').select('name').eq('id', organizationId).single();
   if (organizationError) throw organizationError;
 
-  const loadStore = async () => {
+  const loadStore = async (updatedSince?: string) => {
     // Supabase limits a select response to 1,000 rows by default. The ERP now
     // contains more than that across all modules, so a single request silently
     // omitted older payments, expenses, customers and work orders. Read every
@@ -96,13 +96,15 @@ export async function openCloudSession(user: User): Promise<CloudSession> {
     // whole ERP fail to open. Uploads remain parallel, but the authoritative
     // accounting/customer store is loaded conservatively and completely.
     for (let from = 0; ; from += pageSize) {
-      const { data: page, error } = await client
+      let query = client
         .from('zg_erp_records')
         .select('module, record_id, payload, updated_at')
         .eq('organization_id', organizationId)
         .order('updated_at', { ascending: false })
         .order('record_id', { ascending: false })
         .range(from, from + pageSize - 1);
+      if (updatedSince) query = query.gt('updated_at', updatedSince);
+      const { data: page, error } = await query;
       if (error) throw error;
       const rows = (page || []) as typeof data;
       data.push(...rows);
@@ -190,23 +192,29 @@ export async function openCloudSession(user: User): Promise<CloudSession> {
     if (error) throw error;
   };
 
-  const subscribe = (refresh: () => void) => {
+  const subscribe = (refresh: (requiresFullRefresh?: boolean) => void) => {
     let refreshTimer: ReturnType<typeof setTimeout> | undefined;
     let lastRefreshAt = Date.now();
-    const queueRefresh = () => {
+    let requiresFullRefresh = false;
+    const queueRefresh = (full = false) => {
+      requiresFullRefresh ||= full;
       if (refreshTimer) clearTimeout(refreshTimer);
       refreshTimer = setTimeout(() => {
         refreshTimer = undefined;
         lastRefreshAt = Date.now();
-        refresh();
-      }, 350);
+        const fullRefresh = requiresFullRefresh;
+        requiresFullRefresh = false;
+        refresh(fullRefresh);
+      }, 900);
     };
     const channel = client.channel(`zg-v075-${organizationId}`)
       .on('postgres_changes', {
         event: '*', schema: 'public', table: 'zg_erp_records',
         filter: `organization_id=eq.${organizationId}`,
-      }, queueRefresh).subscribe();
-    const onFocus = () => { if (Date.now() - lastRefreshAt > 30_000) queueRefresh(); };
+      }, payload => queueRefresh(payload.eventType === 'DELETE')).subscribe();
+    // Returning to the app only checks for changed rows. A periodic full
+    // reconciliation is handled by the cache age in the application layer.
+    const onFocus = () => { if (Date.now() - lastRefreshAt > 30_000) queueRefresh(false); };
     window.addEventListener('focus', onFocus);
     return () => {
       window.removeEventListener('focus', onFocus);
