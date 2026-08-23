@@ -930,12 +930,12 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, w
     </div>}{selectedVehicle && <div className="vehicle-strip"><b>{selectedVehicle.plate || '无车牌'}</b><span>VIN {selectedVehicle.vin || '—'}</span><span>Unit {selectedVehicle.unit || '—'}</span><span>{selectedVehicle.ownerName}</span></div>}
       {rewardVehicleChecking && <div className="reward-vehicle-alert checking"><b>正在核对活动资格…</b><span>正在按车辆档案、VIN 和车牌查询。</span></div>}
       {rewardVehicleMatch && <div className={`reward-vehicle-alert ${rewardVehicleMatch.reward_earned_at && !rewardVehicleMatch.reward_redeemed_at ? 'earned' : ''}`}>
-        <b>🎁 此车辆已登记“5 次小保养送 1 次”活动</b>
+        <b>🎁 此车辆已登记“5 次保养送 1 次保养”活动</b>
         {rewardVehicleMatch.enrollmentStatus === 'pending'
           ? <span>活动申请正在等待审核；请先核对客户和车辆资料。</span>
           : rewardVehicleMatch.reward_earned_at && !rewardVehicleMatch.reward_redeemed_at
-            ? <span>免费小保养已可使用{rewardVehicleMatch.reward_expires_at ? `，有效期至 ${new Date(rewardVehicleMatch.reward_expires_at).toLocaleDateString()}` : ''}。结账前请确认本次是否兑换。</span>
-            : <span>当前有效小保养累计：{Math.min(5, rewardVehicleMatch.qualifying_count)} / 5 次。本次符合条件的保养完成后可计入。</span>}
+            ? <span>免费保养已可使用{rewardVehicleMatch.reward_expires_at ? `，有效期至 ${new Date(rewardVehicleMatch.reward_expires_at).toLocaleDateString()}` : ''}。结账前请确认本次是否兑换。</span>
+            : <span>当前有效保养累计：{Math.min(5, rewardVehicleMatch.qualifying_count)} / 5 次。本次符合条件的保养完成后可计入。</span>}
       </div>}
     </section>
 
