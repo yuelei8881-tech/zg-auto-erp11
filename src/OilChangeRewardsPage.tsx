@@ -14,14 +14,14 @@ const termsVersion = '2026-08-23-maintenance-v4';
 
 const copy = {
   zh: {
-    eyebrow: 'Z&G 保养奖励计划', title: '5 次保养，送 1 次保养', subtitle: '使用嘉实多 Castrol 5W-30，并包含 7 项免费检查。每辆车单独累计。',
+    eyebrow: 'Z&G 保养奖励计划', title: '5 次保养，送 1 次保养', subtitle: '使用嘉实多 Castrol 5W-30，按需添加防冻液和玻璃水，并包含 7 项免费检查。每辆车单独累计。',
     personal: '个人客户', fleet: '公司 / 车队', contact: '联系人姓名', phone: '手机号码', email: '电子邮箱', company: '公司名称', tcp: 'TCP 号码', optional: '选填',
     vehicles: '参加活动的车辆', addVehicle: '添加另一辆车', remove: '删除', vin: 'VIN 车架号', plate: '车牌号码', state: '州', year: '年份', make: '品牌', model: '车型', engine: '发动机（选填）', unit: '车队编号（选填）', driver: '实际司机（选填）', driverPhone: '司机电话（选填）', vehicleNotice: '此处为客户预登记资料。车辆到店后，以本店扫描 VIN、识别车牌并由员工核对录入的正式车辆资料为准。',
     termsTitle: '活动规则与免责声明', agree: '我已阅读并同意中英文活动条款；如两种语言有冲突，以英文版本为准。', sms: '我同意接收本活动进度、奖励和维修相关短信。此项为选填；同意短信不是购买服务或参加活动的条件。可回复 STOP 退订。',
     submit: '登记参加活动', submitting: '正在安全提交…', success: '登记已收到', successText: '我们会核对客户与车辆资料。通过后，登记日期之后符合条件的保养将按车辆分别累计；完成 5 次后，第 6 次同等保养免费。', saveLink: '请保存您的专属进度查询链接', copyLink: '复制链接', copied: '已复制', error: '提交失败，请检查资料后重试。',
   },
   en: {
-    eyebrow: 'Z&G Maintenance Rewards', title: 'Complete 5 services. Get the 6th free.', subtitle: 'Uses Castrol 5W-30 and includes 7 complimentary inspections. Progress is tracked separately for each vehicle.',
+    eyebrow: 'Z&G Maintenance Rewards', title: 'Complete 5 services. Get the 6th free.', subtitle: 'Uses Castrol 5W-30, includes coolant and windshield-washer fluid top-offs as needed, and includes 7 complimentary inspections. Progress is tracked separately for each vehicle.',
     personal: 'Individual', fleet: 'Business / Fleet', contact: 'Contact name', phone: 'Mobile number', email: 'Email address', company: 'Legal business name', tcp: 'TCP number', optional: 'Optional',
     vehicles: 'Participating vehicles', addVehicle: 'Add another vehicle', remove: 'Remove', vin: 'VIN', plate: 'License plate', state: 'State', year: 'Year', make: 'Make', model: 'Model', engine: 'Engine (optional)', unit: 'Fleet unit (optional)', driver: 'Driver name (optional)', driverPhone: 'Driver phone (optional)', vehicleNotice: 'Customer-entered information is preliminary. After arrival, the shop’s VIN scan, plate recognition, and staff-verified vehicle record will control.',
     termsTitle: 'Program Terms & Disclosures', agree: 'I have read and agree to the bilingual program terms. If the two versions conflict, the English version controls.', sms: 'I agree to receive transactional program progress, reward, and repair-related text messages. Optional; SMS consent is not a condition of purchase or participation. Reply STOP to opt out.',
