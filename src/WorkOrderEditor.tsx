@@ -5,6 +5,7 @@ import { MONTHLY_BILLING_TERM, MONTHLY_PAYMENT_METHOD, nextMonthlyBillingDate } 
 import { recognizeVehiclePhoto } from './lib/ocr';
 import { SignaturePad } from './SignaturePad';
 import type { CloudSession, StaffMember } from './lib/cloud';
+import { supabase } from './lib/supabase';
 
 type Props = {
   value?: WorkOrder; customers: Customer[]; vehicles: Vehicle[]; fleets: Fleet[]; drivers: Driver[]; workOrders: WorkOrder[];
@@ -29,6 +30,15 @@ type TranslationTarget = 'complaintEn' | 'diagnosisEn' | 'workPerformedEn';
 type TranslationStatus = 'idle' | 'translating' | 'done' | 'error';
 type MobileStep = 'account' | 'inspection' | 'quote' | 'approval' | 'repair' | 'checkout';
 type RepairLibraryItem = { name: string; labor: LaborItem; parts: PartItem[]; total: number; lastUsed: string };
+type RewardVehicleMatch = {
+  id: string;
+  status: string;
+  qualifying_count: number;
+  reward_earned_at?: string | null;
+  reward_expires_at?: string | null;
+  reward_redeemed_at?: string | null;
+  enrollmentStatus: string;
+};
 
 const normalizeVehicleIdentifier = (value: unknown) => String(value || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
 
@@ -172,6 +182,8 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, w
   const [repairLibraryOpen, setRepairLibraryOpen] = useState(false);
   const [packageEditor, setPackageEditor] = useState<ServicePackage | null>(null);
   const [packageSaving, setPackageSaving] = useState(false);
+  const [rewardVehicleMatch, setRewardVehicleMatch] = useState<RewardVehicleMatch | null>(null);
+  const [rewardVehicleChecking, setRewardVehicleChecking] = useState(false);
   const lastAutomaticTranslation = useRef<Record<TranslationSource, { source: string; translation: string }>>({
     complaint: { source: '', translation: '' }, diagnosis: { source: '', translation: '' }, workPerformed: { source: '', translation: '' },
   });
@@ -259,6 +271,46 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, w
     return [...remembered.values()].filter(item => !query || [item.name, ...item.parts.flatMap(part => [part.partNo, part.name])].some(text => String(text || '').toLocaleLowerCase().includes(query)));
   }, [parts, repairLibrarySearch, servicePackages, value?.id, workOrders]);
   const selectedVehicle = vehicles.find(v => v.id === order.vehicleId);
+  useEffect(() => {
+    let cancelled = false;
+    const findRewardVehicle = async () => {
+      setRewardVehicleMatch(null);
+      if (!selectedVehicle || !supabase) return;
+      const client = supabase;
+      setRewardVehicleChecking(true);
+      try {
+        const fields = 'id,status,qualifying_count,reward_earned_at,reward_expires_at,reward_redeemed_at,vehicle_record_id,vin_normalized,plate_normalized,zg_reward_enrollments!inner(status)';
+        const readMatch = async (column: 'vehicle_record_id' | 'vin_normalized' | 'plate_normalized', value: string) => {
+          if (!value) return null;
+          const { data, error } = await client.from('zg_reward_vehicles').select(fields)
+            .eq(column, value).in('zg_reward_enrollments.status', ['pending', 'approved'])
+            .order('created_at', { ascending: false }).limit(1).maybeSingle();
+          if (error) throw error;
+          return data as unknown as Record<string, unknown> | null;
+        };
+        const row = await readMatch('vehicle_record_id', selectedVehicle.id)
+          || await readMatch('vin_normalized', normalizeVehicleIdentifier(selectedVehicle.vin))
+          || await readMatch('plate_normalized', normalizeVehicleIdentifier(selectedVehicle.plate));
+        if (!cancelled && row) {
+          const joined = row.zg_reward_enrollments as { status?: string } | Array<{ status?: string }> | undefined;
+          const enrollmentStatus = Array.isArray(joined) ? String(joined[0]?.status || '') : String(joined?.status || '');
+          setRewardVehicleMatch({
+            id: String(row.id), status: String(row.status || ''), qualifying_count: Number(row.qualifying_count || 0),
+            reward_earned_at: row.reward_earned_at ? String(row.reward_earned_at) : null,
+            reward_expires_at: row.reward_expires_at ? String(row.reward_expires_at) : null,
+            reward_redeemed_at: row.reward_redeemed_at ? String(row.reward_redeemed_at) : null,
+            enrollmentStatus,
+          });
+        }
+      } catch (error) {
+        console.warn('活动车辆查询失败', error);
+      } finally {
+        if (!cancelled) setRewardVehicleChecking(false);
+      }
+    };
+    void findRewardVehicle();
+    return () => { cancelled = true; };
+  }, [selectedVehicle?.id, selectedVehicle?.vin, selectedVehicle?.plate]);
   const vehicleOptions = useMemo(() => vehicles.map(item => ({
     value: item.id,
     label: `${item.plate || '无车牌'} · ${item.year} ${item.make} ${item.model} · ${item.ownerName || '无所属账户'}`,
@@ -875,7 +927,17 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, w
         <label>发动机<input value={vehicleDraft.engine} onChange={e => setVehicleDraft(current => ({ ...current, engine: e.target.value }))} /></label>
         <label>当前里程（必填）<input type="number" inputMode="numeric" min="1" required value={vehicleDraft.mileage || ''} onChange={e => setVehicleDraft(current => ({ ...current, mileage: Number(e.target.value) }))} placeholder="读取仪表后填写" /></label>
       </div><div className="toolbar"><button type="button" onClick={() => setAddingVehicle(false)}>取消</button><button type="button" className="primary" onClick={createVehicle} disabled={vehicleSaving}>{vehicleSaving ? '保存中…' : '保存并选择车辆'}</button></div>
-    </div>}{selectedVehicle && <div className="vehicle-strip"><b>{selectedVehicle.plate || '无车牌'}</b><span>VIN {selectedVehicle.vin || '—'}</span><span>Unit {selectedVehicle.unit || '—'}</span><span>{selectedVehicle.ownerName}</span></div>}</section>
+    </div>}{selectedVehicle && <div className="vehicle-strip"><b>{selectedVehicle.plate || '无车牌'}</b><span>VIN {selectedVehicle.vin || '—'}</span><span>Unit {selectedVehicle.unit || '—'}</span><span>{selectedVehicle.ownerName}</span></div>}
+      {rewardVehicleChecking && <div className="reward-vehicle-alert checking"><b>正在核对活动资格…</b><span>正在按车辆档案、VIN 和车牌查询。</span></div>}
+      {rewardVehicleMatch && <div className={`reward-vehicle-alert ${rewardVehicleMatch.reward_earned_at && !rewardVehicleMatch.reward_redeemed_at ? 'earned' : ''}`}>
+        <b>🎁 此车辆已登记“5 次小保养送 1 次”活动</b>
+        {rewardVehicleMatch.enrollmentStatus === 'pending'
+          ? <span>活动申请正在等待审核；请先核对客户和车辆资料。</span>
+          : rewardVehicleMatch.reward_earned_at && !rewardVehicleMatch.reward_redeemed_at
+            ? <span>免费小保养已可使用{rewardVehicleMatch.reward_expires_at ? `，有效期至 ${new Date(rewardVehicleMatch.reward_expires_at).toLocaleDateString()}` : ''}。结账前请确认本次是否兑换。</span>
+            : <span>当前有效小保养累计：{Math.min(5, rewardVehicleMatch.qualifying_count)} / 5 次。本次符合条件的保养完成后可计入。</span>}
+      </div>}
+    </section>
 
     {(order.company || selectedVehicle?.ownerType === '车队') && <section className="form-section editor-panel panel-intake"><h3>车队送修信息</h3><div className="form-grid four">
       <label>公司名称<input value={order.company || ''} onChange={e => patch({ company: e.target.value })} /></label>
