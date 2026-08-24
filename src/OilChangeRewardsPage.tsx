@@ -10,18 +10,18 @@ type RewardProgress = {
   vehicles: Array<{ id: string; vinLast6?: string; plate?: string; year?: number; make?: string; model?: string; count?: number; rewardEarnedAt?: string; rewardExpiresAt?: string; rewardRedeemedAt?: string; status?: string }>;
 };
 const blankVehicle = (): VehicleForm => ({ vin: '', plate: '', state: 'CA', year: '', make: '', model: '', engine: '', unit: '', driverName: '', driverPhone: '' });
-const termsVersion = '2026-08-23-maintenance-v4';
+const termsVersion = '2026-08-23-maintenance-v5';
 
 const copy = {
   zh: {
-    eyebrow: 'Z&G 保养奖励计划', title: '5 次保养，送 1 次保养', subtitle: '使用嘉实多 Castrol 5W-30，按需添加防冻液和玻璃水，并包含 7 项免费检查。每辆车单独累计。',
+    eyebrow: 'Z&G 保养奖励计划', title: '5 次保养，送 1 次保养', subtitle: '使用嘉实多 Castrol 5W-30，按需添加防冻液和玻璃水，并包含 7 项免费检查。每辆车单独累计。', price: '常规价格：每次 $100', location: '319 Agostino Rd, San Gabriel, CA 91776 · 626-508-0888',
     personal: '个人客户', fleet: '公司 / 车队', contact: '联系人姓名', phone: '手机号码', email: '电子邮箱', company: '公司名称', tcp: 'TCP 号码', optional: '选填',
     vehicles: '参加活动的车辆', addVehicle: '添加另一辆车', remove: '删除', vin: 'VIN 车架号', plate: '车牌号码', state: '州', year: '年份', make: '品牌', model: '车型', engine: '发动机（选填）', unit: '车队编号（选填）', driver: '实际司机（选填）', driverPhone: '司机电话（选填）', vehicleNotice: '此处为客户预登记资料。车辆到店后，以本店扫描 VIN、识别车牌并由员工核对录入的正式车辆资料为准。',
     termsTitle: '活动规则与免责声明', agree: '我已阅读并同意中英文活动条款；如两种语言有冲突，以英文版本为准。', sms: '我同意接收本活动进度、奖励和维修相关短信。此项为选填；同意短信不是购买服务或参加活动的条件。可回复 STOP 退订。',
     submit: '登记参加活动', submitting: '正在安全提交…', success: '登记已收到', successText: '我们会核对客户与车辆资料。通过后，登记日期之后符合条件的保养将按车辆分别累计；完成 5 次后，第 6 次同等保养免费。', saveLink: '请保存您的专属进度查询链接', copyLink: '复制链接', copied: '已复制', error: '提交失败，请检查资料后重试。',
   },
   en: {
-    eyebrow: 'Z&G Maintenance Rewards', title: 'Complete 5 services. Get the 6th free.', subtitle: 'Uses Castrol 5W-30, includes coolant and windshield-washer fluid top-offs as needed, and includes 7 complimentary inspections. Progress is tracked separately for each vehicle.',
+    eyebrow: 'Z&G Maintenance Rewards', title: 'Complete 5 services. Get the 6th free.', subtitle: 'Uses Castrol 5W-30, includes coolant and windshield-washer fluid top-offs as needed, and includes 7 complimentary inspections. Progress is tracked separately for each vehicle.', price: 'Regular price: $100 per service', location: '319 Agostino Rd, San Gabriel, CA 91776 · 626-508-0888',
     personal: 'Individual', fleet: 'Business / Fleet', contact: 'Contact name', phone: 'Mobile number', email: 'Email address', company: 'Legal business name', tcp: 'TCP number', optional: 'Optional',
     vehicles: 'Participating vehicles', addVehicle: 'Add another vehicle', remove: 'Remove', vin: 'VIN', plate: 'License plate', state: 'State', year: 'Year', make: 'Make', model: 'Model', engine: 'Engine (optional)', unit: 'Fleet unit (optional)', driver: 'Driver name (optional)', driverPhone: 'Driver phone (optional)', vehicleNotice: 'Customer-entered information is preliminary. After arrival, the shop’s VIN scan, plate recognition, and staff-verified vehicle record will control.',
     termsTitle: 'Program Terms & Disclosures', agree: 'I have read and agree to the bilingual program terms. If the two versions conflict, the English version controls.', sms: 'I agree to receive transactional program progress, reward, and repair-related text messages. Optional; SMS consent is not a condition of purchase or participation. Reply STOP to opt out.',
@@ -32,7 +32,7 @@ const copy = {
 function ProgramTerms() {
   return <div className="reward-terms-copy">
     <section lang="zh"><h3>中文活动条款</h3><ol>
-      <li>客户成功登记后，每辆登记车辆完成五次符合条件的付费保养，可获得同一车辆第六次同等保养免费；不同车辆的次数不得合并或转让。</li>
+      <li>本活动常规保养价格为每次 $100。客户成功登记后，每辆登记车辆完成五次符合条件的付费保养，可获得同一车辆第六次同等保养免费；不同车辆的次数不得合并或转让。</li>
       <li>每次符合条件的保养使用嘉实多 Castrol 5W-30 机油，机油数量依实际车型所需确定；同时更换适用的本店常用机油滤芯，并按需添加防冻液和玻璃水。标准人工、税费及环保费均包含在内。</li>
       <li>每次保养包含七项免费目视检查：① 皮带；② 刹车片与刹车盘；③ 轮胎胎压、胎纹及可见磨损；④ 电瓶与充电系统；⑤ 各类油液液位及可见泄漏；⑥ 车辆灯光；⑦ 雨刷片。免费检查不等同于拆卸检查或专项诊断。</li>
       <li>防冻液和玻璃水仅为正常范围内的按需补充；检查不包含检查后发现的零件更换、维修或专项诊断。发现需要额外维修或配件时，本店将另行报价并取得客户批准。</li>
@@ -43,7 +43,7 @@ function ProgramTerms() {
       <li>短信同意为选填，不是购买服务或参加本活动的条件。客户资料依本店隐私政策处理。</li>
     </ol><p><b>重要：</b>本中文版本仅为便利翻译。如与英文版本存在差异，以英文版本为准，但不限制适用法律下不可放弃的消费者权利。</p></section>
     <section lang="en"><h3>English Program Terms (Controlling Version)</h3><ol>
-      <li>After successful enrollment, each registered vehicle earns one complimentary sixth maintenance service after five qualifying paid maintenance services. Progress is vehicle-specific and may not be combined or transferred.</li>
+      <li>The regular program price is $100 per maintenance service. After successful enrollment, each registered vehicle earns one complimentary sixth maintenance service after five qualifying paid maintenance services. Progress is vehicle-specific and may not be combined or transferred.</li>
       <li>Each qualifying maintenance service uses Castrol 5W-30 motor oil in the quantity required by the applicable vehicle, replaces an applicable commonly stocked oil filter, and tops off coolant and windshield-washer fluid as needed. Standard labor, taxes, and environmental fees are included.</li>
       <li>Each service includes seven complimentary visual inspections: (1) belts; (2) brake pads and rotors; (3) tire pressure, tread, and visible wear; (4) battery and charging system; (5) fluid levels and visible leaks; (6) exterior vehicle lights; and (7) windshield wiper blades. Complimentary inspections do not include disassembly or advanced diagnosis.</li>
       <li>Coolant and washer fluid are limited to normal top-off quantities. Inspections do not include replacement, repair, disassembly, or advanced diagnosis of any item found to need attention. Any additional repair or part requires a separate estimate and customer approval.</li>
@@ -128,7 +128,7 @@ export function OilChangeRewardsPage({ Header, Footer }: { Header: ComponentType
     </>}
   </section><CurrentOffers /></main><Footer /></>;
   return <><Header /><main className="reward-page">
-    <section className="reward-hero"><div className="reward-lang"><button className={lang === 'zh' ? 'active' : ''} onClick={() => setLang('zh')}>中文</button><button className={lang === 'en' ? 'active' : ''} onClick={() => setLang('en')}>English</button></div><p>{t.eyebrow}</p><h1>{t.title}</h1><span>{t.subtitle}</span><div className="reward-count"><b>1</b><i>2</i><i>3</i><i>4</i><i>5</i><strong>FREE<br />免费</strong></div></section>
+    <section className="reward-hero"><div className="reward-lang"><button className={lang === 'zh' ? 'active' : ''} onClick={() => setLang('zh')}>中文</button><button className={lang === 'en' ? 'active' : ''} onClick={() => setLang('en')}>English</button></div><p>{t.eyebrow}</p><h1>{t.title}</h1><span>{t.subtitle}</span><div className="reward-price-location"><b>{t.price}</b><a href="https://maps.google.com/?q=319+Agostino+Rd+San+Gabriel+CA+91776" target="_blank" rel="noreferrer">{t.location}</a></div><div className="reward-count"><b>1</b><i>2</i><i>3</i><i>4</i><i>5</i><strong>FREE<br />免费</strong></div></section>
     {result ? <section className="reward-success"><div>✓</div><h2>{t.success}</h2><p>{t.successText}</p><b>{t.saveLink}</b><code>{progressUrl}</code><button onClick={async () => { await navigator.clipboard.writeText(progressUrl); setCopied(true); }}>{copied ? t.copied : t.copyLink}</button></section> :
     <form className="reward-form" onSubmit={submit}>
       <div className="reward-type"><button type="button" className={accountType === 'personal' ? 'active' : ''} onClick={() => setAccountType('personal')}>{t.personal}</button><button type="button" className={accountType === 'fleet' ? 'active' : ''} onClick={() => setAccountType('fleet')}>{t.fleet}</button></div>
