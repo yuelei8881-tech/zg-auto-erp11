@@ -184,6 +184,7 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, w
   const [packageSaving, setPackageSaving] = useState(false);
   const [rewardVehicleMatch, setRewardVehicleMatch] = useState<RewardVehicleMatch | null>(null);
   const [rewardVehicleChecking, setRewardVehicleChecking] = useState(false);
+  const rewardArrivalPromptKey = useRef('');
   const lastAutomaticTranslation = useRef<Record<TranslationSource, { source: string; translation: string }>>({
     complaint: { source: '', translation: '' }, diagnosis: { source: '', translation: '' }, workPerformed: { source: '', translation: '' },
   });
@@ -311,6 +312,23 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, w
     void findRewardVehicle();
     return () => { cancelled = true; };
   }, [selectedVehicle?.id, selectedVehicle?.vin, selectedVehicle?.plate]);
+  const rewardReadyForSixthVisit = Boolean(
+    rewardVehicleMatch
+    && rewardVehicleMatch.enrollmentStatus === 'approved'
+    && rewardVehicleMatch.qualifying_count >= 5
+    && rewardVehicleMatch.reward_earned_at
+    && !rewardVehicleMatch.reward_redeemed_at
+    && (!rewardVehicleMatch.reward_expires_at || new Date(rewardVehicleMatch.reward_expires_at).getTime() >= Date.now())
+  );
+  useEffect(() => {
+    if (!rewardReadyForSixthVisit || !rewardVehicleMatch || !selectedVehicle) return;
+    const promptKey = `${value?.id || 'new'}:${selectedVehicle.id}:${rewardVehicleMatch.id}`;
+    if (rewardArrivalPromptKey.current === promptKey) return;
+    rewardArrivalPromptKey.current = promptKey;
+    window.alert(
+      `🎁 第 6 次免费保养提醒\n\n车辆：${selectedVehicle.plate || selectedVehicle.vin || `${selectedVehicle.year} ${selectedVehicle.make} ${selectedVehicle.model}`}\n\n该车辆已经完成 5 次符合条件的换机油保养，本次可享免费保养，并免费二选一：\n1. 更换刹车油\n2. 清洗燃油系统\n\n请工作人员在结账前与客户确认本次是否兑换。`,
+    );
+  }, [rewardReadyForSixthVisit, rewardVehicleMatch?.id, selectedVehicle?.id, value?.id]);
   const vehicleOptions = useMemo(() => vehicles.map(item => ({
     value: item.id,
     label: `${item.plate || '无车牌'} · ${item.year} ${item.make} ${item.model} · ${item.ownerName || '无所属账户'}`,
@@ -929,12 +947,12 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, w
       </div><div className="toolbar"><button type="button" onClick={() => setAddingVehicle(false)}>取消</button><button type="button" className="primary" onClick={createVehicle} disabled={vehicleSaving}>{vehicleSaving ? '保存中…' : '保存并选择车辆'}</button></div>
     </div>}{selectedVehicle && <div className="vehicle-strip"><b>{selectedVehicle.plate || '无车牌'}</b><span>VIN {selectedVehicle.vin || '—'}</span><span>Unit {selectedVehicle.unit || '—'}</span><span>{selectedVehicle.ownerName}</span></div>}
       {rewardVehicleChecking && <div className="reward-vehicle-alert checking"><b>正在核对活动资格…</b><span>正在按车辆档案、VIN 和车牌查询。</span></div>}
-      {rewardVehicleMatch && <div className={`reward-vehicle-alert ${rewardVehicleMatch.reward_earned_at && !rewardVehicleMatch.reward_redeemed_at ? 'earned' : ''}`}>
+      {rewardVehicleMatch && <div className={`reward-vehicle-alert ${rewardReadyForSixthVisit ? 'earned' : ''}`}>
         <b>🎁 此车辆已登记“5 次保养送 1 次保养”活动</b>
         {rewardVehicleMatch.enrollmentStatus === 'pending'
           ? <span>活动申请正在等待审核；请先核对客户和车辆资料。</span>
-          : rewardVehicleMatch.reward_earned_at && !rewardVehicleMatch.reward_redeemed_at
-            ? <span>免费保养已可使用{rewardVehicleMatch.reward_expires_at ? `，有效期至 ${new Date(rewardVehicleMatch.reward_expires_at).toLocaleDateString()}` : ''}。结账前请确认本次是否兑换。</span>
+          : rewardReadyForSixthVisit
+            ? <span>🎁 本次可作为第 6 次免费保养，并赠送“更换刹车油”或“清洗燃油系统”二选一{rewardVehicleMatch.reward_expires_at ? `；奖励有效期至 ${new Date(rewardVehicleMatch.reward_expires_at).toLocaleDateString()}` : ''}。结账前请确认是否兑换。</span>
             : <span>当前有效保养累计：{Math.min(5, rewardVehicleMatch.qualifying_count)} / 5 次。本次符合条件的保养完成后可计入。</span>}
       </div>}
     </section>
