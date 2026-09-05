@@ -18,14 +18,14 @@ const copy = {
     personal: '个人客户', fleet: '公司 / 车队', contact: '联系人姓名', phone: '手机号码', email: '电子邮箱', company: '公司名称', tcp: 'TCP 号码', optional: '选填',
     vehicles: '参加活动的车辆', addVehicle: '添加另一辆车', remove: '删除', vin: 'VIN 车架号', plate: '车牌号码', state: '州', year: '年份', make: '品牌', model: '车型', engine: '发动机（选填）', unit: '车队编号（选填）', driver: '实际司机（选填）', driverPhone: '司机电话（选填）', vehicleNotice: '此处为客户预登记资料。车辆到店后，以本店扫描 VIN、识别车牌并由员工核对录入的正式车辆资料为准。',
     termsTitle: '活动规则与免责声明', agree: '我已阅读并同意中英文活动条款；如两种语言有冲突，以英文版本为准。', sms: '我同意接收本活动进度、奖励和维修相关短信。此项为选填；同意短信不是购买服务或参加活动的条件。可回复 STOP 退订。',
-    submit: '登记参加活动', submitting: '正在安全提交…', success: '登记已收到', successText: '我们会核对客户与车辆资料。通过后，登记日期之后符合条件的保养将按车辆分别累计；完成 5 次后，第 6 次同等保养免费，并可免费选择“清洗燃油系统”或“更换刹车油”其中一项。', saveLink: '请保存您的专属进度查询链接', copyLink: '复制链接', copied: '已复制', error: '提交失败，请检查资料后重试。',
+    submit: '登记参加活动', submitting: '正在安全提交…', success: '登记已收到', successText: '我们会核对客户与车辆资料。通过后，登记日期之后符合条件的保养将按车辆分别累计；完成 5 次后，第 6 次同等保养免费，并可免费选择“清洗燃油系统”或“更换刹车油”其中一项。', existingSuccess: '老客户车辆已自动加入', existingSuccessText: '作为老客户，您的车辆已经自动添加到活动系统，并已自动累计 1 次保养记录。系统已为您打开现有活动进度，不会重复累计。', saveLink: '请保存您的专属进度查询链接', copyLink: '复制链接', copied: '已复制', error: '提交失败，请检查资料后重试。',
   },
   en: {
     eyebrow: 'Z&G Maintenance Rewards', title: 'Complete 5 services. Get 1 maintenance service free.', subtitle: 'Plus, choose one complimentary add-on: brake-fluid replacement or fuel-system cleaning. Uses Castrol 5W-30, includes coolant and windshield-washer fluid top-offs as needed, and includes 7 complimentary inspections. Progress is tracked separately for each vehicle.', price: 'Regular price: $100 per service', location: '319 Agostino Rd, San Gabriel, CA 91776 · 626-508-0888',
     personal: 'Individual', fleet: 'Business / Fleet', contact: 'Contact name', phone: 'Mobile number', email: 'Email address', company: 'Legal business name', tcp: 'TCP number', optional: 'Optional',
     vehicles: 'Participating vehicles', addVehicle: 'Add another vehicle', remove: 'Remove', vin: 'VIN', plate: 'License plate', state: 'State', year: 'Year', make: 'Make', model: 'Model', engine: 'Engine (optional)', unit: 'Fleet unit (optional)', driver: 'Driver name (optional)', driverPhone: 'Driver phone (optional)', vehicleNotice: 'Customer-entered information is preliminary. After arrival, the shop’s VIN scan, plate recognition, and staff-verified vehicle record will control.',
     termsTitle: 'Program Terms & Disclosures', agree: 'I have read and agree to the bilingual program terms. If the two versions conflict, the English version controls.', sms: 'I agree to receive transactional program progress, reward, and repair-related text messages. Optional; SMS consent is not a condition of purchase or participation. Reply STOP to opt out.',
-    submit: 'Enroll in rewards', submitting: 'Submitting securely…', success: 'Enrollment received', successText: 'We will review and match your records. Qualifying maintenance services after enrollment are tracked separately for each vehicle; after 5, the 6th equivalent service is complimentary and includes a choice of one complimentary add-on: fuel-system cleaning or brake-fluid replacement.', saveLink: 'Save your private progress link', copyLink: 'Copy link', copied: 'Copied', error: 'Submission failed. Please review the information and try again.',
+    submit: 'Enroll in rewards', submitting: 'Submitting securely…', success: 'Enrollment received', successText: 'We will review and match your records. Qualifying maintenance services after enrollment are tracked separately for each vehicle; after 5, the 6th equivalent service is complimentary and includes a choice of one complimentary add-on: fuel-system cleaning or brake-fluid replacement.', existingSuccess: 'Existing customer vehicle added', existingSuccessText: 'As an existing customer, your vehicle was automatically added to the rewards program with 1 maintenance visit already credited. We opened your existing progress and did not add a duplicate credit.', saveLink: 'Save your private progress link', copyLink: 'Copy link', copied: 'Copied', error: 'Submission failed. Please review the information and try again.',
   },
 };
 
@@ -79,7 +79,7 @@ export function OilChangeRewardsPage({ Header, Footer }: { Header: ComponentType
   const [accountType, setAccountType] = useState<'personal' | 'fleet'>('personal');
   const [form, setForm] = useState({ contactName: '', phone: '', email: '', companyName: '', tcpNumber: '', termsAccepted: false, smsConsent: false });
   const [vehicles, setVehicles] = useState<VehicleForm[]>([blankVehicle()]);
-  const [busy, setBusy] = useState(false); const [error, setError] = useState(''); const [result, setResult] = useState<{ enrollmentId: string; token: string } | null>(null); const [copied, setCopied] = useState(false);
+  const [busy, setBusy] = useState(false); const [error, setError] = useState(''); const [result, setResult] = useState<{ enrollmentId: string; token: string; existingCustomer?: boolean } | null>(null); const [copied, setCopied] = useState(false);
   const rewardToken = useMemo(() => new URLSearchParams(window.location.search).get('reward_token')?.trim() || '', []);
   const [progress, setProgress] = useState<RewardProgress | null>(null);
   const [progressBusy, setProgressBusy] = useState(Boolean(rewardToken));
@@ -109,9 +109,9 @@ export function OilChangeRewardsPage({ Header, Footer }: { Header: ComponentType
       if (!supabase) throw new Error('Service unavailable');
       const { data, error: rpcError } = await supabase.rpc('zg_submit_oil_reward_registration', { p_payload: { accountType, ...form, preferredLanguage: lang, termsVersion, vehicles } });
       if (rpcError) throw rpcError;
-      const payload = data as { enrollmentId?: string; token?: string };
+      const payload = data as { enrollmentId?: string; token?: string; existingCustomer?: boolean };
       if (!payload?.enrollmentId || !payload?.token) throw new Error('Invalid server response');
-      setResult({ enrollmentId: payload.enrollmentId, token: payload.token });
+      setResult({ enrollmentId: payload.enrollmentId, token: payload.token, existingCustomer: payload.existingCustomer === true });
     } catch (cause) { setError(cause instanceof Error ? cause.message : t.error); } finally { setBusy(false); }
   };
   if (rewardToken) return <><Header /><main className="reward-page"><section className="reward-progress">
@@ -131,7 +131,7 @@ export function OilChangeRewardsPage({ Header, Footer }: { Header: ComponentType
   </section><CurrentOffers /></main><Footer /></>;
   return <><Header /><main className="reward-page">
     <section className="reward-hero"><div className="reward-lang"><button className={lang === 'zh' ? 'active' : ''} onClick={() => setLang('zh')}>中文</button><button className={lang === 'en' ? 'active' : ''} onClick={() => setLang('en')}>English</button></div><p>{t.eyebrow}</p><h1>{t.title}</h1><span>{t.subtitle}</span><div className="reward-price-location"><b>{t.price}</b><a href="https://maps.google.com/?q=319+Agostino+Rd+San+Gabriel+CA+91776" target="_blank" rel="noreferrer">{t.location}</a></div><div className="reward-count"><b>1</b><i>2</i><i>3</i><i>4</i><i>5</i><strong>FREE<br />免费</strong></div></section>
-    {result ? <section className="reward-success"><div>✓</div><h2>{t.success}</h2><p>{t.successText}</p><b>{t.saveLink}</b><code>{progressUrl}</code><button onClick={async () => { await navigator.clipboard.writeText(progressUrl); setCopied(true); }}>{copied ? t.copied : t.copyLink}</button></section> :
+    {result ? <section className="reward-success"><div>✓</div><h2>{result.existingCustomer ? t.existingSuccess : t.success}</h2><p>{result.existingCustomer ? t.existingSuccessText : t.successText}</p><b>{t.saveLink}</b><code>{progressUrl}</code><button onClick={async () => { await navigator.clipboard.writeText(progressUrl); setCopied(true); }}>{copied ? t.copied : t.copyLink}</button></section> :
     <form className="reward-form" onSubmit={submit}>
       <div className="reward-type"><button type="button" className={accountType === 'personal' ? 'active' : ''} onClick={() => setAccountType('personal')}>{t.personal}</button><button type="button" className={accountType === 'fleet' ? 'active' : ''} onClick={() => setAccountType('fleet')}>{t.fleet}</button></div>
       <section><h2>1. {accountType === 'fleet' ? t.fleet : t.personal}</h2><div className="reward-grid"><label>{t.contact}<input required value={form.contactName} onChange={e => setForm({ ...form, contactName: e.target.value })} /></label><label>{t.phone}<input required type="tel" value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} /></label><label>{t.email}<input required type="email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} /></label>{accountType === 'fleet' && <label>{t.company}<input required value={form.companyName} onChange={e => setForm({ ...form, companyName: e.target.value })} /></label>}<label>{t.tcp} ({accountType === 'personal' ? t.optional : ''})<input required={accountType === 'fleet'} value={form.tcpNumber} onChange={e => setForm({ ...form, tcpNumber: e.target.value })} /></label></div></section>
