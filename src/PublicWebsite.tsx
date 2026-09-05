@@ -12,7 +12,7 @@ const business = {
 const publicUrl = (path: string) => window.location.pathname.startsWith('/website') ? `/website${path === '/' ? '' : path}` : path;
 
 function Header() {
-  return <header className="public-header"><a className="public-brand" href={publicUrl('/')}><span>Z&amp;G</span><b>小资本大黑专修厂</b></a><nav><a href={`${publicUrl('/')}#services`}>Services</a><a href={publicUrl('/oil-change-rewards')}>Maintenance Rewards / 保养活动</a><a href={`${publicUrl('/')}#contact`}>Contact</a><a href={publicUrl('/privacy')}>Privacy</a><a href={publicUrl('/terms')}>SMS Terms</a></nav><a className="public-call" href="tel:+16265080888">Call {business.phone}</a></header>;
+  return <header className="public-header"><a className="public-brand" href={publicUrl('/')}><span>Z&amp;G</span><b style={{ color: '#72e0c1', fontSize: 11, letterSpacing: 1, marginTop: 6 }}>小资本大黑专修厂</b></a><nav><a href={`${publicUrl('/')}#services`}>Services</a><a href={publicUrl('/oil-change-rewards')}>Maintenance Rewards / 保养活动</a><a href={`${publicUrl('/')}#contact`}>Contact</a><a href={publicUrl('/privacy')}>Privacy</a><a href={publicUrl('/terms')}>SMS Terms</a></nav><a className="public-call" href="tel:+16265080888">Call {business.phone}</a></header>;
 }
 
 function Footer() {
