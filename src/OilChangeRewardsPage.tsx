@@ -10,7 +10,8 @@ type RewardProgress = {
   vehicles: Array<{ id: string; vinLast6?: string; plate?: string; year?: number; make?: string; model?: string; count?: number; rewardEarnedAt?: string; rewardExpiresAt?: string; rewardRedeemedAt?: string; status?: string }>;
 };
 const blankVehicle = (): VehicleForm => ({ vin: '', plate: '', state: 'CA', year: '', make: '', model: '', engine: '', unit: '', driverName: '', driverPhone: '' });
-const termsVersion = '2026-09-07-maintenance-v7';
+// Keep the production-compatible identifier until migration 025 is installed.
+const termsVersion = '2026-09-05-maintenance-v6';
 
 const copy = {
   zh: {
