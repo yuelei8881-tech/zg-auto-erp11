@@ -326,7 +326,7 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, w
     if (rewardArrivalPromptKey.current === promptKey) return;
     rewardArrivalPromptKey.current = promptKey;
     window.alert(
-      `🎁 第 6 次免费保养提醒\n\n车辆：${selectedVehicle.plate || selectedVehicle.vin || `${selectedVehicle.year} ${selectedVehicle.make} ${selectedVehicle.model}`}\n\n该车辆已经完成 5 次符合条件的换机油保养，本次可享免费保养，并免费二选一：\n1. 更换刹车油\n2. 清洗燃油系统\n\n请工作人员在结账前与客户确认本次是否兑换。`,
+      `🎁 第 6 次免费保养提醒\n\n车辆：${selectedVehicle.plate || selectedVehicle.vin || `${selectedVehicle.year} ${selectedVehicle.make} ${selectedVehicle.model}`}\n\n该车辆已经完成 5 次符合条件的换机油保养，本次可享免费保养。\n\n请工作人员在结账前与客户确认本次是否兑换。`,
     );
   }, [rewardReadyForSixthVisit, rewardVehicleMatch?.id, selectedVehicle?.id, value?.id]);
   const vehicleOptions = useMemo(() => vehicles.map(item => ({
@@ -952,7 +952,7 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, w
         {rewardVehicleMatch.enrollmentStatus === 'pending'
           ? <span>活动申请正在等待审核；请先核对客户和车辆资料。</span>
           : rewardReadyForSixthVisit
-            ? <span>🎁 本次可作为第 6 次免费保养，并赠送“更换刹车油”或“清洗燃油系统”二选一{rewardVehicleMatch.reward_expires_at ? `；奖励有效期至 ${new Date(rewardVehicleMatch.reward_expires_at).toLocaleDateString()}` : ''}。结账前请确认是否兑换。</span>
+            ? <span>🎁 本次可作为第 6 次免费保养{rewardVehicleMatch.reward_expires_at ? `；奖励有效期至 ${new Date(rewardVehicleMatch.reward_expires_at).toLocaleDateString()}` : ''}。结账前请确认是否兑换。</span>
             : <span>当前有效保养累计：{Math.min(5, rewardVehicleMatch.qualifying_count)} / 5 次。本次符合条件的保养完成后可计入。</span>}
       </div>}
     </section>
