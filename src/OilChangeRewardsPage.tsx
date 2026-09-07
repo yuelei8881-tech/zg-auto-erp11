@@ -111,7 +111,14 @@ export function OilChangeRewardsPage({ Header, Footer }: { Header: ComponentType
       const payload = data as { enrollmentId?: string; token?: string; existingCustomer?: boolean };
       if (!payload?.enrollmentId || !payload?.token) throw new Error('Invalid server response');
       setResult({ enrollmentId: payload.enrollmentId, token: payload.token, existingCustomer: payload.existingCustomer === true });
-    } catch (cause) { setError(cause instanceof Error ? cause.message : t.error); } finally { setBusy(false); }
+    } catch (cause) {
+      const message = cause instanceof Error
+        ? cause.message
+        : cause && typeof cause === 'object' && 'message' in cause
+          ? String((cause as { message?: unknown }).message || '')
+          : '';
+      setError(message || t.error);
+    } finally { setBusy(false); }
   };
   if (rewardToken) return <><Header /><main className="reward-page"><section className="reward-progress">
     <p className="reward-progress-eyebrow">Z&amp;G MAINTENANCE REWARDS / 保养奖励</p>
