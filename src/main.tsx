@@ -1295,6 +1295,7 @@ function Finance({ store, openModal, persist, requestPaymentCorrection, requestE
   const [selectedDate, setSelectedDate] = useState(() => losAngelesDateKey(new Date().toISOString()));
   const [customerQuery, setCustomerQuery] = useState('');
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
+  const [selectedExpenseMethod, setSelectedExpenseMethod] = useState('');
   const paymentRows = useMemo(() => [...store.payments].sort((a, b) => b.date.localeCompare(a.date)), [store.payments]);
   const expenseRows = useMemo(() => [...store.expenses].sort((a, b) => b.date.localeCompare(a.date)), [store.expenses]);
   const dailyPayments = useMemo(() => paymentRows.filter(item => !item.archivedAt && losAngelesDateKey(item.date) === selectedDate), [paymentRows, selectedDate]);
@@ -1309,6 +1310,15 @@ function Finance({ store, openModal, persist, requestPaymentCorrection, requestE
     });
     return [...groups.entries()].sort((a, b) => b[1] - a[1]);
   }, [dailyPayments]);
+  const expenseGroups = useMemo(() => {
+    const groups = new Map<string, number>();
+    dailyExpenses.forEach(expense => {
+      const method = expense.method?.trim() || '未记录';
+      groups.set(method, (groups.get(method) || 0) + Number(expense.amount || 0));
+    });
+    return [...groups.entries()].sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]));
+  }, [dailyExpenses]);
+  const visibleDailyExpenses = selectedExpenseMethod ? dailyExpenses.filter(expense => (expense.method?.trim() || '未记录') === selectedExpenseMethod) : dailyExpenses;
   const accountCandidates = useMemo(() => store.customers
     .filter(item => !(item as Customer & { archived?: boolean }).archived)
     .filter(item => !customerQuery.trim() || normalizeSearch([item.name, item.phone, item.email].join(' ')).includes(normalizeSearch(customerQuery)))
@@ -1334,6 +1344,7 @@ function Finance({ store, openModal, persist, requestPaymentCorrection, requestE
     const next = new Date(`${selectedDate}T12:00:00`);
     next.setDate(next.getDate() + days);
     setSelectedDate(next.toISOString().slice(0, 10));
+    setSelectedExpenseMethod('');
   };
   const requestDailyReconciliation = async () => {
     if (reconciliation?.status === '待授权') return alert(`这一天已经由 ${reconciliation.requestedBy} 提交，正在等待另一账号审核。`);
@@ -1439,11 +1450,12 @@ function Finance({ store, openModal, persist, requestPaymentCorrection, requestE
     alert(`小票退款已保存。\n原支出已冲减 ${money(amount)}，${method}余额已增加；原小票记录仍然保留。`);
   };
   return <div className="page finance-page"><div className="page-title"><div><p className="eyebrow">Finance Center</p><h2>每日财务与客户账单</h2><p>可回看任意洛杉矶日期，并由两个不同账号补做对账。</p></div><div className="title-actions"><button onClick={refundReceipt}>↩ 小票退款</button><button className="primary-soft" onClick={recordIncome}>＋ 记录收入</button><button className="primary" onClick={() => openModal('expense')}>＋ 记录支出</button></div></div>
-    <section className="panel daily-finance-panel"><div className="daily-date-toolbar"><button onClick={() => changeDate(-1)}>‹ 前一天</button><label>查看日期（洛杉矶）<input type="date" value={selectedDate} onChange={event => setSelectedDate(event.target.value)} /></label><button onClick={() => setSelectedDate(losAngelesDateKey(new Date().toISOString()))}>今天</button><button onClick={() => changeDate(1)}>后一天 ›</button></div>
+    <section className="panel daily-finance-panel"><div className="daily-date-toolbar"><button onClick={() => changeDate(-1)}>‹ 前一天</button><label>查看日期（洛杉矶）<input type="date" value={selectedDate} onChange={event => { setSelectedDate(event.target.value); setSelectedExpenseMethod(''); }} /></label><button onClick={() => { setSelectedDate(losAngelesDateKey(new Date().toISOString())); setSelectedExpenseMethod(''); }}>今天</button><button onClick={() => changeDate(1)}>后一天 ›</button></div>
       <div className="kpi-grid"><Kpi label={`${selectedDate} 实收`} value={money(dailyIncome)} tone="green" /><Kpi label="当日支出" value={money(dailyExpense)} tone="orange" /><Kpi label="当日净额" value={money(dailyIncome - dailyExpense)} tone="purple" /><Kpi label="流水数量" value={`${dailyPayments.length} 收 / ${dailyExpenses.length} 支`} /></div>
       <div className="daily-reconciliation"><div><b>双人每日对账</b><span>{reconciliation?.status === '已执行' ? `已完成：${reconciliation.requestedBy} ＋ ${reconciliation.approvedBy}` : reconciliation?.status === '待授权' ? `等待第二人审核；第一确认人：${reconciliation.requestedBy}` : '尚未对账；即使错过当天，也可以选择日期补做。'}</span></div><button className={reconciliation?.status === '已执行' ? '' : 'primary'} onClick={() => void requestDailyReconciliation()}>{reconciliation?.status === '已执行' ? '查看对账状态' : reconciliation?.status === '待授权' ? '等待第二人审核' : '第一人确认并提交'}</button></div>
-      {!!paymentGroups.length && <div className="payment-method-summary">{paymentGroups.map(([method, amount]) => <div key={method}><span>{method}</span><b>{money(amount)}</b></div>)}</div>}
-      <div className="split-panels"><section><h3>当日收款明细</h3><DetailPayments rows={dailyPayments} /></section><section><h3>当日支出明细</h3><DetailExpenses rows={dailyExpenses} /></section></div>
+      {!!paymentGroups.length && <div className="daily-composition"><h3>当日收入组成</h3><div className="payment-method-summary">{paymentGroups.map(([method, amount]) => <div key={method}><span>{method}</span><b>{money(amount)}</b></div>)}</div></div>}
+      {!!expenseGroups.length && <div className="daily-composition expense-composition"><div className="section-title"><div><h3>当日支出组成</h3><p>点击付款方式筛选下方支出明细</p></div>{selectedExpenseMethod && <button type="button" onClick={() => setSelectedExpenseMethod('')}>查看全部支出</button>}</div><div className="payment-method-summary">{expenseGroups.map(([method, amount]) => <button type="button" className={selectedExpenseMethod === method ? 'selected' : ''} key={method} onClick={() => setSelectedExpenseMethod(current => current === method ? '' : method)}><span>{method}</span><b>{money(amount)}</b><small>点击查看明细</small></button>)}</div></div>}
+      <div className="split-panels"><section><h3>当日收款明细</h3><DetailPayments rows={dailyPayments} /></section><section><h3>当日支出明细{selectedExpenseMethod ? ` · ${selectedExpenseMethod}` : ''}</h3><DetailExpenses rows={visibleDailyExpenses} /></section></div>
     </section>
     <section className="panel customer-ledger-panel"><div className="section-title"><div><h3>客户账单汇总</h3><span>搜索并点击一次，即可查看同一客户全部工单、累计已付和欠款。</span></div></div><input type="search" value={customerQuery} onChange={event => setCustomerQuery(event.target.value)} placeholder="输入客户姓名、公司、电话或邮箱" /><div className="customer-ledger-results">{accountCandidates.map(item => <button key={item.id} onClick={() => setSelectedCustomer(item)}><b>{item.name}</b><span>{item.phone || '未记录电话'}</span></button>)}</div></section>
     <div className="split-panels recent-finance-panels"><section className="panel"><h3>最近收款</h3><table><thead><tr><th>日期/工单</th><th>客户</th><th>方式</th><th>金额</th><th /></tr></thead><tbody>{paymentRows.map(item => <tr key={item.id}><td>{new Date(item.date).toLocaleDateString()}<small>{item.workOrderNumber}</small></td><td>{item.customer}<small>{item.status || '有效'}</small></td><td>{item.method}</td><td className={item.amount > 0 ? 'success-text' : 'muted'}><b>{money(item.amount)}</b>{item.originalAmount !== undefined && <small>原记录 {money(item.originalAmount)}</small>}</td><td><button onClick={() => void requestPaymentCorrection(item)}>申请更正</button></td></tr>)}</tbody></table></section><section className="panel"><h3>最近支出</h3><table><thead><tr><th>日期</th><th>类别/收款方</th><th>方式</th><th>金额</th><th /></tr></thead><tbody>{expenseRows.map(item => <tr key={item.id}><td>{item.date}</td><td>{item.category}<small>{item.vendor}</small><small>{item.status || '有效'}{item.correctionReason ? ` · ${item.correctionReason}` : ''}</small></td><td>{item.method || '—'}</td><td className={item.amount > 0 ? 'warning-text' : 'muted'}><b>{money(item.amount)}</b>{item.originalAmount !== undefined && <small>原记录 {money(item.originalAmount)}</small>}</td><td><button onClick={() => void requestExpenseCorrection(item)}>申请更正</button></td></tr>)}</tbody></table></section></div>
