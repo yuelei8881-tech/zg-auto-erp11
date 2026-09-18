@@ -1465,6 +1465,14 @@ function TaxReports({ store }: ContentProps) {
     return [...values].sort().reverse();
   }, [store.workOrders, currentQuarter]);
   const [quarter, setQuarter] = useState(currentQuarter);
+  const [taxDetail, setTaxDetail] = useState<{ title: string; date?: string; metric?: 'tax' | 'labor' | 'parts' | 'total'; source?: string } | null>(null);
+  const classifyIncomeSource = (value: unknown) => {
+    const method = String(value || '').trim();
+    if (/现金|cash/i.test(method)) return '现金';
+    if (/pos|刷卡|信用卡|借记卡|credit|debit|card/i.test(method)) return 'POS';
+    if (/转账|银行|zelle|wire|ach|扫码|二维码|wechat|alipay/i.test(method)) return '转账';
+    return '其他 / 未记录';
+  };
   const report = useMemo(() => {
     const match = quarter.match(/^(\d{4})-Q([1-4])$/);
     const year = Number(match?.[1] || new Date().getFullYear());
@@ -1493,26 +1501,17 @@ function TaxReports({ store }: ContentProps) {
       outsource: sum.outsource + row.outsource,
       total: sum.total + row.total,
     }), { orders: 0, labor: 0, parts: 0, tax: 0, outsource: 0, total: 0 });
-    return { days, totals, orders };
-  }, [quarter, store.workOrders]);
-  useEffect(() => {
-    const table = document.querySelector<HTMLTableElement>('.tax-report-table');
-    const body = table?.tBodies[0];
-    if (!body) return;
-    const openDetails = (event: Event) => {
-      const row = (event.target as HTMLElement).closest('tr');
-      const date = row?.cells[0]?.textContent?.trim();
-      if (!date) return;
-      const orders = report.orders.filter(order => String(order.date || '').slice(0, 10) === date);
-      const lines = orders.map(order => `<tr><td><b>${escapeHtml(order.number || '—')}</b></td><td>${escapeHtml(order.customer || order.company || '—')}<small>${escapeHtml(order.plate || '')} ${escapeHtml(order.vehicle || '')}</small></td><td>${money(order.laborTotal || 0)}</td><td>${money(order.partsTotal || 0)}</td><td>${money(order.tax || 0)}</td><td>${money(order.outsource || 0)}</td><td><b>${money(order.total || 0)}</b></td></tr>`).join('');
-      const popup = window.open('', '_blank', 'width=1100,height=760');
-      if (!popup) return alert('浏览器阻止了明细窗口，请允许本站打开弹出窗口。');
-      popup.document.write(`<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>${escapeHtml(date)} 税务明细</title><style>body{font-family:Arial,"Microsoft YaHei",sans-serif;color:#172033;padding:28px}h1{margin:0 0 5px}.sub{color:#667085;margin-bottom:22px}table{width:100%;border-collapse:collapse}th,td{border:1px solid #d8dee9;padding:10px;text-align:right}th{background:#f2f6fc}th:nth-child(-n+2),td:nth-child(-n+2){text-align:left}small{display:block;color:#667085;margin-top:4px}.actions{margin-bottom:18px}.actions button{padding:9px 16px;border:1px solid #b8c2d2;border-radius:8px;background:#fff;cursor:pointer}@media print{.actions{display:none}}</style></head><body><div class="actions"><button onclick="window.print()">打印明细</button></div><h1>${escapeHtml(date)} 每日税务明细</h1><div class="sub">Daily Sales Tax & Labor Revenue · ${orders.length} 张工单</div><table><thead><tr><th>工单</th><th>客户 / 车辆</th><th>人工</th><th>配件</th><th>销售税</th><th>外包</th><th>总额</th></tr></thead><tbody>${lines}</tbody></table></body></html>`);
-      popup.document.close();
-    };
-    body.addEventListener('click', openDetails);
-    return () => body.removeEventListener('click', openDetails);
-  }, [report.orders]);
+    const payments = store.payments.filter(payment => payment.status !== '已作废' && monthKeys.some(key => losAngelesDateKey(payment.date).startsWith(key)));
+    const sourceMap = new Map<string, number>([['现金', 0], ['转账', 0], ['POS', 0], ['其他 / 未记录', 0]]);
+    payments.forEach(payment => {
+      const entries = payment.splits?.length ? payment.splits : [{ method: payment.method, amount: payment.amount }];
+      entries.forEach(entry => {
+        const source = classifyIncomeSource(entry.method);
+        sourceMap.set(source, (sourceMap.get(source) || 0) + Number(entry.amount || 0));
+      });
+    });
+    return { days, totals, orders, payments, incomeSources: [...sourceMap.entries()] as Array<[string, number]> };
+  }, [quarter, store.workOrders, store.payments]);
   const exportCsv = () => {
     const rows = [
       ['Date', 'Work Orders', 'Labor Revenue', 'Parts Sales', 'Sales Tax', 'Outsource', 'Invoice Total'],
@@ -1527,7 +1526,19 @@ function TaxReports({ store }: ContentProps) {
     link.click();
     URL.revokeObjectURL(url);
   };
-  return <div className="page tax-report-page"><div className="page-title"><div><p className="eyebrow">Tax Reporting Database</p><h2>税务数据库 / 季度报税</h2><p>销售税与人工收入按工单日期逐日分开汇总。</p></div><div className="title-actions"><select value={quarter} onChange={event => setQuarter(event.target.value)}>{quarterOptions.map(item => <option key={item} value={item}>{item.replace('-', ' ')}</option>)}</select><button className="primary" onClick={exportCsv}>导出季度 CSV</button></div></div><div className="kpi-grid"><Kpi label={`${quarter} 配件销售税`} value={money(report.totals.tax)} tone="orange" /><Kpi label={`${quarter} 人工收入`} value={money(report.totals.labor)} tone="green" /><Kpi label={`${quarter} 配件销售额`} value={money(report.totals.parts)} tone="blue" /><Kpi label={`${quarter} 工单总额`} value={money(report.totals.total)} tone="purple" /></div><section className="panel tax-summary-note"><b>季度汇总：</b><span>{report.totals.orders} 张工单</span><span>外包 {money(report.totals.outsource)}</span><span>销售税 {money(report.totals.tax)}</span><span>人工收入 {money(report.totals.labor)}</span></section><section className="panel"><div className="section-title"><div><h3>每日税务明细</h3><p>Daily Sales Tax & Labor Revenue</p></div><b>{quarter.replace('-', ' ')}</b></div><table className="tax-report-table"><thead><tr><th>日期</th><th>工单数</th><th>人工收入</th><th>配件销售额</th><th>销售税</th><th>外包</th><th>工单总额</th></tr></thead><tbody>{report.days.map(row => <tr key={row.date}><td><b>{row.date}</b></td><td>{row.orders}</td><td>{money(row.labor)}</td><td>{money(row.parts)}</td><td className="warning-text"><b>{money(row.tax)}</b></td><td>{money(row.outsource)}</td><td><b>{money(row.total)}</b></td></tr>)}</tbody><tfoot><tr><th>季度合计</th><th>{report.totals.orders}</th><th>{money(report.totals.labor)}</th><th>{money(report.totals.parts)}</th><th>{money(report.totals.tax)}</th><th>{money(report.totals.outsource)}</th><th>{money(report.totals.total)}</th></tr></tfoot></table>{!report.days.length && <Empty text="这个季度还没有可汇总的工单。" />}</section><section className="panel tax-disclaimer"><b>报税提示</b><p>本报表依据系统工单中的人工、配件销售额和最终销售税生成；手动税额会按工单最终记录计入。正式申报前请由会计核对退货、作废、折扣及应税例外。</p></section></div>;
+  const detailOrders = taxDetail?.date ? report.orders.filter(order => String(order.date || '').slice(0, 10) === taxDetail.date) : report.orders;
+  const detailPayments = report.payments.filter(payment => {
+    if (taxDetail?.date && losAngelesDateKey(payment.date) !== taxDetail.date) return false;
+    if (!taxDetail?.source) return true;
+    const entries = payment.splits?.length ? payment.splits : [{ method: payment.method, amount: payment.amount }];
+    return entries.some(entry => classifyIncomeSource(entry.method) === taxDetail.source);
+  }).map(payment => {
+    if (!taxDetail?.source) return payment;
+    const entries = payment.splits?.length ? payment.splits : [{ method: payment.method, amount: payment.amount }];
+    const matching = entries.filter(entry => classifyIncomeSource(entry.method) === taxDetail.source);
+    return { ...payment, amount: matching.reduce((sum, entry) => sum + Number(entry.amount || 0), 0), method: taxDetail.source, splits: matching };
+  });
+  return <div className="page tax-report-page"><div className="page-title"><div><p className="eyebrow">Tax Reporting Database</p><h2>税务数据库 / 季度报税</h2><p>销售税、人工收入与真实收款来源按季度和日期汇总；点击任意卡片或日期可展开。</p></div><div className="title-actions"><select value={quarter} onChange={event => setQuarter(event.target.value)}>{quarterOptions.map(item => <option key={item} value={item}>{item.replace('-', ' ')}</option>)}</select><button className="primary" onClick={exportCsv}>导出季度 CSV</button></div></div><div className="kpi-grid"><Kpi label={`${quarter} 配件销售税`} value={money(report.totals.tax)} tone="orange" hint="点击查看组成" onClick={() => setTaxDetail({ title: `${quarter} 配件销售税明细`, metric: 'tax' })} /><Kpi label={`${quarter} 人工收入`} value={money(report.totals.labor)} tone="green" hint="点击查看组成" onClick={() => setTaxDetail({ title: `${quarter} 人工收入明细`, metric: 'labor' })} /><Kpi label={`${quarter} 配件销售额`} value={money(report.totals.parts)} tone="blue" hint="点击查看组成" onClick={() => setTaxDetail({ title: `${quarter} 配件销售额明细`, metric: 'parts' })} /><Kpi label={`${quarter} 工单总额`} value={money(report.totals.total)} tone="purple" hint="点击查看全部工单" onClick={() => setTaxDetail({ title: `${quarter} 工单总额明细`, metric: 'total' })} /></div><section className="panel tax-income-sources"><div className="section-title"><div><h3>收入来源分类</h3><p>依据实际收款流水统计，组合付款会分别计入对应分类</p></div><b>实收 {money(report.payments.reduce((sum, item) => sum + Number(item.amount || 0), 0))}</b></div><div className="tax-source-grid">{report.incomeSources.map(([source, amount]) => <button type="button" key={source} onClick={() => setTaxDetail({ title: `${quarter} ${source}收入明细`, source })}><span>{source}</span><b>{money(amount)}</b><small>点击展开流水</small></button>)}</div></section><section className="panel tax-summary-note"><b>季度汇总：</b><button type="button" onClick={() => setTaxDetail({ title: `${quarter} 全部工单`, metric: 'total' })}>{report.totals.orders} 张工单</button><button type="button" onClick={() => setTaxDetail({ title: `${quarter} 外包明细` })}>外包 {money(report.totals.outsource)}</button><button type="button" onClick={() => setTaxDetail({ title: `${quarter} 销售税明细`, metric: 'tax' })}>销售税 {money(report.totals.tax)}</button><button type="button" onClick={() => setTaxDetail({ title: `${quarter} 人工收入明细`, metric: 'labor' })}>人工收入 {money(report.totals.labor)}</button></section><section className="panel"><div className="section-title"><div><h3>每日税务明细</h3><p>点击任意日期展开当天工单和收款来源</p></div><b>{quarter.replace('-', ' ')}</b></div><table className="tax-report-table"><thead><tr><th>日期</th><th>工单数</th><th>人工收入</th><th>配件销售额</th><th>销售税</th><th>外包</th><th>工单总额</th></tr></thead><tbody>{report.days.map(row => <tr key={row.date} onClick={() => setTaxDetail({ title: `${row.date} 每日明细`, date: row.date })}><td><b>{row.date}</b><small>点击展开</small></td><td>{row.orders}</td><td>{money(row.labor)}</td><td>{money(row.parts)}</td><td className="warning-text"><b>{money(row.tax)}</b></td><td>{money(row.outsource)}</td><td><b>{money(row.total)}</b></td></tr>)}</tbody><tfoot><tr><th>季度合计</th><th>{report.totals.orders}</th><th>{money(report.totals.labor)}</th><th>{money(report.totals.parts)}</th><th>{money(report.totals.tax)}</th><th>{money(report.totals.outsource)}</th><th>{money(report.totals.total)}</th></tr></tfoot></table>{!report.days.length && <Empty text="这个季度还没有可汇总的工单。" />}</section><section className="panel tax-disclaimer"><b>报税提示</b><p>本报表依据系统工单中的人工、配件销售额和最终销售税生成；手动税额会按工单最终记录计入。正式申报前请由会计核对退货、作废、折扣及应税例外。</p></section>{taxDetail && <div className="modal-backdrop" onMouseDown={event => event.target === event.currentTarget && setTaxDetail(null)}><div className="modal today-payment-modal tax-detail-modal"><div className="modal-head"><div><p className="eyebrow">税务与收入二级明细</p><h2>{taxDetail.title}</h2><span>{detailOrders.length} 张工单 · {detailPayments.length} 笔收款</span></div><button type="button" onClick={() => setTaxDetail(null)}>×</button></div><div className="payment-method-summary">{(['现金', '转账', 'POS', '其他 / 未记录'] as const).map(source => { const amount = detailPayments.reduce((sum, payment) => { const entries = payment.splits?.length ? payment.splits : [{ method: payment.method, amount: payment.amount }]; return sum + entries.filter(entry => classifyIncomeSource(entry.method) === source).reduce((part, entry) => part + Number(entry.amount || 0), 0); }, 0); return <div key={source}><span>{source}</span><b>{money(amount)}</b></div>; })}</div><DetailOrders rows={detailOrders} mode={taxDetail.metric === 'total' ? 'total' : 'gross'} /><DetailPayments rows={detailPayments} /></div></div>}</div>;
 }
 
 async function prepareReceiptImage(file: File) {
