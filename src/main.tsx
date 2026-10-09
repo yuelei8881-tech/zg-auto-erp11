@@ -92,6 +92,7 @@ function App({ cloud }: { cloud: CloudSession }) {
   const [store, setStore] = useState<AppStore>(emptyStore);
   const [page, setPage] = useState<Page>('dashboard');
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
   const [syncing, setSyncing] = useState(false);
   const [refreshState, setRefreshState] = useState<'loading' | 'ready' | 'error'>('loading');
   const [refreshedAt, setRefreshedAt] = useState(0);
@@ -147,6 +148,7 @@ function App({ cloud }: { cloud: CloudSession }) {
       // Overlap two minutes so records committed near the cache timestamp can
       // never be skipped because of device/server clock differences.
       setRefreshState('loading');
+      setLoadError('');
       const requestStartedAt = Date.now();
       const updatedSince = lastCloudSyncAt.current ? new Date(Math.max(0, lastCloudSyncAt.current - 120_000)).toISOString() : undefined;
       // Update cached figures before waiting for historical reconciliation.
@@ -175,6 +177,7 @@ function App({ cloud }: { cloud: CloudSession }) {
       setRefreshState('ready');
     }
     catch (error) {
+      setLoadError(error instanceof Error ? error.message : String((error as { message?: string })?.message || '服务器读取失败，请重试。'));
       if (requestId === refreshRequestId.current) setRefreshState('error');
       if (!quiet) {
         const details = error instanceof Error
@@ -197,7 +200,13 @@ function App({ cloud }: { cloud: CloudSession }) {
   useEffect(() => {
     let active = true;
     void (async () => {
-      const cached = await readStoreCache(cloud);
+      // IndexedDB can stall in mobile/private browsing. Optional cache must
+      // never prevent the authoritative server request from starting.
+      let cacheTimer: ReturnType<typeof setTimeout> | undefined;
+      const cached = await Promise.race([
+        readStoreCache(cloud),
+        new Promise<null>(resolve => { cacheTimer = setTimeout(() => resolve(null), 1500); }),
+      ]).finally(() => clearTimeout(cacheTimer));
       if (!active) return;
       if (cached) {
         setStore(normalizeStore(cached.store));
@@ -959,7 +968,7 @@ function App({ cloud }: { cloud: CloudSession }) {
     <main className="main"><header className="topbar"><div className="global-search">⌕<input value={searchDraft} onChange={e => setSearchDraft(e.target.value)} onKeyDown={e => e.key === 'Enter' && runGlobalSearch()} placeholder="搜索客户、公司、电话、VIN、车牌、工单、司机…" /><button type="button" onClick={runGlobalSearch}>搜索</button>{searchSuggestions.length > 0 && <div className="search-suggestions">{searchSuggestions.map((item, index) => <button type="button" key={`${item.page}-${item.label}-${index}`} onClick={() => { setModal(null); setPage(item.page); setSearch(item.query); setSearchDraft(''); if (item.page !== 'customers' && item.page !== 'fleets' && item.modalType && item.record) openModal(item.modalType, item.record); }}><b>{item.label}</b><small>{item.meta}</small></button>)}</div>}</div><div className="top-status"><span className={syncing ? 'syncing' : ''}>{syncing || refreshState === 'loading' ? '正在同步…' : refreshState === 'error' ? '同步失败' : '● 云端已同步'}</span><span>{actorName}</span><b>v0.82.4</b><button type="button" className="topbar-logout" onClick={() => confirm('确定退出当前账号？') && void cloud.signOut()}>退出</button></div></header>
       {saveNotice && page === 'workOrders' && <div className="dashboard-sync-status" role="status">{saveNotice}<button onClick={() => setSaveNotice('')}>关闭</button></div>}
       {page === 'dashboard' && !loading && <div className="dashboard-sync-status" role="status">{refreshState === 'loading' ? '正在更新金额，当前显示已缓存的数据…' : refreshState === 'error' ? '更新失败，当前金额可能不是最新，请重试。' : `金额已更新 · ${new Date(refreshedAt).toLocaleTimeString()}`} <button disabled={refreshState === 'loading'} onClick={() => void refresh(true)}>刷新金额</button></div>}
-      {loading ? <div className="loading">正在读取正式服务器数据…</div> : <PageContent page={page} search={search} store={store} settings={settings} cloud={cloud} setPage={setPage} openModal={openModal} setEditingOrder={setEditingOrder} persist={persist} remove={remove} receiveStock={receiveStock} addPayment={addPayment} deleteWorkOrder={deleteWorkOrder} requestPaymentCorrection={requestPaymentCorrection} requestExpenseCorrection={requestExpenseCorrection} approveRequest={approveRequest} rejectRequest={rejectRequest} claimWorkOrder={claimWorkOrder} completeWorkOrder={completeWorkOrder} actorName={actorName} editOwnProfile={editOwnProfile} />}
+{!loading && loadError && !lastFullSyncAt.current ? <section className="form-section" role="alert"><h3>数据尚未读取成功</h3><p>{loadError}</p><p>当前不显示金额，避免把未加载的数据误认为零。请勿重复录入工单或收款。</p><button className="primary" onClick={() => void refresh(false, true)}>重新连接服务器</button></section> : loading ? <div className="loading">正在读取正式服务器数据…</div> : <PageContent page={page} search={search} store={store} settings={settings} cloud={cloud} setPage={setPage} openModal={openModal} setEditingOrder={setEditingOrder} persist={persist} remove={remove} receiveStock={receiveStock} addPayment={addPayment} deleteWorkOrder={deleteWorkOrder} requestPaymentCorrection={requestPaymentCorrection} requestExpenseCorrection={requestExpenseCorrection} approveRequest={approveRequest} rejectRequest={rejectRequest} claimWorkOrder={claimWorkOrder} completeWorkOrder={completeWorkOrder} actorName={actorName} editOwnProfile={editOwnProfile} />}
     </main>
     {orderDetailLoading && <div className="modal-backdrop"><div className="modal" role="status"><h3>正在读取这张工单的完整资料…</h3><p>照片和签名仅在需要时加载；请等待后再编辑。</p><button onClick={() => setEditingOrder(null)}>取消</button></div></div>}
     {modal && <EntityModal state={modal} store={store} settings={settings} cloud={cloud} onClose={closeModal} onSave={saveModal} />}
