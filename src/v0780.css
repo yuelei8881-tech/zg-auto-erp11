@@ -131,6 +131,14 @@
 }
 
 /* Focused work-order layout: show one meaningful group at a time. */
+.focused-editor>.pricing-permission-group{display:none}
+.focused-editor[data-panel="pricing"]>.pricing-permission-group{display:block}
+@media(max-width:760px){
+  .focused-editor>.pricing-permission-group{display:none!important}
+  .focused-editor[data-mobile-step="quote"]>.pricing-permission-group,
+  .focused-editor[data-mobile-step="checkout"]>.pricing-permission-group{display:block!important}
+  .focused-editor[data-mobile-step="checkout"]>.pricing-permission-group>.form-section:not(.totals-section){display:none!important}
+}
 .focused-editor>.form-section{display:none}
 .focused-editor[data-panel="intake"]>.panel-intake,
 .focused-editor[data-panel="evidence"]>.evidence-section,

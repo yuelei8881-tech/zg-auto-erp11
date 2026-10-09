@@ -1,0 +1,13 @@
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+const editor = readFileSync(new URL('../src/WorkOrderEditor.tsx', import.meta.url), 'utf8');
+const css = readFileSync(new URL('../src/v0780.css', import.meta.url), 'utf8');
+assert.match(editor, /<fieldset className="pricing-permission-group" disabled=\{!canEditPricing\}/);
+const group = editor.split('<fieldset className="pricing-permission-group"')[1].split('</fieldset>')[0];
+for (const section of ['repair-library-section', 'labor-grid', 'parts-grid', 'totals-section']) assert.ok(group.includes(section));
+assert.ok(css.includes('.focused-editor>.pricing-permission-group{display:none}'));
+assert.ok(css.includes('.focused-editor[data-panel="pricing"]>.pricing-permission-group{display:block}'));
+assert.ok(css.includes('.focused-editor>.pricing-permission-group{display:none!important}'));
+assert.ok(css.includes('.focused-editor[data-mobile-step="quote"]>.pricing-permission-group,\n  .focused-editor[data-mobile-step="checkout"]>.pricing-permission-group{display:block!important}'));
+assert.ok(css.includes('.focused-editor[data-mobile-step="checkout"]>.pricing-permission-group>.form-section:not(.totals-section){display:none!important}'));
+console.log('PASS: pricing permission wrapper retained; desktop pricing and mobile quote/checkout visibility guards present');

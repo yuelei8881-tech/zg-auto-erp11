@@ -1026,7 +1026,7 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, w
     </section>
 
     {!canEditPricing && <p className="muted">施工项目只读；可以保存诊断、施工进度与照片。报价及配件用量由授权人员维护。</p>}
-    <fieldset disabled={!canEditPricing} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
+    <fieldset className="pricing-permission-group" disabled={!canEditPricing} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
     <section className="form-section repair-library-section"><div className="section-title"><div><h3>维修项目资料库</h3><span className="muted">套餐默认折叠；展开后点击套餐主体，配件、用量和人工会整套加入工单。</span></div><button type="button" className="primary" onClick={() => openPackageEditor()}>＋ 新建维修套餐</button></div>
       <details className="repair-library-collapse" open={repairLibraryOpen} onToggle={event => setRepairLibraryOpen(event.currentTarget.open)}>
         <summary><span><b>维修套餐快捷选择</b><small>点开后选择套餐，点击套餐主体即可整套加入当前工单</small></span><strong>{repairLibrary.length} 个套餐</strong></summary>
