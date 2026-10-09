@@ -4,6 +4,8 @@ import { FormalGate } from './FormalGate';
 import type { CloudRow, CloudSession, CloudStore, StaffMember } from './lib/cloud';
 import { readStoreCache, writeStoreCache, storeCacheKey } from './lib/storeCache';
 import { financialStore } from './lib/financialRecords';
+import { coalesceRefresh } from './lib/refreshQueue';
+import { businessExport } from './lib/businessExport';
 import { supabase } from './lib/supabase';
 import { decodeVin, escapeHtml, money, recalculateWorkOrder, today, uid } from './lib/erp';
 import { MONTHLY_BILLING_TERM, MONTHLY_PAYMENT_METHOD, nextMonthlyBillingDate } from './lib/billing';
@@ -106,6 +108,7 @@ function App({ cloud }: { cloud: CloudSession }) {
   const numberRepairInFlight = useRef(false);
   const lastCloudSyncAt = useRef(0);
   const lastFullSyncAt = useRef(0);
+  const refreshQueue = useRef<ReturnType<typeof coalesceRefresh> | null>(null);
 
   const mergeCloudStore = (current: AppStore, changes: CloudStore) => {
     const merged = { ...current } as AppStore;
@@ -119,7 +122,7 @@ function App({ cloud }: { cloud: CloudSession }) {
     return normalizeStore(merged as unknown as CloudStore);
   };
 
-  const refresh = async (quiet = false, forceFull = false) => {
+  const performRefresh = async (quiet = false, forceFull = false) => {
     const requestId = ++refreshRequestId.current;
     const mutationAtStart = mutationGeneration.current;
     if (!quiet) setLoading(true);
@@ -171,6 +174,9 @@ function App({ cloud }: { cloud: CloudSession }) {
     }
     finally { if (!quiet) setLoading(false); }
   };
+
+  if (!refreshQueue.current) refreshQueue.current = coalesceRefresh(performRefresh);
+  const refresh = refreshQueue.current;
 
   useEffect(() => {
     let active = true;
@@ -1648,15 +1654,26 @@ async function detectReceiptBarcode(file: File) {
 
 function SettingsPage({ settings, openModal, store, cloud }: ContentProps) {
   const canDownloadAllData = cloud.role === 'owner' || can(cloud, 'exportCustomerData');
-  const downloadBackup = () => {
+  const [exporting, setExporting] = useState(false);
+  const exportInFlight = useRef(false);
+  const downloadBackup = async () => {
     if (!canDownloadAllData) return alert('当前账号没有下载或导出客户与系统资料的权限。');
-    const payload = JSON.stringify({ product: 'Z&G AUTO ERP', version: '0.79.6', exportedAt: new Date().toISOString(), settings, data: store }, null, 2);
+    if (exportInFlight.current) return;
+    exportInFlight.current = true; setExporting(true);
+    try {
+    const startedAt = new Date().toISOString();
+    const fresh = await cloud.loadStore(undefined, true);
+    const payload = JSON.stringify(businessExport(fresh, cloud.organizationId, cloud.user.id, startedAt), null, 2);
     const url = URL.createObjectURL(new Blob([payload], { type: 'application/json;charset=utf-8' }));
     const anchor = document.createElement('a');
-    anchor.href = url; anchor.download = `ZG_AUTO_ERP_backup_${today()}.json`; anchor.click();
+    anchor.href = url; anchor.download = `ZG_AUTO_ERP_business_export_${today()}.json`; anchor.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String((error as { message?: string })?.message || '读取失败');
+      alert(`导出失败，未生成文件：${message}`);
+    } finally { exportInFlight.current = false; setExporting(false); }
   };
-  return <div className="page"><div className="page-title"><div><p className="eyebrow">System Settings</p><h2>修理厂设置</h2></div><div className="title-actions">{canDownloadAllData && <button onClick={downloadBackup}>下载全部资料备份</button>}<button className="primary" onClick={() => openModal('settings', settings)}>编辑设置</button></div></div><section className="settings-card"><div className="print-logo">Z&G</div><div><h2>{settings.shopName}</h2><p>{settings.address || '尚未填写地址'}</p><p>{settings.phone || '尚未填写电话'} · {settings.email}</p></div><dl><div><dt>默认工时费率</dt><dd>{money(settings.defaultLaborRate)}/小时</dd></div><div><dt>默认配件税率</dt><dd>{settings.defaultTaxRate}%（仅配件）</dd></div></dl></section>{canDownloadAllData && <section className="panel backup-panel"><div><h3>本地资料备份</h3><p>下载客户、车辆、工单、库存、财务、活动、员工权限和修改记录。服务器资料不会被删除。</p></div><button className="primary-soft" onClick={downloadBackup}>下载 JSON 备份</button></section>}<section className="panel"><h3>智能服务状态</h3><div className="integration-list"><div><b>VIN 自动识别</b><span className="success-text">已启用（NHTSA vPIC）</span></div><div><b>本地 OCR 车牌识别</b><span className="success-text">已启用（Tesseract）</span></div><div><b>浏览器语音输入</b><span className="success-text">兼容 Edge / Chrome</span></div><div><b>AI 故障诊断与照片分类</b><span>需部署 zg-ai 云函数并配置 OPENAI_API_KEY</span></div><div><b>邮件与短信通知</b><span>云端发送失败时自动打开本机邮件程序并保留客户确认链接</span></div><div><b>在线付款</b><span>需部署 zg-payment 云函数并配置 Stripe</span></div></div></section></div>;
+  return <div className="page"><div className="page-title"><div><p className="eyebrow">System Settings</p><h2>修理厂设置</h2></div><div className="title-actions">{canDownloadAllData && <button disabled={exporting} onClick={() => void downloadBackup()}>{exporting ? '正在读取服务器…' : '导出业务资料'}</button>}<button className="primary" onClick={() => openModal('settings', settings)}>编辑设置</button></div></div><section className="settings-card"><div className="print-logo">Z&G</div><div><h2>{settings.shopName}</h2><p>{settings.address || '尚未填写地址'}</p><p>{settings.phone || '尚未填写电话'} · {settings.email}</p></div><dl><div><dt>默认工时费率</dt><dd>{money(settings.defaultLaborRate)}/小时</dd></div><div><dt>默认配件税率</dt><dd>{settings.defaultTaxRate}%（仅配件）</dd></div></dl></section>{canDownloadAllData && <section className="panel backup-panel"><div><h3>业务资料导出（非完整备份）</h3><p>点击后重新读取服务器中当前账号有权查看的客户、车辆、工单、库存及财务等业务记录。文件附带各类记录数量和导出范围；不会删除服务器数据。</p><p>不含账号密码、员工权限、机油活动独立数据、客户确认表或照片文件，不能用于完整恢复系统。正式灾难恢复需要数据库备份与照片存储备份。</p></div><button className="primary-soft" disabled={exporting} onClick={() => void downloadBackup()}>{exporting ? '正在读取服务器…' : '下载业务 JSON'}</button></section>}<section className="panel"><h3>智能服务状态</h3><div className="integration-list"><div><b>VIN 自动识别</b><span className="success-text">已启用（NHTSA vPIC）</span></div><div><b>本地 OCR 车牌识别</b><span className="success-text">已启用（Tesseract）</span></div><div><b>浏览器语音输入</b><span className="success-text">兼容 Edge / Chrome</span></div><div><b>AI 故障诊断与照片分类</b><span>需部署 zg-ai 云函数并配置 OPENAI_API_KEY</span></div><div><b>邮件与短信通知</b><span>云端发送失败时自动打开本机邮件程序并保留客户确认链接</span></div><div><b>在线付款</b><span>需部署 zg-payment 云函数并配置 Stripe</span></div></div></section></div>;
 }
 
 function EntityModal({ state, store, settings, cloud, onClose, onSave }: { state: NonNullable<ModalState>; store: AppStore; settings: ShopSettings; cloud: CloudSession; onClose: () => void; onSave: (type: NonNullable<ModalState>['type'], data: Record<string, unknown>) => Promise<void> }) {
