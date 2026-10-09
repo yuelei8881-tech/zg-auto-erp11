@@ -128,6 +128,7 @@ function App({ cloud }: { cloud: CloudSession }) {
   const [syncing, setSyncing] = useState(false);
   const [refreshState, setRefreshState] = useState<'loading' | 'ready' | 'error'>('loading');
   const [refreshedAt, setRefreshedAt] = useState(0);
+  const [saveNotice, setSaveNotice] = useState('');
   const [search, setSearch] = useState('');
   const [searchDraft, setSearchDraft] = useState('');
   const [displayName, setDisplayName] = useState(cloud.user.name || cloud.user.email.split('@')[0]);
@@ -382,22 +383,51 @@ function App({ cloud }: { cloud: CloudSession }) {
       }
       if (delta) partChanges.push({ part, nextQty, delta });
     }
+    mutationGeneration.current += 1;
+    setSyncing(true);
     try {
+      const records: Array<{ module: string; row: CloudRow }> = [];
       for (const change of partChanges) {
-        await persist('parts', { ...change.part, qty: change.nextQty });
+        records.push({ module: 'parts', row: { ...change.part, qty: change.nextQty } as unknown as CloudRow });
         const log: InventoryLog = { id: uid(), date: new Date().toISOString(), partId: change.part.id, partNo: change.part.partNo, partName: change.part.name, type: change.delta > 0 ? '工单领用' : '工单退回', change: -change.delta, before: change.part.qty, after: change.nextQty, reference: order.number };
-        await persist('inventoryLogs', log);
+        records.push({ module: 'inventoryLogs', row: log as unknown as CloudRow });
       }
       const savedOrder = discountNeedsApproval || settlementNeedsApproval ? safeOrder : currentOrder;
-      await persist('workOrders', { ...savedOrder, inventoryCommitted: savedOrder.status !== '已取消' });
-      await writeChangeLog(savedOrder, old ? '修改工单' : '新建工单', old ? '工单内容已更新并保存到服务器' : '工单已建立并保存到服务器', old, savedOrder);
+      savedOrder.inventoryCommitted = savedOrder.status !== '已取消';
+      records.push({ module: 'workOrders', row: savedOrder as unknown as CloudRow });
+      const changeLog: ChangeLog = {
+        id: uid(), workOrderId: savedOrder.id, workOrderNumber: savedOrder.number,
+        action: old ? '修改工单' : '新建工单', detail: old ? '工单内容已更新并保存到服务器' : '工单已建立并保存到服务器',
+        actor: actorName, actorId: cloud.user.id, at: new Date().toISOString(),
+        before: compactWorkOrderSnapshot(old), after: compactWorkOrderSnapshot(savedOrder),
+      };
+      records.push({ module: 'changeLogs', row: changeLog as unknown as CloudRow });
+      await cloud.saveWorkOrderRecords(records);
+      // Invalidate reads begun while the save was in flight, then publish the
+      // confirmed rows immediately instead of waiting for a realtime reload.
+      mutationGeneration.current += 1;
+      refreshRequestId.current += 1;
+      setStore(current => {
+        const next = { ...current } as AppStore;
+        for (const { module, row } of records) next[module] = upsertLocal(next[module] as unknown as CloudRow[], row);
+        return next;
+      });
       if (discountNeedsApproval) await requestApproval({ workOrderId: order.id, workOrderNumber: order.number, type: '工单折扣', reason: `折扣由 ${money(old?.discount || 0)} 调整为 ${money(order.discount)}`, oldValue: old?.discount || 0, newValue: order.discount, proposedOrder: savedOrder });
       if (settlementNeedsApproval) await requestApproval({ workOrderId: order.id, workOrderNumber: order.number, type: '实际结账金额', reason: `实际结账金额申请调整为 ${money(order.settlementTotal ?? computedOrder.total)}；修改浮动 ${money(settlementAdjustmentDifference)}`, oldValue: old?.settlementTotal ?? oldComputed?.total ?? computedOrder.total, newValue: order.settlementTotal ?? computedOrder.total, proposedOrder: savedOrder });
       if (keepOpen) setEditingOrder(savedOrder);
-      else { setEditingOrder(null); setPage('workOrders'); }
-      alert(keepOpen ? `工单 ${order.number} 当前进度已保存，可以继续填写。` : discountNeedsApproval || settlementNeedsApproval ? `工单 ${order.number} 已保存到服务器；折扣/结账金额将在第二人授权后生效。` : `工单 ${order.number} 已保存到正式服务器，其他账号会自动同步。`);
+      else { setSearch(''); setSearchDraft(''); setEditingOrder(null); setPage('workOrders'); }
+      const message = discountNeedsApproval || settlementNeedsApproval ? `工单 ${order.number} 已保存；折扣/结账金额将在第二人授权后生效。` : `工单 ${order.number} 已保存到正式服务器。`;
+      if (keepOpen) alert(`${message} 可以继续填写。`);
+      else setSaveNotice(message);
       return savedOrder;
-    } catch { /* persist already explains the error */ }
+    } catch (error) {
+      alert(`工单保存未全部完成，请保留当前内容并核对后重试：${error instanceof Error ? error.message : String(error)}`);
+      return undefined;
+    } finally {
+      mutationGeneration.current += 1;
+      setSyncing(false);
+      void refresh(true);
+    }
   };
 
   useEffect(() => {
@@ -903,6 +933,7 @@ function App({ cloud }: { cloud: CloudSession }) {
       <div className="side-foot"><small>{cloud.organizationName}</small><b>{actorName}</b><span>{cloud.user.email}</span><button onClick={() => confirm('确定退出当前账号？') && void cloud.signOut()}>退出登录</button></div>
     </aside>
     <main className="main"><header className="topbar"><div className="global-search">⌕<input value={searchDraft} onChange={e => setSearchDraft(e.target.value)} onKeyDown={e => e.key === 'Enter' && runGlobalSearch()} placeholder="搜索客户、公司、电话、VIN、车牌、工单、司机…" /><button type="button" onClick={runGlobalSearch}>搜索</button>{searchSuggestions.length > 0 && <div className="search-suggestions">{searchSuggestions.map((item, index) => <button type="button" key={`${item.page}-${item.label}-${index}`} onClick={() => { setModal(null); setPage(item.page); setSearch(item.query); setSearchDraft(''); if (item.page !== 'customers' && item.page !== 'fleets' && item.modalType && item.record) openModal(item.modalType, item.record); }}><b>{item.label}</b><small>{item.meta}</small></button>)}</div>}</div><div className="top-status"><span className={syncing ? 'syncing' : ''}>{syncing || refreshState === 'loading' ? '正在同步…' : refreshState === 'error' ? '同步失败' : '● 云端已同步'}</span><span>{actorName}</span><b>v0.82.4</b><button type="button" className="topbar-logout" onClick={() => confirm('确定退出当前账号？') && void cloud.signOut()}>退出</button></div></header>
+      {saveNotice && page === 'workOrders' && <div className="dashboard-sync-status" role="status">{saveNotice}<button onClick={() => setSaveNotice('')}>关闭</button></div>}
       {page === 'dashboard' && !loading && <div className="dashboard-sync-status" role="status">{refreshState === 'loading' ? '正在更新金额，当前显示已缓存的数据…' : refreshState === 'error' ? '更新失败，当前金额可能不是最新，请重试。' : `金额已更新 · ${new Date(refreshedAt).toLocaleTimeString()}`} <button disabled={refreshState === 'loading'} onClick={() => void refresh(true)}>刷新金额</button></div>}
       {loading ? <div className="loading">正在读取正式服务器数据…</div> : <PageContent page={page} search={search} store={store} settings={settings} cloud={cloud} setPage={setPage} openModal={openModal} setEditingOrder={setEditingOrder} persist={persist} remove={remove} receiveStock={receiveStock} addPayment={addPayment} deleteWorkOrder={deleteWorkOrder} requestPaymentCorrection={requestPaymentCorrection} requestExpenseCorrection={requestExpenseCorrection} approveRequest={approveRequest} rejectRequest={rejectRequest} claimWorkOrder={claimWorkOrder} completeWorkOrder={completeWorkOrder} actorName={actorName} editOwnProfile={editOwnProfile} />}
     </main>

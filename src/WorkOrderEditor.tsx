@@ -160,6 +160,7 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, w
     laborItems: [], partItems: [], outsource: 0, discount: 0, taxRate: settings.defaultTaxRate,
   }));
   const [saving, setSaving] = useState(false);
+  const saveInFlight = useRef(false);
   const [partSearch, setPartSearch] = useState('');
   const [accountSearch, setAccountSearch] = useState('');
   const [vehicleSearch, setVehicleSearch] = useState('');
@@ -846,6 +847,8 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, w
   };
 
   const submit = async () => {
+    if (saveInFlight.current) return;
+    if (evidenceSaving) return alert('照片正在上传，请等照片上传完成后保存。');
     if (!calculated.customer || !calculated.vehicle) { setActivePanel('intake'); return alert('请选择客户和车辆。'); }
     if (Number(calculated.mileage || 0) <= 0) { selectMobileStep('account'); return alert('当前里程为必填项。每次开工单都必须重新读取仪表并填写实际里程。'); }
     if (!checklist.intake || !checklist.exterior) { setActivePanel('evidence'); return alert('请先完成“接车资料”和“车辆外观”两项检查。'); }
@@ -859,9 +862,15 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, w
     const saveAsCompleted = !canCheckoutAndDeliver && mobileStep === 'repair';
     const orderToSave = saveAsCompleted ? recalculateWorkOrder({ ...calculated, status: '已完成', workflowStage: '完工待结账', technicianCompletedAt: new Date().toISOString(), completedBy: currentUser, completedByUserId: currentUserId }) : calculated;
     setSaving(true);
-    try { await onSave(orderToSave); await removeWorkOrderDraft(draftKey); } finally { setSaving(false); }
+    saveInFlight.current = true;
+    try {
+      const savedOrder = await onSave(orderToSave);
+      if (savedOrder) await removeWorkOrderDraft(draftKey);
+    } finally { saveInFlight.current = false; setSaving(false); }
   };
   const saveProgress = async () => {
+    if (saveInFlight.current) return;
+    if (evidenceSaving) return alert('照片正在上传，请等照片上传完成后保存。');
     if (!calculated.customer || !calculated.vehicle) { selectMobileStep('account'); return alert('请先选择客户和车辆，然后即可保存当前进度。'); }
     if (Number(calculated.mileage || 0) <= 0) { selectMobileStep('account'); return alert('当前里程为必填项。每次开工单都必须重新读取仪表并填写实际里程。'); }
     const saveAsCompleted = !canCheckoutAndDeliver && mobileStep === 'repair';
@@ -872,10 +881,11 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, w
     });
     setSaving(true);
     try {
+      saveInFlight.current = true;
       const savedOrder = await onSave(orderToSave, true);
       if (savedOrder) setOrder(savedOrder);
       if (saveAsCompleted && savedOrder) alert(`工单 ${savedOrder.number} 已自动设为“已完成”，请由有收款权限的账号继续结账交车。`);
-    } finally { setSaving(false); }
+    } finally { saveInFlight.current = false; setSaving(false); }
   };
   const finalizeDelivery = async () => {
     if (!canCheckoutAndDeliver) return alert('当前员工账号没有“收款并交车”权限，请由老板、经理、前台或财务账号操作。');

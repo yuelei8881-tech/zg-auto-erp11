@@ -6,10 +6,12 @@ import { stripTypeScriptTypes } from 'node:module';
 // Exercise the actual cloud loader without contacting production.
 const source = fs.readFileSync(new URL('../src/lib/cloud.ts', import.meta.url), 'utf8');
 let pages = [], calls = [], signed = 0, failAt = -1;
+let batchCalls = [], batchError = null;
 const client = {
   from(table) {
     const query = {
       select() { return this; }, eq() { return this; }, order() { return this; },
+      async upsert(rows, options) { batchCalls.push({ table, rows, options }); return { error: batchError }; },
       range(start) { this.start = start; return this; },
       gt(column, value) { this.since = value; return this; },
       maybeSingle: async () => ({ data: { organization_id: 'org', role: 'owner', permissions: {} } }),
@@ -42,3 +44,23 @@ assert.equal(legacy.workOrders[0].evidencePhotos[0].dataUrl, 'signed:org/7.jpg')
 pages = [Array.from({ length: 1000 }, (_, i) => row(i))]; failAt = 1000;
 await assert.rejects(session.loadStore(undefined, true), /network failure/);
 console.log('PASS: full paging, incremental filter, nonblocking dashboard photos, legacy photo signing, partial failure rejection');
+const records = [
+  { module: 'parts', row: { id: 'part', qty: 4 } },
+  { module: 'inventoryLogs', row: { id: 'usage', change: -1 } },
+  { module: 'workOrders', row: { id: 'order', total: 100 } },
+  { module: 'changeLogs', row: { id: 'audit', action: '新建工单' } },
+];
+await session.saveWorkOrderRecords(records);
+assert.equal(batchCalls.length, 1, 'All save rows must use one request');
+assert.equal(batchCalls[0].rows.length, 4);
+assert.equal(batchCalls[0].options.onConflict, 'organization_id,module,record_id');
+for (let i = 0; i < records.length; i++) {
+  assert.equal(batchCalls[0].rows[i].organization_id, 'org');
+  assert.equal(batchCalls[0].rows[i].updated_by, 'user');
+  assert.equal(batchCalls[0].rows[i].payload, records[i].row);
+}
+batchError = new Error('permission denied');
+await assert.rejects(session.saveWorkOrderRecords(records), /permission denied/);
+await assert.rejects(session.saveWorkOrderRecords([{ module: 'customers', row: { id: 'customer' } }]), /不支持/);
+assert.equal(batchCalls.length, 2, 'Invalid module must never be submitted');
+console.log('PASS: single batch request, preserved audit/inventory payload, organization scope, error propagation');

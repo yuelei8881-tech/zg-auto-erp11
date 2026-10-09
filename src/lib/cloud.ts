@@ -17,6 +17,7 @@ export type CloudSession = {
   permissions: Record<string, boolean>;
   loadStore: (updatedSince?: string, skipPhotos?: boolean) => Promise<CloudStore>;
   upsertRecord: (module: string, row: CloudRow) => Promise<void>;
+  saveWorkOrderRecords: (records: Array<{ module: string; row: CloudRow }>) => Promise<void>;
   reserveWorkOrderNumber: (recordId: string) => Promise<string>;
   recordPayment: (workOrderId: string, payment: CloudRow) => Promise<CloudRow>;
   deleteRecord: (module: string, id: string) => Promise<void>;
@@ -184,6 +185,18 @@ export async function openCloudSession(user: User): Promise<CloudSession> {
       payload: row,
       updated_by: user.id,
     }, { onConflict: 'organization_id,module,record_id' });
+    if (error) throw error;
+  };
+
+  const saveWorkOrderRecords = async (records: Array<{ module: string; row: CloudRow }>) => {
+    if (!records.length) return;
+    const allowed = new Set(['parts', 'inventoryLogs', 'workOrders', 'changeLogs']);
+    if (records.some(item => !allowed.has(item.module))) throw new Error('工单批量保存包含不支持的资料类型。');
+    // One PostgREST statement: inventory, order and audit history commit together.
+    // The existing authenticated user's RLS policies still apply to every row.
+    const { error } = await client.from('zg_erp_records').upsert(records.map(({ module, row }) => ({
+      organization_id: organizationId, module, record_id: row.id, payload: row, updated_by: user.id,
+    })), { onConflict: 'organization_id,module,record_id' });
     if (error) throw error;
   };
 
@@ -379,7 +392,7 @@ export async function openCloudSession(user: User): Promise<CloudSession> {
     organizationName: organization?.name || 'Z&G AUTO REPAIR',
     role: String(membership.role),
     permissions: (membership.permissions || {}) as Record<string, boolean>,
-    loadStore, upsertRecord, reserveWorkOrderNumber, deleteRecord, recordPayment, subscribe, invokeFunction, uploadEvidencePhoto, createCustomerApproval, listStaff, createStaffInvite, updateStaff, updateOwnProfile, cancelStaffInvite, deleteStaffByEmail,
+    loadStore, upsertRecord, saveWorkOrderRecords, reserveWorkOrderNumber, deleteRecord, recordPayment, subscribe, invokeFunction, uploadEvidencePhoto, createCustomerApproval, listStaff, createStaffInvite, updateStaff, updateOwnProfile, cancelStaffInvite, deleteStaffByEmail,
     signOut: async () => { await client.auth.signOut(); },
   };
 }
