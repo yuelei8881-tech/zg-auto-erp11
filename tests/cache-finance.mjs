@@ -9,7 +9,8 @@ function load(path,names,extra={}) {
   vm.runInNewContext(source+'\nObject.assign(result,{'+names.join(',')+'});',{result,indexedDB,console,crypto,...extra});
   return result;
 }
-const cache=load('../src/lib/storeCache.ts',['storeCacheKey','writeStoreCache','readStoreCache','clearStoreCache']);
+const workspace=load('../src/lib/workspaceRecords.ts',['compactWorkspaceStore']);
+const cache=load('../src/lib/storeCache.ts',['storeCacheKey','writeStoreCache','readStoreCache','clearStoreCache'],workspace);
 const owner={organizationId:'org',user:{id:'owner'},role:'owner',permissions:{}};
 const other={...owner,user:{id:'other'}};
 const employee={...owner,user:{id:'employee'},role:'technician'};
@@ -28,6 +29,15 @@ assert.equal(await cache.readStoreCache(owner),null);
 const {recalculateWorkOrder}=load('../src/lib/erp.ts',['recalculateWorkOrder']);
 const loss=recalculateWorkOrder({id:'loss',date:'2026-10-09',partItems:[{id:'p',qty:1,cost:150,price:100}],laborItems:[],taxRate:0});
 assert.equal(loss.grossProfit,-50,'loss must not be clamped to zero');
+const full={...loss,customerSignature:'large signature',evidencePhotos:[{id:'photo',dataUrl:'large photo',storagePath:'org/photo.jpg'}]};
+const lean=workspace.compactWorkspaceStore({workOrders:[full],changeLogs:[{id:'log',before:full,after:full,detail:'change'}]});
+assert.equal(lean.workOrders[0].customerSignature,undefined);
+assert.equal(lean.workOrders[0].evidencePhotos[0].dataUrl,undefined);
+assert.equal(lean.workOrders[0].evidencePhotos[0].storagePath,'org/photo.jpg');
+assert.equal(lean.changeLogs[0].before,undefined);assert.equal(lean.changeLogs[0].detail,'change');
+for(const key of ['total','tax','partsTotal','partsCost','grossProfit','paid','balance','laborTotal']) assert.equal(recalculateWorkOrder(lean.workOrders[0])[key],recalculateWorkOrder(full)[key],`summary must preserve ${key}`);
+await cache.writeStoreCache(owner,{workOrders:[full]});
+assert.equal((await cache.readStoreCache(owner)).store.workOrders[0].customerSignature,undefined);
 const {financialStore}=load('../src/lib/financialRecords.ts',['financialStore']);
 const store=financialStore({workOrders:[{total:100},{total:900,status:'已取消'}],payments:[{amount:100},{amount:900,archivedAt:'date'}],expenses:[{amount:40},{amount:800,status:'已作废'}]});
 assert.equal(store.workOrders.length,1); assert.equal(store.payments.length,1); assert.equal(store.expenses.length,1);

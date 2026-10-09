@@ -2,7 +2,7 @@ import type { CloudStore } from './cloud';
 
 export function businessExport(data: CloudStore, organizationId: string, userId: string, startedAt: string) {
   return {
-    product: 'Z&G AUTO ERP', formatVersion: 1, applicationVersion: '0.96.5',
+    product: 'Z&G AUTO ERP', formatVersion: 1, applicationVersion: '0.96.6',
     exportType: 'authorized-business-records', completeDatabaseBackup: false,
     organizationId, exportedBy: userId, readStartedAt: startedAt, exportedAt: new Date().toISOString(),
     consistency: 'paginated-read-not-transaction-snapshot',

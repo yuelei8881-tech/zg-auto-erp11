@@ -14,8 +14,9 @@ export function printDocumentV077(
   settings: ShopSettings,
   kind: string,
   payments: Payment[] = [],
-  options: { hidePrices?: boolean } = {},
+  options: { hidePrices?: boolean; previewWindow?: Window } = {},
 ) {
+  if (order._detailsDeferred) { options.previewWindow?.close(); alert('请读取完整工单后再打印，避免遗漏客户签名。'); return; }
   // Every print entry point must use the same calculation. Some list views can
   // briefly hold a server row whose derived totals predate settlementTotal;
   // printing that row directly made the same invoice appear to change.
@@ -68,7 +69,7 @@ ${partRows ? `<div class="section"><div class="line-title">Parts / 配件</div><
 <table class="totals"><tr><td>Labor</td><td class="n">${money(order.laborTotal)}</td></tr><tr><td>Parts</td><td class="n">${money(order.partsTotal)}</td></tr><tr><td>${order.outsourceDescription ? `Outsource / ${escapeHtml(order.outsourceDescription)}` : 'Outsource'}</td><td class="n">${money(order.outsource)}</td></tr><tr><td>Parts Sales Tax / 配件销售税</td><td class="n">${money(order.tax)}</td></tr><tr><td>Discount / 结账折扣</td><td class="n">-${money(displayedDiscount)}</td></tr>${displayedSurcharge > .009 ? `<tr><td>Settlement Adjustment / 结账调整</td><td class="n">${money(displayedSurcharge)}</td></tr>` : ''}<tr class="total"><td>${receipt ? 'Amount Paid' : 'Total'}</td><td class="n">${money(receipt ? order.paid : order.total)}</td></tr>${receipt ? '' : `<tr><td>Paid</td><td class="n">${money(order.paid)}</td></tr><tr><td>Balance Due</td><td class="n">${money(order.balance)}</td></tr>`}${showPaymentMethod ? `<tr><td>Payment Method / 支付方式</td><td class="n">${escapeHtml(order.paymentMethod || 'Not recorded / 未记录')}</td></tr>` : ''}</table>
 ${paymentRows ? `<div class="section"><div class="line-title">Payment History / 付款记录（Los Angeles Time）</div><table><thead><tr><th>Date & Time / 支付时间</th><th>Method / 方式</th><th class="n">Amount / 金额</th></tr></thead><tbody>${paymentRows}</tbody></table></div>` : ''}<div class="signatures"><div class="sig">${signed}<b>Customer Signature / Date · 客户签字/日期</b></div><div class="sig"><b>Authorized By / Date · 授权人/日期</b></div></div><div class="footer">${escapeHtml(settings.invoiceTerms || 'Thank you for your business.')}</div><div class="document-footer"><span>zgautorepair.com</span><span>Page 1 of 1</span></div>
 <script>function returnToOrder(){if(window.opener&&!window.opener.closed){window.close();return}if(history.length>1){history.back();return}location.replace('/')}</script></body></html>`;
-  const win = window.open('', '_blank');
+  const win = options.previewWindow || window.open('', '_blank');
   if (!win) return alert('浏览器阻止了打印窗口，请允许弹出窗口后重试。');
   win.document.write(html);
   win.document.close();

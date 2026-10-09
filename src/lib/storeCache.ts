@@ -1,10 +1,11 @@
 import type { CloudSession, CloudStore } from './cloud';
+import { compactWorkspaceStore } from './workspaceRecords';
 
 const DB = 'zg-auto-erp-cache-v1';
 export type StoreCache = { store: CloudStore; savedAt: number; fullSyncedAt: number };
 type Identity = Pick<CloudSession, 'organizationId' | 'user' | 'role' | 'permissions'>;
 export const storeCacheKey = (session: Identity) => JSON.stringify([
-  'account-v2', session.organizationId, session.user.id, session.role,
+  'workspace-v3', session.organizationId, session.user.id, session.role,
   Object.entries(session.permissions).sort(([a], [b]) => a.localeCompare(b)),
 ]);
 let generation = 0;
@@ -40,6 +41,7 @@ export async function readStoreCache(session: Identity): Promise<StoreCache | nu
         const tx = db.transaction('stores', 'readwrite');
         const store = tx.objectStore('stores');
         store.delete(session.organizationId); // remove legacy company-wide cache
+        store.delete(storeCacheKey(session).replace('workspace-v3', 'account-v2'));
         const request = store.get(storeCacheKey(session));
         request.onsuccess = () => resolve(request.result?.store ? request.result as StoreCache : null);
         request.onerror = () => reject(request.error);
@@ -56,7 +58,7 @@ export async function writeStoreCache(session: Identity, store: CloudStore, full
       if (start !== generation) return;
       await new Promise<void>((resolve, reject) => {
         const tx = db.transaction('stores', 'readwrite');
-        tx.objectStore('stores').put({ store, savedAt: syncCursor, fullSyncedAt }, storeCacheKey(session));
+        tx.objectStore('stores').put({ store: compactWorkspaceStore(store), savedAt: syncCursor, fullSyncedAt }, storeCacheKey(session));
         tx.oncomplete = () => resolve();
         tx.onerror = () => reject(tx.error);
       });

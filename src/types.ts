@@ -67,6 +67,7 @@ export type EvidencePhoto = {
 
 export type WorkOrder = {
   _cloudUpdatedAt?: string;
+  _detailsDeferred?: boolean;
   id: string; number: string; date: string; customerId?: string; customer: string; phone?: string;
   vehicleId?: string; vehicle: string; plate?: string; vin?: string; mileage?: number;
   fleetId?: string; company?: string; driverId?: string; driver?: string; driverPhone?: string;

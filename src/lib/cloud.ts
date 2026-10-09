@@ -17,6 +17,8 @@ export type CloudSession = {
   role: string;
   permissions: Record<string, boolean>;
   loadStore: (updatedSince?: string, skipPhotos?: boolean) => Promise<CloudStore>;
+  loadWorkspace: (updatedSince?: string) => Promise<CloudStore>;
+  readWorkOrder: (id: string) => Promise<CloudRow>;
   upsertRecord: (module: string, row: CloudRow) => Promise<CloudRow>;
   saveRecords: (records: Array<{ module: string; row: CloudRow }>) => Promise<Array<{ module: string; row: CloudRow }>>;
   saveWorkOrderRecords: (records: Array<{ module: string; row: CloudRow }>) => Promise<Array<{ module: string; row: CloudRow }>>;
@@ -90,7 +92,7 @@ export async function openCloudSession(user: User): Promise<CloudSession> {
     .from('zg_organizations').select('name').eq('id', organizationId).single();
   if (organizationError) throw organizationError;
 
-  const loadStore = async (updatedSince?: string, skipPhotos = false, onlyModule?: string) => {
+  const loadStore = async (updatedSince?: string, skipPhotos = false, onlyModule?: string, workspace = false) => {
     const current = await findMembership().catch(async error => {
       if (error instanceof Error && error.message.includes('账号已停用')) {
         await clearStoreCache().catch(() => undefined);
@@ -118,7 +120,7 @@ export async function openCloudSession(user: User): Promise<CloudSession> {
     // whole ERP fail to open. Uploads remain parallel, but the authoritative
     // accounting/customer store is loaded conservatively and completely.
     for (let from = 0; ; from += pageSize) {
-      const { data: page, error } = await client.rpc('zg_read_records', {
+      const { data: page, error } = await client.rpc(workspace ? 'zg_read_workspace' : 'zg_read_records', {
         p_org: organizationId, p_since: updatedSince || null, p_offset: from, p_limit: pageSize, p_module: onlyModule || null,
       });
       if (error) throw error;
@@ -411,6 +413,13 @@ export async function openCloudSession(user: User): Promise<CloudSession> {
     role: String(membership.role),
     permissions: (membership.permissions || {}) as Record<string, boolean>,
     loadStore, upsertRecord, saveRecords, saveWorkOrderRecords,
+    loadWorkspace: updatedSince => loadStore(updatedSince, true, undefined, true),
+    readWorkOrder: async id => {
+      const { data, error } = await client.rpc('zg_read_work_order', { p_org: organizationId, p_id: id });
+      if (error) throw new Error(error.message);
+      if (!data?.id || data._detailsDeferred) throw new Error('完整工单读取失败，请重试。');
+      return data as CloudRow;
+    },
     saveOperationalOrder: async row => {
       const { data, error } = await client.rpc('zg_save_operational_order', { p_org: organizationId, p_order: row });
       if (error) throw error;

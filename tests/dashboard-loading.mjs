@@ -9,11 +9,12 @@ let pages = [], calls = [], signed = 0, failAt = -1;
 let batchCalls = [], batchError = null;
 const client = {
   async rpc(name, args) {
-    if (name === 'zg_read_records') {
-      calls.push({ start: args.p_offset, since: args.p_since });
+    if (name === 'zg_read_records' || name === 'zg_read_workspace') {
+      calls.push({ name, start: args.p_offset, since: args.p_since });
       return args.p_offset === failAt ? { error: new Error('network failure') } : { data: pages[args.p_offset / 1000] || [] };
     }
     if (name === 'zg_write_records_v2') { batchCalls.push(args); return { data: args.p_records, error: batchError }; }
+    if (name === 'zg_read_work_order') { calls.push({name,id:args.p_id,org:args.p_org});return {data:{id:args.p_id,customerSignature:'full-signature'}}; }
     throw new Error('Unexpected RPC: ' + name);
   },
   from(table) {
@@ -52,6 +53,10 @@ assert.equal(legacy.workOrders[0].evidencePhotos[0].dataUrl, 'signed:org/7.jpg')
 pages = [Array.from({ length: 1000 }, (_, i) => row(i))]; failAt = 1000;
 await assert.rejects(session.loadStore(undefined, true), /network failure/);
 console.log('PASS: full paging, incremental filter, nonblocking dashboard photos, legacy photo signing, partial failure rejection');
+failAt=-1;pages=[[row(7)]];calls=[];
+await session.loadWorkspace('2026-10-08T00:00:00Z');
+assert.equal(calls[0].name,'zg_read_workspace');assert.equal(calls[0].since,'2026-10-08T00:00:00Z');
+const detail=await session.readWorkOrder('7');assert.equal(detail.customerSignature,'full-signature');assert.equal(calls[1].org,'org');
 const records = [
   { module: 'parts', row: { id: 'part', qty: 4 } },
   { module: 'inventoryLogs', row: { id: 'usage', change: -1 } },
