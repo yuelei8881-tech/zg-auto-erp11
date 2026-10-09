@@ -93,6 +93,7 @@ await db.query("update zg_organization_members set status='active',role='technic
 await db.exec(readFileSync(new URL('../supabase/migrations/20261009153733_verified_oil_service_credits.sql',import.meta.url),'utf8'));
 await db.exec('alter table zg_reward_vehicles add column vin text');
 await db.exec(readFileSync(new URL('../supabase/migrations/20261009154220_qualify_reward_lookup_variables.sql',import.meta.url),'utf8'));
+await db.exec(readFileSync(new URL('../supabase/migrations/20261009154657_preserve_oil_confirmation_upserts.sql',import.meta.url),'utf8'));
 await db.exec("create trigger zg_sync_oil_reward_work_order after insert or update of payload on zg_erp_records for each row execute function zg_sync_oil_reward_work_order()");
 const vehicleA='00000000-0000-4000-8000-000000000011',vehicleB='00000000-0000-4000-8000-000000000012';
 const rewardA='00000000-0000-4000-8000-000000000021',rewardB='00000000-0000-4000-8000-000000000022';
@@ -109,6 +110,10 @@ await save({oilChangeCompleted:true,status:'维修中'});
 assert.equal(await count(rewardA),0,'confirmation before actual completion is insufficient');
 await save({status:'已完成'}); await save({}); await save({status:'已交车'});
 assert.equal(await count(rewardA),1,'save, retry and delivery earn exactly one credit');
+const legacyRetry={...payload};delete legacyRetry.oilChangeCompleted;
+await db.query("insert into zg_erp_records(organization_id,module,record_id,payload) values($1,'workOrders',$2,$3) on conflict(organization_id,module,record_id) do update set payload=excluded.payload",[org,service,legacyRetry]);
+assert.equal((await db.query('select payload from zg_erp_records where record_id=$1',[service])).rows[0].payload.oilChangeCompleted,true,'legacy UPSERT must preserve explicit confirmation');
+assert.equal(await count(rewardA),1);
 await save({status:'已取消'});
 assert.equal(await count(rewardA),0);
 await save({status:'已完成'}); await save({archivedAt:'2026-09-11'});
