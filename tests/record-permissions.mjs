@@ -168,6 +168,7 @@ await db.query('delete from zg_erp_records where record_id=$1',[auditId]);
 assert.deepEqual((await db.query("select before_data from zg_audit_logs where action='DELETE'")).rows[0].before_data,auditUpdated);
 await db.exec(readFileSync(new URL('../supabase/migrations/20261009155245_lazy_workspace_records.sql',import.meta.url),'utf8'));
 await db.exec(readFileSync(new URL('../supabase/migrations/20261009185258_cache_workspace_owner_check.sql',import.meta.url),'utf8'));
+await db.exec(readFileSync(new URL('../supabase/migrations/20261009190012_cache_workspace_permissions.sql',import.meta.url),'utf8'));
 const detailId='00000000-0000-4000-8000-000000000091';
 const detailOrder={...original,id:detailId,technicianUserId:worker,customerSignature:'signed-original',evidencePhotos:[{id:'photo',dataUrl:'data:image/jpeg;base64,original',storagePath:'org/photo.jpg'}]};
 await db.query("insert into zg_erp_records(organization_id,module,record_id,payload) values($1,'workOrders',$2,$3)",[org,detailId,detailOrder]);
@@ -197,7 +198,18 @@ await assert.rejects(db.query('select * from zg_read_workspace($1)',[org]),/perm
 await db.exec('reset role');
 await db.query('delete from zg_erp_records where record_id=$1',[detailId]);
 assert.equal((await db.query('select count(*)::int as n from zg_private.workspace_records where record_id=$1',[detailId])).rows[0].n,0);
+await db.exec('reset role');
+for (const role of ['owner','finance','workshop_supervisor','technician','warehouse','custom']) {
+  for (const permissions of [{}, {workOrders:false,assignedWorkOrders:true,claimWorkOrders:true}, {workOrders:false,assignedWorkOrders:true,claimWorkOrders:false}, {finance:true,customerContact:false,pricing:false}]) {
+    await db.query('update zg_organization_members set role=$1, permissions=$2 where user_id=$3',[role,permissions,worker]);
+    await db.query("select set_config('request.jwt.claim.sub',$1,false)",[worker]);
+    const expected=(await db.query('select module,record_id from zg_private.workspace_records where organization_id=$1 and zg_private.readable($1,module,payload) order by module,record_id',[org])).rows;
+    const actual=(await db.query('select module,record_id from public.zg_read_workspace($1) order by module,record_id',[org])).rows;
+    assert.deepEqual(actual,expected, 'cached permissions must match original rules: '+role+JSON.stringify(permissions));
+  }
+}
 await db.close();
+console.log('PASS: cached permission rules match original visibility across 24 role/permission combinations');
 console.log('PASS: lightweight read model, private access denial, on-demand full details, unchanged financials, attachment-safe priced/operational writes, transactional update/delete');
 console.log('PASS: audit preserves complete insert/delete, reversible changed fields including removal/null, unchanged-photo elision and no-op suppression');
 console.log('PASS: oil confirmation, cutoff, cancellation/recompletion, immutable audit, vehicle correction, no plate fallback, sixth-service readiness and minimal authorized lookup');
