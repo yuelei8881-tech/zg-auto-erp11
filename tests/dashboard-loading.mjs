@@ -13,7 +13,7 @@ const client = {
       calls.push({ start: args.p_offset, since: args.p_since });
       return args.p_offset === failAt ? { error: new Error('network failure') } : { data: pages[args.p_offset / 1000] || [] };
     }
-    if (name === 'zg_write_records') { batchCalls.push(args); return { error: batchError }; }
+    if (name === 'zg_write_records_v2') { batchCalls.push(args); return { data: args.p_records, error: batchError }; }
     throw new Error('Unexpected RPC: ' + name);
   },
   from(table) {

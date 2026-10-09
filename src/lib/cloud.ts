@@ -17,8 +17,9 @@ export type CloudSession = {
   role: string;
   permissions: Record<string, boolean>;
   loadStore: (updatedSince?: string, skipPhotos?: boolean) => Promise<CloudStore>;
-  upsertRecord: (module: string, row: CloudRow) => Promise<void>;
-  saveWorkOrderRecords: (records: Array<{ module: string; row: CloudRow }>) => Promise<void>;
+  upsertRecord: (module: string, row: CloudRow) => Promise<CloudRow>;
+  saveRecords: (records: Array<{ module: string; row: CloudRow }>) => Promise<Array<{ module: string; row: CloudRow }>>;
+  saveWorkOrderRecords: (records: Array<{ module: string; row: CloudRow }>) => Promise<Array<{ module: string; row: CloudRow }>>;
   saveOperationalOrder: (row: CloudRow) => Promise<CloudRow>;
   reserveWorkOrderNumber: (recordId: string) => Promise<string>;
   recordPayment: (workOrderId: string, payment: CloudRow) => Promise<CloudRow>;
@@ -166,9 +167,9 @@ export async function openCloudSession(user: User): Promise<CloudSession> {
 
   const upsertRecord = async (module: string, row: CloudRow) => {
     if (module === 'workOrders' && !canEditPricing) {
-      const { error } = await client.rpc('zg_save_operational_order', { p_org: organizationId, p_order: row });
+      const { data, error } = await client.rpc('zg_save_operational_order', { p_org: organizationId, p_order: row });
       if (error) throw error;
-      return;
+      return data as CloudRow;
     }
     if (module === 'customers') {
       const normalizePhone = (value: unknown) => {
@@ -191,18 +192,24 @@ export async function openCloudSession(user: User): Promise<CloudSession> {
         }
       }
     }
-    const { error } = await client.rpc('zg_write_records', { p_org: organizationId, p_records: [{ module, row }] });
-    if (error) throw error;
+    const saved = await saveRecords([{ module, row }]);
+    return saved[0].row;
   };
 
+  const saveRecords = async (records: Array<{ module: string; row: CloudRow }>) => {
+    if (!records.length) return [];
+    const { data, error } = await client.rpc('zg_write_records_v2', { p_org: organizationId, p_records: records });
+    if (error) throw new Error(error.message);
+    if (!Array.isArray(data) || data.length !== records.length) throw new Error('服务器保存确认不完整，请刷新核对，不要重复提交。');
+    return data as Array<{ module: string; row: CloudRow }>;
+  };
   const saveWorkOrderRecords = async (records: Array<{ module: string; row: CloudRow }>) => {
-    if (!records.length) return;
+    if (!records.length) return [];
     const allowed = new Set(['parts', 'inventoryLogs', 'workOrders', 'changeLogs']);
     if (records.some(item => !allowed.has(item.module))) throw new Error('工单批量保存包含不支持的资料类型。');
     // One PostgREST statement: inventory, order and audit history commit together.
     // The existing authenticated user's RLS policies still apply to every row.
-    const { error } = await client.rpc('zg_write_records', { p_org: organizationId, p_records: records });
-    if (error) throw error;
+    return saveRecords(records);
   };
 
   const deleteRecord = async (module: string, id: string) => {
@@ -403,7 +410,7 @@ export async function openCloudSession(user: User): Promise<CloudSession> {
     organizationName: organization?.name || 'Z&G AUTO REPAIR',
     role: String(membership.role),
     permissions: (membership.permissions || {}) as Record<string, boolean>,
-    loadStore, upsertRecord, saveWorkOrderRecords,
+    loadStore, upsertRecord, saveRecords, saveWorkOrderRecords,
     saveOperationalOrder: async row => {
       const { data, error } = await client.rpc('zg_save_operational_order', { p_org: organizationId, p_order: row });
       if (error) throw error;

@@ -236,11 +236,28 @@ function App({ cloud }: { cloud: CloudSession }) {
   const persist = async <T extends { id: string }>(module: keyof AppStore, row: T) => {
     mutationGeneration.current += 1;
     setSyncing(true);
-    const previous = store;
-    setStore(current => ({ ...current, [module]: upsertLocal(current[module] as unknown as T[], row) }));
-    try { await cloud.upsertRecord(String(module), row as unknown as CloudRow); }
-    catch (error) { setStore(previous); alert(`保存失败：${error instanceof Error ? error.message : error}`); throw error; }
-    finally { mutationGeneration.current += 1; setSyncing(false); }
+    try {
+      const confirmed = await cloud.upsertRecord(String(module), row as unknown as CloudRow);
+      Object.assign(row, confirmed);
+      refreshRequestId.current += 1;
+      setStore(current => ({ ...current, [module]: upsertLocal(current[module] as unknown as CloudRow[], confirmed) }));
+    } catch (error) { alert(`保存失败：${error instanceof Error ? error.message : String((error as { message?: string })?.message || error)}`); throw error; }
+    finally { mutationGeneration.current += 1; setSyncing(false); void refresh(true); }
+  };
+
+  const persistRecords = async (records: Array<{ module: string; row: CloudRow }>) => {
+    mutationGeneration.current += 1;
+    setSyncing(true);
+    try {
+      const confirmed = await cloud.saveRecords(records);
+      refreshRequestId.current += 1;
+      setStore(current => {
+        const next = { ...current } as AppStore;
+        for (const { module, row } of confirmed) next[module] = upsertLocal(next[module] as unknown as CloudRow[], row);
+        return next;
+      });
+    } catch (error) { alert(`保存尚未确认，请刷新核对，勿重复提交：${error instanceof Error ? error.message : String((error as { message?: string })?.message || error)}`); throw error; }
+    finally { mutationGeneration.current += 1; setSyncing(false); void refresh(true); }
   };
 
   const remove = async (module: keyof AppStore, id: string) => {
@@ -250,12 +267,7 @@ function App({ cloud }: { cloud: CloudSession }) {
     const reason = prompt('根据数据保留规则，该记录不会被删除，只会作废归档。请输入原因：', '资料录入错误');
     if (!reason?.trim()) return;
     const archived = { ...existing, archived: true, archivedAt: new Date().toISOString(), archivedBy: actorName, archiveReason: reason.trim() };
-    setSyncing(true);
-    const previous = store;
-    setStore(current => ({ ...current, [module]: upsertLocal(current[module] as unknown as Array<Record<string, unknown> & { id: string }>, archived) }));
-    try { await cloud.upsertRecord(String(module), archived as unknown as CloudRow); }
-    catch (error) { setStore(previous); alert(`归档失败：${error instanceof Error ? error.message : error}`); }
-    finally { setSyncing(false); }
+    await persist(module, archived);
   };
 
   const writeChangeLog = async (order: WorkOrder, action: string, detail: string, before?: unknown, after?: unknown) => {
@@ -373,7 +385,7 @@ function App({ cloud }: { cloud: CloudSession }) {
         const log: InventoryLog = { id: uid(), date: new Date().toISOString(), partId: change.part.id, partNo: change.part.partNo, partName: change.part.name, type: change.delta > 0 ? '工单领用' : '工单退回', change: -change.delta, before: change.part.qty, after: change.nextQty, reference: order.number };
         records.push({ module: 'inventoryLogs', row: log as unknown as CloudRow });
       }
-      const savedOrder = discountNeedsApproval || settlementNeedsApproval ? safeOrder : currentOrder;
+      let savedOrder = discountNeedsApproval || settlementNeedsApproval ? safeOrder : currentOrder;
       savedOrder.inventoryCommitted = savedOrder.status !== '已取消';
       records.push({ module: 'workOrders', row: savedOrder as unknown as CloudRow });
       const changeLog: ChangeLog = {
@@ -383,14 +395,15 @@ function App({ cloud }: { cloud: CloudSession }) {
         before: compactWorkOrderSnapshot(old), after: compactWorkOrderSnapshot(savedOrder),
       };
       records.push({ module: 'changeLogs', row: changeLog as unknown as CloudRow });
-      await cloud.saveWorkOrderRecords(records);
+      const confirmedRecords = await cloud.saveWorkOrderRecords(records);
+      savedOrder = confirmedRecords.find(item => item.module === 'workOrders')!.row as unknown as WorkOrder;
       // Invalidate reads begun while the save was in flight, then publish the
       // confirmed rows immediately instead of waiting for a realtime reload.
       mutationGeneration.current += 1;
       refreshRequestId.current += 1;
       setStore(current => {
         const next = { ...current } as AppStore;
-        for (const { module, row } of records) next[module] = upsertLocal(next[module] as unknown as CloudRow[], row);
+        for (const { module, row } of confirmedRecords) next[module] = upsertLocal(next[module] as unknown as CloudRow[], row);
         return next;
       });
       if (discountNeedsApproval) await requestApproval({ workOrderId: order.id, workOrderNumber: order.number, type: '工单折扣', reason: `折扣由 ${money(old?.discount || 0)} 调整为 ${money(order.discount)}`, oldValue: old?.discount || 0, newValue: order.discount, proposedOrder: savedOrder });
@@ -499,17 +512,19 @@ function App({ cloud }: { cloud: CloudSession }) {
   };
 
   const executeWorkOrderArchive = async (order: WorkOrder, reason: string) => {
+    const records: Array<{ module: string; row: CloudRow }> = [];
     if (order.status !== '已取消') {
       for (const [partId, qty] of Object.entries(usageMap(order))) {
         const part = store.parts.find(item => item.id === partId); if (!part) continue;
         const next = part.qty + qty;
-        await persist('parts', { ...part, qty: next });
-        await persist('inventoryLogs', { id: uid(), date: new Date().toISOString(), partId, partNo: part.partNo, partName: part.name, type: '工单作废退回', change: qty, before: part.qty, after: next, reference: order.number } as InventoryLog);
+        records.push({ module: 'parts', row: { ...part, qty: next } as unknown as CloudRow });
+        records.push({ module: 'inventoryLogs', row: { id: uid(), date: new Date().toISOString(), partId, partNo: part.partNo, partName: part.name, type: '工单作废退回', change: qty, before: part.qty, after: next, reference: order.number } });
       }
     }
     const archived = recalculateWorkOrder({ ...order, status: '已取消', archivedAt: new Date().toISOString(), archivedBy: actorName, archiveReason: reason, inventoryCommitted: false });
-    await persist('workOrders', archived);
-    await writeChangeLog(archived, '工单作废并归档', `原始工单永久保留。原因：${reason}`, order, archived);
+    records.push({ module: 'workOrders', row: archived as unknown as CloudRow });
+    records.push({ module: 'changeLogs', row: { id: uid(), workOrderId: order.id, workOrderNumber: order.number, action: '工单作废并归档', detail: reason, actor: actorName, actorId: cloud.user.id, at: new Date().toISOString() } });
+    await persistRecords(records);
   };
 
   const deleteWorkOrder = async (order: WorkOrder) => {
@@ -527,9 +542,11 @@ function App({ cloud }: { cloud: CloudSession }) {
     const paid = Math.round((otherPaid + Number(proposed.amount || 0)) * 100) / 100;
     const recalculated = recalculateWorkOrder({ ...order, paid });
     const reopened = recalculated.balance > 0.009 && order.status === '已交车' ? recalculateWorkOrder({ ...recalculated, status: '已完成', workflowStage: '完工待结账' }) : recalculated;
-    await persist('payments', proposed);
-    await persist('workOrders', reopened);
-    await writeChangeLog(reopened, `${approvalLabel}收款更正`, `收款由 ${money(payment.amount)} 更正为 ${money(proposed.amount)}；修改人 ${actorName}。原因：${proposed.correctionReason || '未填写'}`, order, reopened);
+    await persistRecords([
+      { module: 'payments', row: proposed as unknown as CloudRow },
+      { module: 'workOrders', row: reopened as unknown as CloudRow },
+      { module: 'changeLogs', row: { id: uid(), workOrderId: order.id, workOrderNumber: order.number, action: `${approvalLabel}收款更正`, detail: `收款由 ${money(payment.amount)} 更正为 ${money(proposed.amount)}；原因：${proposed.correctionReason || '未填写'}`, actor: actorName, actorId: cloud.user.id, at: new Date().toISOString() } },
+    ]);
     return reopened;
   };
 
@@ -718,7 +735,7 @@ function App({ cloud }: { cloud: CloudSession }) {
       }));
       alert(`${paymentType}已记录，并已完成交车。\n本次实收 ${money(amount)} 已计入今日收入。\n剩余欠款 ${money(deliveredOrder.balance)}。`);
     } catch (error) {
-      alert(`收款失败：${error instanceof Error ? error.message : error}\n系统没有写入新的收款流水，请刷新后核对。`);
+      alert(`收款失败：${error instanceof Error ? error.message : error}\n收款可能已入账，但后续步骤未完成。请先刷新核对流水，不要重复收款。`);
     } finally {
       paymentInFlight.current.delete(order.id);
       setSyncing(false);
@@ -740,8 +757,10 @@ function App({ cloud }: { cloud: CloudSession }) {
     if (!Number.isFinite(unitCost) || unitCost < 0) return alert('请输入正确的采购单价。');
     const reference = entry ? entry.reference : prompt('请输入采购单/收据号码（可选）：', '') || '';
     const next = part.qty + qty;
-    await persist('parts', { ...part, qty: next, cost: unitCost });
-    await persist('inventoryLogs', { id: uid(), date: new Date().toISOString(), partId: part.id, partNo: part.partNo, partName: part.name, type: '采购入库', change: qty, before: part.qty, after: next, reference, unitCost, totalCost: qty * unitCost } as InventoryLog);
+    await persistRecords([
+      { module: 'parts', row: { ...part, qty: next, cost: unitCost } as unknown as CloudRow },
+      { module: 'inventoryLogs', row: { id: uid(), date: new Date().toISOString(), partId: part.id, partNo: part.partNo, partName: part.name, type: '采购入库', change: qty, before: part.qty, after: next, reference, unitCost, totalCost: qty * unitCost } },
+    ]);
   };
 
   async function returnStock(part: Part) {
@@ -776,9 +795,11 @@ function App({ cloud }: { cloud: CloudSession }) {
     if (!confirm(`确认采购退货？\n${part.partNo} ${part.name} × ${qty}\n退款 ${money(refundAmount)} · ${method}\n库存将从 ${part.qty} 减少到 ${Number(part.qty || 0) - qty}`)) return;
     const now = new Date().toISOString();
     const after = Number(part.qty || 0) - qty;
-    await persist('parts', { ...part, qty: after });
-    await persist('inventoryLogs', { id: uid(), date: now, partId: part.id, partNo: part.partNo, partName: part.name, type: '采购退货', change: -qty, before: part.qty, after, reference: refundReference || purchase.reference || '', note: `[原采购:${purchase.id}] ${reason} · 退款方式 ${method}`, unitCost: qty ? refundAmount / qty : 0, totalCost: -refundAmount } as InventoryLog);
-    await persist('expenses', { id: uid(), date: now, category: '采购退款', vendor: part.supplier || '配件供应商', amount: -refundAmount, method, note: `${part.partNo} ${part.name} × ${qty} · ${reason}${refundReference ? ` · 退款号 ${refundReference}` : ''}` } as Expense);
+    await persistRecords([
+      { module: 'parts', row: { ...part, qty: after } as unknown as CloudRow },
+      { module: 'inventoryLogs', row: { id: uid(), date: now, partId: part.id, partNo: part.partNo, partName: part.name, type: '采购退货', change: -qty, before: part.qty, after, reference: refundReference || purchase.reference || '', note: `[原采购:${purchase.id}] ${reason} · 退款方式 ${method}`, unitCost: qty ? refundAmount / qty : 0, totalCost: -refundAmount } },
+      { module: 'expenses', row: { id: uid(), date: now, category: '采购退款', vendor: part.supplier || '配件供应商', amount: -refundAmount, method, note: `${part.partNo} ${part.name} × ${qty} · ${reason}${refundReference ? ` · 退款号 ${refundReference}` : ''}` } },
+    ]);
     alert(`采购退货已完成。\n库存已减少 ${qty}，采购支出已冲减 ${money(refundAmount)}，${method}余额已增加。`);
   }
 
