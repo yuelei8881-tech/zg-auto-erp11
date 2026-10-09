@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from
 import type { Session } from '@supabase/supabase-js';
 import { openCloudSession, type CloudSession } from './lib/cloud';
 import { cloudConfigured, supabase } from './lib/supabase';
+import { clearStoreCache } from './lib/storeCache';
 
 type AuthMode = 'login' | 'register' | 'forgot' | 'recovery';
 
@@ -23,6 +24,11 @@ export function FormalGate({ children }: { children: (cloud: CloudSession) => Re
   );
   const [notice, setNotice] = useState('');
   const [connectionAttempt, setConnectionAttempt] = useState(0);
+  useEffect(() => {
+    const reconnect = () => { setCloud(null); setConnectionAttempt(value => value + 1); };
+    window.addEventListener('zg-permissions-changed', reconnect);
+    return () => window.removeEventListener('zg-permissions-changed', reconnect);
+  }, []);
 
   useEffect(() => {
     if (!supabase) {
@@ -37,7 +43,7 @@ export function FormalGate({ children }: { children: (cloud: CloudSession) => Re
     const { data } = supabase.auth.onAuthStateChange((event, next) => {
       if (event === 'PASSWORD_RECOVERY') setMode('recovery');
       setSession(next);
-      if (!next) setCloud(null);
+      if (!next) { setCloud(null); void clearStoreCache().catch(() => undefined); }
     });
     return () => data.subscription.unsubscribe();
   }, []);

@@ -2,6 +2,8 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { FormalGate } from './FormalGate';
 import type { CloudRow, CloudSession, CloudStore, StaffMember } from './lib/cloud';
+import { readStoreCache, writeStoreCache, storeCacheKey } from './lib/storeCache';
+import { financialStore } from './lib/financialRecords';
 import { supabase } from './lib/supabase';
 import { decodeVin, escapeHtml, money, recalculateWorkOrder, today, uid } from './lib/erp';
 import { MONTHLY_BILLING_TERM, MONTHLY_PAYMENT_METHOD, nextMonthlyBillingDate } from './lib/billing';
@@ -31,44 +33,7 @@ type ModalState = { type: 'customer' | 'fleet' | 'driver' | 'vehicle' | 'part' |
 const emptyStore: AppStore = { customers: [], fleets: [], drivers: [], vehicles: [], workOrders: [], parts: [], inventoryLogs: [], payments: [], expenses: [], settings: [], campaigns: [], warranties: [], servicePackages: [], approvalRequests: [], changeLogs: [] };
 const defaultSettings: ShopSettings = { id: '00000000-0000-4000-8000-000000000075', shopName: 'Z&G AUTO REPAIR', address: '319 Agostino Rd, San Gabriel, CA 91776', phone: '626-508-0888', email: '', defaultLaborRate: 165, defaultTaxRate: 9.5, invoiceTerms: 'Thank you for your business.' };
 
-const STORE_CACHE_DB = 'zg-auto-erp-cache-v1';
-function openStoreCache() {
-  return new Promise<IDBDatabase>((resolve, reject) => {
-    const request = indexedDB.open(STORE_CACHE_DB, 1);
-    request.onupgradeneeded = () => {
-      if (!request.result.objectStoreNames.contains('stores')) request.result.createObjectStore('stores');
-    };
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
-  });
-}
-type StoreCache = { store: CloudStore; savedAt: number; fullSyncedAt: number };
-async function readStoreCache(organizationId: string): Promise<StoreCache | null> {
-  try {
-    const db = await openStoreCache();
-    return await new Promise((resolve, reject) => {
-      const request = db.transaction('stores', 'readonly').objectStore('stores').get(organizationId);
-      request.onsuccess = () => {
-        const value = request.result as Partial<StoreCache> | undefined;
-        if (!value?.store) return resolve(null);
-        const savedAt = Number(value.savedAt || 0);
-        resolve({ store: value.store, savedAt, fullSyncedAt: Number(value.fullSyncedAt || savedAt || 0) });
-      };
-      request.onerror = () => reject(request.error);
-    });
-  } catch { return null; }
-}
-async function writeStoreCache(organizationId: string, store: CloudStore, fullSyncedAt = Date.now(), syncCursor = Date.now()) {
-  try {
-    const db = await openStoreCache();
-    await new Promise<void>((resolve, reject) => {
-      const transaction = db.transaction('stores', 'readwrite');
-      transaction.objectStore('stores').put({ savedAt: syncCursor, fullSyncedAt, store }, organizationId);
-      transaction.oncomplete = () => resolve();
-      transaction.onerror = () => reject(transaction.error);
-    });
-  } catch { /* Cache failure must never affect the authoritative server. */ }
-}
+// Account-scoped cache implementation lives in lib/storeCache.
 
 const nav: Array<{ id: Page; icon: string; label: string }> = [
   { id: 'dashboard', icon: '⌂', label: '经营首页' }, { id: 'customers', icon: '👤', label: '客户管理' },
@@ -178,11 +143,11 @@ function App({ cloud }: { cloud: CloudSession }) {
         const loaded = normalizeStore(changes);
         setStore(loaded);
         lastFullSyncAt.current = syncedAt;
-        void writeStoreCache(cloud.organizationId, loaded as unknown as CloudStore, syncedAt, requestStartedAt);
+        void writeStoreCache(cloud, loaded as unknown as CloudStore, syncedAt, requestStartedAt);
       } else {
         setStore(current => {
           const loaded = mergeCloudStore(current, changes);
-          void writeStoreCache(cloud.organizationId, loaded as unknown as CloudStore, lastFullSyncAt.current, requestStartedAt);
+          void writeStoreCache(cloud, loaded as unknown as CloudStore, lastFullSyncAt.current, requestStartedAt);
           return loaded;
         });
       }
@@ -210,7 +175,7 @@ function App({ cloud }: { cloud: CloudSession }) {
   useEffect(() => {
     let active = true;
     void (async () => {
-      const cached = await readStoreCache(cloud.organizationId);
+      const cached = await readStoreCache(cloud);
       if (!active) return;
       if (cached) {
         setStore(normalizeStore(cached.store));
@@ -223,7 +188,7 @@ function App({ cloud }: { cloud: CloudSession }) {
     void cloud.listStaff().then(data => setStaffMembers(data.members.filter(item => item.status === 'active'))).catch(() => undefined);
     const unsubscribe = cloud.subscribe(requiresFullRefresh => { void refresh(true, Boolean(requiresFullRefresh)); });
     return () => { active = false; unsubscribe(); };
-  }, [cloud.organizationId]);
+  }, [cloud]);
 
   const settings = store.settings[0] || defaultSettings;
   const actorName = displayName || cloud.user.name || cloud.user.email;
@@ -337,6 +302,22 @@ function App({ cloud }: { cloud: CloudSession }) {
         alert(`无法取得唯一工单号，本次内容尚未保存。${error instanceof Error ? `\n${error.message}` : ''}`);
         return;
       }
+    }
+    if (!can(cloud, 'pricing')) {
+      setSyncing(true);
+      mutationGeneration.current += 1;
+      try {
+        const saved = recalculateWorkOrder(await cloud.saveOperationalOrder(numberedOrder as unknown as CloudRow) as unknown as WorkOrder);
+        refreshRequestId.current += 1;
+        setStore(current => ({ ...current, workOrders: upsertLocal(current.workOrders, saved) }));
+        if (keepOpen) setEditingOrder(saved);
+        else { setSearch(''); setSearchDraft(''); setEditingOrder(null); setPage('workOrders'); }
+        setSaveNotice('施工记录已保存；报价、收款及库存由授权人员维护。');
+        return saved;
+      } catch (error) {
+        alert(`施工记录保存失败：${error instanceof Error ? error.message : String(error)}`);
+        return undefined;
+      } finally { mutationGeneration.current += 1; setSyncing(false); void refresh(true); }
     }
     const computedOrder = recalculateWorkOrder({ ...numberedOrder, settlementTotal: undefined });
     const order = recalculateWorkOrder(numberedOrder);
@@ -979,7 +960,8 @@ function greetingForNow() {
   return '晚上好';
 }
 
-function Dashboard({ store, setPage, setEditingOrder, cloud, actorName, editOwnProfile }: ContentProps) {
+function Dashboard({ store: rawStore, setPage, setEditingOrder, cloud, actorName, editOwnProfile }: ContentProps) {
+  const store = useMemo(() => financialStore(rawStore), [rawStore]);
   const metrics = useMemo(() => dashboardMetrics(store), [store]);
   const [selectedMetric, setSelectedMetric] = useState<string | null>(null);
   const [trendMode, setTrendMode] = useState<'daily' | 'monthly'>('daily');
@@ -1043,7 +1025,7 @@ function Dashboard({ store, setPage, setEditingOrder, cloud, actorName, editOwnP
     monthSales: { title: '本月营业额明细', total: metrics.monthSales, formula: '本月所有未取消工单的总价合计', orders: monthOrders },
     monthReceived: { title: '本月实收明细', total: metrics.monthReceived, formula: '本月所有实际收款流水合计', payments: monthPayments },
     monthExpenses: { title: '本月支出明细', total: metrics.monthExpenses, formula: '本月所有已记录支出合计', expenses: monthExpenses },
-    monthNet: { title: '本月净经营收益组成', total: metrics.monthNet, formula: `本月工单毛利润 ${money(metrics.monthGross)}－本月支出 ${money(metrics.monthExpenses)}`, orders: monthOrders, expenses: monthExpenses },
+    monthNet: { title: '本月现金净流入组成', total: metrics.monthNet, formula: `本月实收 ${money(metrics.monthReceived)}－本月支出 ${money(metrics.monthExpenses)}`, payments: monthPayments, expenses: monthExpenses },
     todayExpenses: { title: '今日支出明细（洛杉矶时间）', total: metrics.todayExpenses, formula: '今日所有已记录支出合计', expenses: todayExpenses },
     todayPartsExpenses: { title: '今日配件支出明细', total: metrics.todayPartsExpenses, formula: '今日类别为“配件采购”的支出合计', expenses: todayExpenses.filter(item => item.category === '配件采购') },
     monthBookBalance: { title: '累计账面余额与资金账户组成', total: metrics.monthBookBalance, formula: `全部正式收款 ${money(metrics.totalReceived)}－全部正式支出 ${money(metrics.totalExpenses)}`, payments: allPayments, expenses: allExpenses, accountBalances: monthAccountBalances },
@@ -1079,7 +1061,7 @@ function Dashboard({ store, setPage, setEditingOrder, cloud, actorName, editOwnP
   return <div className="page"><div className="hero"><div><button type="button" className="greeting-name" onClick={() => void editOwnProfile()}><h1>{greetingForNow()}，{actorName || 'Z&G AUTO REPAIR'}</h1></button></div><div className="toolbar">{can(cloud, 'customers') && <button onClick={() => setPage('customers')}>＋ 新客户</button>}{can(cloud, 'createWorkOrders') && <button className="primary" onClick={() => setEditingOrder('new')}>＋ 新建工单</button>}</div></div>
     <div className="dashboard-actions">{can(cloud, 'workOrders') && <button onClick={() => setPage('workOrders')}><b>维修工单</b><span>接车、检查、施工与结账</span></button>}{can(cloud, 'inventory') && <button onClick={() => setPage('parts')}><b>库存查询</b><span>配件编号、名称、库存与进货价</span></button>}{can(cloud, 'finance') && <button onClick={() => setPage('finance')}><b>财务收款</b><span>收入、支出与欠款</span></button>}{can(cloud, 'campaigns') && <button onClick={() => setPage('campaigns')}><b>活动与保修</b><span>优惠活动和车辆保修</span></button>}</div>
     {showFinance && <details className="relationship-overview relationship-overview-collapsible"><summary><span><b>客户与车辆统计</b><small>点击展开客户、车队与车辆数据</small></span><span className="relationship-toggle" aria-hidden="true">⌄</span></summary><div className="relationship-overview-body"><p>读取正式服务器中的有效档案，已归档资料不计入。</p><div className="kpi-grid relationship-kpis"><Kpi label="客户档案" value={String(relationshipStats.customers)} tone="blue" onClick={() => setPage('customers')} hint="点击查看客户明细" /><Kpi label="公司 / 车队" value={String(relationshipStats.fleets)} tone="purple" onClick={() => setPage('fleets')} hint="点击查看车队与司机" /><Kpi label="车辆档案" value={String(relationshipStats.vehicles)} tone="green" onClick={() => setPage('vehicles')} hint="点击查看车辆明细" /><Kpi label="本月新增车辆（新客户）" value={String(relationshipStats.newVehiclesThisMonth)} tone="blue" onClick={() => setPage('vehicles')} hint="按车辆首次录入日期统计" /><Kpi label="有维修记录车辆" value={String(relationshipStats.servicedVehicles)} tone="orange" onClick={() => setPage('vehicles')} hint="点击进入车辆维修档案" /></div></div></details>}
-    {showFinance ? <div className="kpi-grid"><Kpi label="今日开单营业额" value={money(metrics.todaySales)} tone="blue" onClick={() => setSelectedMetric('todaySales')} hint="点击查看金额组成" /><Kpi label="今日实收" value={money(metrics.todayReceived)} tone="green" onClick={() => setSelectedMetric('todayReceived')} hint="点击查看收款组合明细" /><Kpi label="今日毛利润" value={money(metrics.todayGross)} tone="purple" onClick={() => setSelectedMetric('todayGross')} hint="点击查看金额组成" /><Kpi label="未收款总额" value={money(metrics.receivables)} tone="orange" onClick={() => setSelectedMetric('receivables')} hint="点击查看欠款工单" /><Kpi label="本月营业额" value={money(metrics.monthSales)} onClick={() => setSelectedMetric('monthSales')} hint="点击查看金额组成" /><Kpi label="本月实收" value={money(metrics.monthReceived)} onClick={() => setSelectedMetric('monthReceived')} hint="点击查看收款明细" /><Kpi label="本月支出" value={money(metrics.monthExpenses)} onClick={() => setSelectedMetric('monthExpenses')} hint="点击查看支出明细" /><Kpi label="本月净经营收益" value={money(metrics.monthNet)} onClick={() => setSelectedMetric('monthNet')} hint="点击查看计算组成" /></div> : <div className="kpi-grid technician-kpis"><Kpi label="分配给我的工单" value={String(visibleOrders.length)} tone="blue" /><Kpi label="等待检查" value={String(visibleOrders.filter(item => item.status === '等待检查').length)} /><Kpi label="维修中" value={String(visibleOrders.filter(item => item.status === '维修中').length)} tone="purple" /><Kpi label="今日完成" value={String(visibleOrders.filter(item => item.date === today() && item.status === '已完成').length)} tone="green" /></div>}
+    {showFinance ? <div className="kpi-grid"><Kpi label="今日开单营业额" value={money(metrics.todaySales)} tone="blue" onClick={() => setSelectedMetric('todaySales')} hint="点击查看金额组成" /><Kpi label="今日实收" value={money(metrics.todayReceived)} tone="green" onClick={() => setSelectedMetric('todayReceived')} hint="点击查看收款组合明细" /><Kpi label="今日毛利润" value={money(metrics.todayGross)} tone="purple" onClick={() => setSelectedMetric('todayGross')} hint="点击查看金额组成" /><Kpi label="未收款总额" value={money(metrics.receivables)} tone="orange" onClick={() => setSelectedMetric('receivables')} hint="点击查看欠款工单" /><Kpi label="本月营业额" value={money(metrics.monthSales)} onClick={() => setSelectedMetric('monthSales')} hint="点击查看金额组成" /><Kpi label="本月实收" value={money(metrics.monthReceived)} onClick={() => setSelectedMetric('monthReceived')} hint="点击查看收款明细" /><Kpi label="本月支出" value={money(metrics.monthExpenses)} onClick={() => setSelectedMetric('monthExpenses')} hint="点击查看支出明细" /><Kpi label="本月现金净流入" value={money(metrics.monthNet)} onClick={() => setSelectedMetric('monthNet')} hint="点击查看计算组成" /></div> : <div className="kpi-grid technician-kpis"><Kpi label="分配给我的工单" value={String(visibleOrders.length)} tone="blue" /><Kpi label="等待检查" value={String(visibleOrders.filter(item => item.status === '等待检查').length)} /><Kpi label="维修中" value={String(visibleOrders.filter(item => item.status === '维修中').length)} tone="purple" /><Kpi label="今日完成" value={String(visibleOrders.filter(item => item.date === today() && item.status === '已完成').length)} tone="green" /></div>}
     {showFinance && <div className="kpi-grid today-expense-kpi"><Kpi label="今日支出（洛杉矶时间）" value={money(metrics.todayExpenses)} tone="orange" onClick={() => setSelectedMetric('todayExpenses')} hint="点击查看支出明细" /><Kpi label="今日配件支出总额" value={money(metrics.todayPartsExpenses)} tone="purple" onClick={() => setSelectedMetric('todayPartsExpenses')} hint="点击查看配件支出" /><Kpi label="累计账面余额（实收－支出）" value={money(metrics.monthBookBalance)} tone="green" onClick={() => setSelectedMetric('monthBookBalance')} hint="点击查看现金、转账、POS等余额" /></div>}
     {showFinance && <FinancialTrendChart rows={financialTrend} mode={trendMode} onModeChange={setTrendMode} />}
     <div className="dashboard-grid"><section className="panel wide"><div className="section-title"><h3>最近工单</h3><button onClick={() => setPage('workOrders')}>查看全部</button></div><table><thead><tr><th>工单</th><th>客户/车辆</th><th>状态</th>{showFinance && <><th>总价</th><th>欠款</th></>}</tr></thead><tbody>{recent.map(order => <tr key={order.id}><td><b>{order.number}</b><small>{order.date}</small></td><td>{order.customer}<small>{order.plate} · {order.vehicle}</small></td><td><Status value={order.status} /></td>{showFinance && <><td>{money(order.total)}</td><td className={order.balance > 0 ? 'warning-text' : ''}>{money(order.balance)}</td></>}</tr>)}</tbody></table>{!recent.length && <Empty text="还没有分配给您的工单。" />}</section>
@@ -2062,7 +2044,7 @@ function losAngelesDateKey(value: string) {
   const part = (type: string) => parts.find(item => item.type === type)?.value || '';
   return `${part('year')}-${part('month')}-${part('day')}`;
 }
-function dashboardMetrics(store: AppStore) { const date = losAngelesDateKey(new Date().toISOString()), month = date.slice(0, 7), valid = store.workOrders.filter(item => item.status !== '已取消'); const todayOrders = valid.filter(item => losAngelesDateKey(item.date) === date), monthOrders = valid.filter(item => losAngelesDateKey(item.date).startsWith(month)); const todayPayments = store.payments.filter(item => losAngelesDateKey(item.date) === date), monthPayments = store.payments.filter(item => losAngelesDateKey(item.date).startsWith(month)), todayExpensesRows = store.expenses.filter(item => losAngelesDateKey(item.date) === date), monthExpensesRows = store.expenses.filter(item => losAngelesDateKey(item.date).startsWith(month)); const monthReceived = sum(monthPayments, 'amount'), monthExpenses = sum(monthExpensesRows, 'amount'), totalReceived = sum(store.payments, 'amount'), totalExpenses = sum(store.expenses, 'amount'); return { todaySales: sum(todayOrders, 'total'), monthSales: sum(monthOrders, 'total'), todayReceived: sum(todayPayments, 'amount'), monthReceived, totalReceived, totalExpenses, todayExpenses: sum(todayExpensesRows, 'amount'), todayPartsExpenses: sum(todayExpensesRows.filter(item => item.category === '配件采购'), 'amount'), todayGross: sum(todayOrders, 'grossProfit'), monthGross: sum(monthOrders, 'grossProfit'), monthExpenses, monthBookBalance: totalReceived - totalExpenses, monthNet: sum(monthOrders, 'grossProfit') - monthExpenses, receivables: sum(valid, 'balance') }; }
+function dashboardMetrics(store: AppStore) { const date = losAngelesDateKey(new Date().toISOString()), month = date.slice(0, 7), valid = store.workOrders.filter(item => item.status !== '已取消'); const todayOrders = valid.filter(item => losAngelesDateKey(item.date) === date), monthOrders = valid.filter(item => losAngelesDateKey(item.date).startsWith(month)); const todayPayments = store.payments.filter(item => losAngelesDateKey(item.date) === date), monthPayments = store.payments.filter(item => losAngelesDateKey(item.date).startsWith(month)), todayExpensesRows = store.expenses.filter(item => losAngelesDateKey(item.date) === date), monthExpensesRows = store.expenses.filter(item => losAngelesDateKey(item.date).startsWith(month)); const monthReceived = sum(monthPayments, 'amount'), monthExpenses = sum(monthExpensesRows, 'amount'), totalReceived = sum(store.payments, 'amount'), totalExpenses = sum(store.expenses, 'amount'); return { todaySales: sum(todayOrders, 'total'), monthSales: sum(monthOrders, 'total'), todayReceived: sum(todayPayments, 'amount'), monthReceived, totalReceived, totalExpenses, todayExpenses: sum(todayExpensesRows, 'amount'), todayPartsExpenses: sum(todayExpensesRows.filter(item => item.category === '配件采购'), 'amount'), todayGross: sum(todayOrders, 'grossProfit'), monthGross: sum(monthOrders, 'grossProfit'), monthExpenses, monthBookBalance: totalReceived - totalExpenses, monthNet: monthReceived - monthExpenses, receivables: sum(valid, 'balance') }; }
 function sum<T extends object>(rows: T[], key: keyof T) { return rows.reduce((total, row) => total + Number(row[key] || 0), 0); }
 
 registerPwa();
@@ -2070,4 +2052,4 @@ const approvalToken = new URLSearchParams(window.location.search).get('approval'
 const publicHost = ['zgautorepair.com', 'www.zgautorepair.com'].includes(window.location.hostname);
 const publicPreview = window.location.pathname === '/website' || window.location.pathname.startsWith('/website/');
 const publicPath = publicPreview ? (window.location.pathname.replace(/^\/website/, '') || '/') : window.location.pathname;
-createRoot(document.getElementById('root')!).render(<React.StrictMode>{publicHost || publicPreview ? <PublicWebsite path={publicPath} /> : approvalToken ? <CustomerApprovalPage token={approvalToken} /> : <><PwaInstall /><FormalGate>{cloud => <App cloud={cloud} />}</FormalGate></>}</React.StrictMode>);
+createRoot(document.getElementById('root')!).render(<React.StrictMode>{publicHost || publicPreview ? <PublicWebsite path={publicPath} /> : approvalToken ? <CustomerApprovalPage token={approvalToken} /> : <><PwaInstall /><FormalGate>{cloud => <App key={storeCacheKey(cloud)} cloud={cloud} />}</FormalGate></>}</React.StrictMode>);

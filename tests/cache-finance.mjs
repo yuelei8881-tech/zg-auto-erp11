@@ -1,0 +1,37 @@
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { stripTypeScriptTypes } from 'node:module';
+import { indexedDB } from 'fake-indexeddb';
+import vm from 'node:vm';
+function load(path,names,extra={}) {
+  const source=stripTypeScriptTypes(readFileSync(new URL(path,import.meta.url),'utf8')).replace(/^import .*;$/gm,'').replace(/^export /gm,'');
+  const result={};
+  vm.runInNewContext(source+'\nObject.assign(result,{'+names.join(',')+'});',{result,indexedDB,console,crypto,...extra});
+  return result;
+}
+const cache=load('../src/lib/storeCache.ts',['storeCacheKey','writeStoreCache','readStoreCache','clearStoreCache']);
+const owner={organizationId:'org',user:{id:'owner'},role:'owner',permissions:{}};
+const other={...owner,user:{id:'other'}};
+const employee={...owner,user:{id:'employee'},role:'technician'};
+assert.notEqual(cache.storeCacheKey(owner),cache.storeCacheKey(other));
+assert.notEqual(cache.storeCacheKey(employee),cache.storeCacheKey({...employee,permissions:{finance:true}}));
+await cache.writeStoreCache(owner,{payments:[{id:'private',amount:500}]},100,200);
+assert.equal((await cache.readStoreCache(owner)).store.payments[0].amount,500);
+assert.equal(await cache.readStoreCache(other),null);
+assert.equal(await cache.readStoreCache(employee),null);
+assert.equal(await cache.readStoreCache(owner),null,'employee login clears prior sensitive cache');
+await cache.writeStoreCache(employee,{payments:[{id:'must-not-store'}]});
+assert.equal(await cache.readStoreCache(employee),null);
+await cache.writeStoreCache(owner,{payments:[]});
+await cache.clearStoreCache();
+assert.equal(await cache.readStoreCache(owner),null);
+const {recalculateWorkOrder}=load('../src/lib/erp.ts',['recalculateWorkOrder']);
+const loss=recalculateWorkOrder({id:'loss',date:'2026-10-09',partItems:[{id:'p',qty:1,cost:150,price:100}],laborItems:[],taxRate:0});
+assert.equal(loss.grossProfit,-50,'loss must not be clamped to zero');
+const {financialStore}=load('../src/lib/financialRecords.ts',['financialStore']);
+const store=financialStore({workOrders:[{total:100},{total:900,status:'已取消'}],payments:[{amount:100},{amount:900,archivedAt:'date'}],expenses:[{amount:40},{amount:800,status:'已作废'}]});
+assert.equal(store.workOrders.length,1); assert.equal(store.payments.length,1); assert.equal(store.expenses.length,1);
+const main=readFileSync(new URL('../src/main.tsx',import.meta.url),'utf8');
+assert.match(main,/monthNet: monthReceived - monthExpenses/,'cash-flow metric must not deduct inventory costs twice');
+assert.match(main,/label="本月现金净流入"/);
+console.log('PASS: account/permission cache isolation, employee no-cache, logout clearing, negative gross profit, inactive-record exclusion, cash-flow definition');

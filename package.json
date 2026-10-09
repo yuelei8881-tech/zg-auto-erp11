@@ -7,19 +7,23 @@
   },
   "type": "module",
   "scripts": {
+    "test": "node tests/dashboard-loading.mjs && node tests/cache-finance.mjs && node tests/record-permissions.mjs",
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.57.4",
-    "@vitejs/plugin-react": "latest",
-    "vite": "latest",
+    "@types/react": "19.2.17",
+    "@types/react-dom": "19.2.3",
+    "@vitejs/plugin-react": "6.0.3",
+    "react": "19.2.7",
+    "react-dom": "19.2.7",
     "typescript": "latest",
-    "react": "latest",
-    "react-dom": "latest",
-    "@types/react": "latest",
-    "@types/react-dom": "latest"
+    "vite": "8.1.4"
   },
-  "devDependencies": {}
+  "devDependencies": {
+    "@electric-sql/pglite": "0.5.8",
+    "fake-indexeddb": "6.2.5"
+  }
 }

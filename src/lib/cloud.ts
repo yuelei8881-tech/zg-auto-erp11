@@ -1,5 +1,6 @@
 import type { User } from '@supabase/supabase-js';
 import { supabase, supabasePublishableKey, supabaseUrl } from './supabase';
+import { clearStoreCache } from './storeCache';
 
 export type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
 export type CloudRow = { id: string; [key: string]: JsonValue };
@@ -18,6 +19,7 @@ export type CloudSession = {
   loadStore: (updatedSince?: string, skipPhotos?: boolean) => Promise<CloudStore>;
   upsertRecord: (module: string, row: CloudRow) => Promise<void>;
   saveWorkOrderRecords: (records: Array<{ module: string; row: CloudRow }>) => Promise<void>;
+  saveOperationalOrder: (row: CloudRow) => Promise<CloudRow>;
   reserveWorkOrderNumber: (recordId: string) => Promise<string>;
   recordPayment: (workOrderId: string, payment: CloudRow) => Promise<CloudRow>;
   deleteRecord: (module: string, id: string) => Promise<void>;
@@ -45,11 +47,11 @@ export async function openCloudSession(user: User): Promise<CloudSession> {
   const findMembership = async () => {
     const { data, error } = await client
       .from('zg_organization_members')
-      .select('organization_id, role, display_name, permissions')
+      .select('organization_id, role, display_name, permissions, status')
       .eq('user_id', user.id)
-      .eq('status', 'active')
       .maybeSingle();
     if (error) throw error;
+    if (data && data.status !== 'active') throw new Error('员工账号已停用，请联系管理员。');
     return data;
   };
 
@@ -80,12 +82,30 @@ export async function openCloudSession(user: User): Promise<CloudSession> {
   if (!membership) throw new Error('无法建立修理厂账号，请联系系统管理员。');
 
   const organizationId = String(membership.organization_id);
+  const canEditPricing = membership.role === 'owner' || (Object.prototype.hasOwnProperty.call(membership.permissions || {}, 'pricing')
+    ? membership.permissions.pricing === true : membership.role === 'finance');
   const evidenceUrlCache = new Map<string, { url: string; expiresAt: number }>();
   const { data: organization, error: organizationError } = await client
     .from('zg_organizations').select('name').eq('id', organizationId).single();
   if (organizationError) throw organizationError;
 
-  const loadStore = async (updatedSince?: string, skipPhotos = false) => {
+  const loadStore = async (updatedSince?: string, skipPhotos = false, onlyModule?: string) => {
+    const current = await findMembership().catch(async error => {
+      if (error instanceof Error && error.message.includes('账号已停用')) {
+        await clearStoreCache().catch(() => undefined);
+        window.dispatchEvent(new Event('zg-permissions-changed'));
+      }
+      throw error;
+    });
+    const fingerprint = (value: Record<string, unknown> | null) => JSON.stringify([
+      value?.organization_id, value?.role,
+      Object.entries((value?.permissions || {}) as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b)),
+    ]);
+    if (fingerprint(current) !== fingerprint(membership)) {
+      await clearStoreCache().catch(() => undefined);
+      window.dispatchEvent(new Event('zg-permissions-changed'));
+      throw new Error('账号权限已更新，正在重新连接。');
+    }
     // Supabase limits a select response to 1,000 rows by default. The ERP now
     // contains more than that across all modules, so a single request silently
     // omitted older payments, expenses, customers and work orders. Read every
@@ -97,15 +117,9 @@ export async function openCloudSession(user: User): Promise<CloudSession> {
     // whole ERP fail to open. Uploads remain parallel, but the authoritative
     // accounting/customer store is loaded conservatively and completely.
     for (let from = 0; ; from += pageSize) {
-      let query = client
-        .from('zg_erp_records')
-        .select('module, record_id, payload, updated_at')
-        .eq('organization_id', organizationId)
-        .order('updated_at', { ascending: false })
-        .order('record_id', { ascending: false })
-        .range(from, from + pageSize - 1);
-      if (updatedSince) query = query.gt('updated_at', updatedSince);
-      const { data: page, error } = await query;
+      const { data: page, error } = await client.rpc('zg_read_records', {
+        p_org: organizationId, p_since: updatedSince || null, p_offset: from, p_limit: pageSize, p_module: onlyModule || null,
+      });
       if (error) throw error;
       const rows = (page || []) as typeof data;
       data.push(...rows);
@@ -151,6 +165,11 @@ export async function openCloudSession(user: User): Promise<CloudSession> {
   };
 
   const upsertRecord = async (module: string, row: CloudRow) => {
+    if (module === 'workOrders' && !canEditPricing) {
+      const { error } = await client.rpc('zg_save_operational_order', { p_org: organizationId, p_order: row });
+      if (error) throw error;
+      return;
+    }
     if (module === 'customers') {
       const normalizePhone = (value: unknown) => {
         const digits = String(value || '').replace(/\D/g, '');
@@ -159,32 +178,20 @@ export async function openCloudSession(user: User): Promise<CloudSession> {
       const phone = normalizePhone(row.phone);
       const email = String(row.email || '').trim().toLocaleLowerCase();
       if (phone || email) {
-        const { data: existingCustomers, error: lookupError } = await client
-          .from('zg_erp_records')
-          .select('record_id, payload, updated_at')
-          .eq('organization_id', organizationId)
-          .eq('module', 'customers')
-          .order('updated_at', { ascending: false });
-        if (lookupError) throw lookupError;
-        const duplicate = (existingCustomers || []).find(item => {
-          const payload = (item.payload || {}) as Record<string, unknown>;
+        const existingCustomers = (await loadStore(undefined, true, 'customers')).customers || [];
+        const duplicate = existingCustomers.find(item => {
+          const payload = item as Record<string, unknown>;
           if (payload.archived === true) return false;
           return (phone && normalizePhone(payload.phone) === phone)
             || (email && String(payload.email || '').trim().toLocaleLowerCase() === email);
         });
-        if (duplicate && String(duplicate.record_id) !== row.id) {
-          const payload = (duplicate.payload || {}) as Record<string, unknown>;
+        if (duplicate && duplicate.id !== row.id) {
+          const payload = duplicate as Record<string, unknown>;
           throw new Error(`客户已经存在：${String(payload.name || '未命名客户')} · ${String(payload.phone || '未记录电话')}`);
         }
       }
     }
-    const { error } = await client.from('zg_erp_records').upsert({
-      organization_id: organizationId,
-      module,
-      record_id: row.id,
-      payload: row,
-      updated_by: user.id,
-    }, { onConflict: 'organization_id,module,record_id' });
+    const { error } = await client.rpc('zg_write_records', { p_org: organizationId, p_records: [{ module, row }] });
     if (error) throw error;
   };
 
@@ -194,9 +201,7 @@ export async function openCloudSession(user: User): Promise<CloudSession> {
     if (records.some(item => !allowed.has(item.module))) throw new Error('工单批量保存包含不支持的资料类型。');
     // One PostgREST statement: inventory, order and audit history commit together.
     // The existing authenticated user's RLS policies still apply to every row.
-    const { error } = await client.from('zg_erp_records').upsert(records.map(({ module, row }) => ({
-      organization_id: organizationId, module, record_id: row.id, payload: row, updated_by: user.id,
-    })), { onConflict: 'organization_id,module,record_id' });
+    const { error } = await client.rpc('zg_write_records', { p_org: organizationId, p_records: records });
     if (error) throw error;
   };
 
@@ -233,10 +238,16 @@ export async function openCloudSession(user: User): Promise<CloudSession> {
     const onVisible = () => { if (document.visibilityState === 'visible') onFocus(); };
     document.addEventListener('visibilitychange', onVisible);
     window.addEventListener('online', onFocus);
+    // Employee reads use a redacted RPC, so direct-table realtime is intentionally
+    // unavailable. Poll only while visible, without overlapping refresh requests.
+    const poll = window.setInterval(() => {
+      if (document.visibilityState === 'visible') queueRefresh(false);
+    }, 60_000);
     return () => {
       window.removeEventListener('focus', onFocus);
       document.removeEventListener('visibilitychange', onVisible);
       window.removeEventListener('online', onFocus);
+      window.clearInterval(poll);
       if (refreshTimer) clearTimeout(refreshTimer);
       void client.removeChannel(channel);
     };
@@ -392,7 +403,17 @@ export async function openCloudSession(user: User): Promise<CloudSession> {
     organizationName: organization?.name || 'Z&G AUTO REPAIR',
     role: String(membership.role),
     permissions: (membership.permissions || {}) as Record<string, boolean>,
-    loadStore, upsertRecord, saveWorkOrderRecords, reserveWorkOrderNumber, deleteRecord, recordPayment, subscribe, invokeFunction, uploadEvidencePhoto, createCustomerApproval, listStaff, createStaffInvite, updateStaff, updateOwnProfile, cancelStaffInvite, deleteStaffByEmail,
-    signOut: async () => { await client.auth.signOut(); },
+    loadStore, upsertRecord, saveWorkOrderRecords,
+    saveOperationalOrder: async row => {
+      const { data, error } = await client.rpc('zg_save_operational_order', { p_org: organizationId, p_order: row });
+      if (error) throw error;
+      return data as CloudRow;
+    },
+    reserveWorkOrderNumber, deleteRecord, recordPayment, subscribe, invokeFunction, uploadEvidencePhoto, createCustomerApproval, listStaff, createStaffInvite, updateStaff, updateOwnProfile, cancelStaffInvite, deleteStaffByEmail,
+    signOut: async () => {
+      await clearStoreCache().catch(() => undefined);
+      const { error } = await client.auth.signOut();
+      if (error) throw error;
+    },
   };
 }

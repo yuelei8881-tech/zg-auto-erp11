@@ -56,7 +56,7 @@ export function recalculateWorkOrder(order: Partial<WorkOrder>): WorkOrder {
     // Profit follows the final customer total, including any approved flat
     // settlement amount. Sales tax is not shop income; outsourced work and
     // actual parts cost are expenses.
-    grossProfit: Math.max(0, total - tax - partsCost - outsource),
+    grossProfit: Math.round((total - tax - partsCost - outsource) * 100) / 100,
   } as WorkOrder;
 }
 

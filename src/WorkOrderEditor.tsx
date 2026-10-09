@@ -5,6 +5,7 @@ import { MONTHLY_BILLING_TERM, MONTHLY_PAYMENT_METHOD, nextMonthlyBillingDate } 
 import { recognizeVehiclePhoto } from './lib/ocr';
 import { SignaturePad } from './SignaturePad';
 import type { CloudSession, StaffMember } from './lib/cloud';
+import { storeCacheKey } from './lib/storeCache';
 import { supabase } from './lib/supabase';
 
 type Props = {
@@ -206,7 +207,7 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, w
     });
     return () => { active = false; };
   }, [evidencePaths]);
-  const draftKey = `work-order:${value?.id || 'new'}`;
+  const draftKey = `work-order:v2:${storeCacheKey(cloud)}:${value?.id || 'new'}`;
   const allowLocalDraft = !value;
   const calculated = useMemo(() => recalculateWorkOrder(order), [order]);
   const visibleMobileSteps = useMemo(() => canCheckoutAndDeliver ? mobileSteps : mobileSteps.filter(step => step.key !== 'checkout'), [canCheckoutAndDeliver]);
@@ -1031,6 +1032,8 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, w
       {!!order.reviewHistory?.length && <div className="review-history"><b>审查记录</b>{[...order.reviewHistory].reverse().map(item => <div key={item.id}><span>{item.action}</span><small>{item.by} · {new Date(item.at).toLocaleString()}{item.note ? ` · ${item.note}` : ''}</small></div>)}</div>}
     </section>
 
+    {!canEditPricing && <p className="muted">施工项目只读；可以保存诊断、施工进度与照片。报价及配件用量由授权人员维护。</p>}
+    <fieldset disabled={!canEditPricing} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
     <section className="form-section repair-library-section"><div className="section-title"><div><h3>维修项目资料库</h3><span className="muted">套餐默认折叠；展开后点击套餐主体，配件、用量和人工会整套加入工单。</span></div><button type="button" className="primary" onClick={() => openPackageEditor()}>＋ 新建维修套餐</button></div>
       <details className="repair-library-collapse" open={repairLibraryOpen} onToggle={event => setRepairLibraryOpen(event.currentTarget.open)}>
         <summary><span><b>维修套餐快捷选择</b><small>点开后选择套餐，点击套餐主体即可整套加入当前工单</small></span><strong>{repairLibrary.length} 个套餐</strong></summary>
@@ -1073,6 +1076,7 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, w
     <section className="form-section review-section checklist-quote-section"><div className="section-title"><div><h3>报价核对</h3><span>Estimate Checklist · 请在确认全部金额后勾选</span></div></div>
       <div className="inspection-grid">{inspectionItems.slice(4, 5).map(([key, label]) => <label key={key}><input type="checkbox" checked={checklist[key]} onChange={e => patch({ inspectionChecklist: { ...checklist, [key]: e.target.checked } })} /><span>{label}</span></label>)}</div>
     </section>
+    </fieldset>
     {packageEditor && <ServicePackageEditor value={packageEditor} inventory={parts} editing={servicePackages.some(item => item.id === packageEditor.id)} saving={packageSaving} onChange={setPackageEditor} onCancel={() => setPackageEditor(null)} onSave={() => void savePackage()} />}
     <div className="mobile-editor-actions"><div><small>{mobileStepIndex + 1} / {visibleMobileSteps.length} · {allowLocalDraft ? (draftStatus === 'saving' ? '正在自动保存…' : draftStatus === 'saved' ? '草稿已保存在本机' : draftStatus === 'error' ? '本机草稿保存失败' : '自动保存已开启') : '已选择此工单；取消不会保存修改'}</small><b>{visibleMobileSteps[mobileStepIndex]?.label}</b></div><button type="button" onClick={() => moveMobileStep(-1)} disabled={mobileStepIndex === 0}>上一步</button><button type="button" className="primary" onClick={saveProgress} disabled={saving}>{saving ? '保存中…' : !canCheckoutAndDeliver && mobileStep === 'repair' ? '完成维修并保存' : '保存进度'}</button><button type="button" onClick={() => moveMobileStep(1)} disabled={mobileStepIndex === visibleMobileSteps.length - 1}>下一步</button></div>
   </div>;

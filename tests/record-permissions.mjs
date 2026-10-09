@@ -1,0 +1,64 @@
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { PGlite } from '@electric-sql/pglite';
+
+// Real PostgreSQL execution in an isolated in-memory database, never production.
+const db = new PGlite();
+await db.exec(`
+create role anon; create role authenticated;
+create schema auth;
+create function auth.uid() returns uuid language sql stable as
+$$ select nullif(current_setting('request.jwt.claim.sub',true),'')::uuid $$;
+create table zg_organization_members(organization_id uuid,user_id uuid,role text,status text,permissions jsonb default '{}',primary key(organization_id,user_id));
+create table zg_erp_records(organization_id uuid,module text,record_id uuid,payload jsonb,updated_by uuid,updated_at timestamptz default now(),primary key(organization_id,module,record_id));
+create table zg_audit_logs(organization_id uuid);
+create table zg_customer_approvals(organization_id uuid);
+create table zg_reward_enrollments(organization_id uuid,id uuid);
+create table zg_reward_vehicles(organization_id uuid,id uuid);
+create table zg_reward_events(organization_id uuid);
+create table zg_staff_invites(organization_id uuid);
+alter table zg_erp_records enable row level security;
+grant usage on schema auth to authenticated;
+grant all on zg_erp_records to authenticated;
+create function zg_is_org_member(p_org uuid) returns boolean language sql stable security definer as
+$$ select exists(select 1 from public.zg_organization_members where organization_id=p_org and user_id=auth.uid() and status='active') $$;
+create function zg_record_payment(uuid,uuid,jsonb) returns jsonb language sql as $$ select $3 $$;
+create function zg_set_oil_reward_count(uuid,integer,text) returns jsonb language sql as $$ select '{}'::jsonb $$;
+create function zg_review_oil_reward_enrollment(uuid,boolean,text) returns jsonb language sql as $$ select '{}'::jsonb $$;
+create function zg_create_customer_approval(uuid,uuid,text,text,jsonb) returns text language sql as $$ select 'test-token'::text $$;
+`);
+const migration = readFileSync(new URL('../supabase/migrations/20261009150337_enforce_record_permissions.sql', import.meta.url),'utf8');
+await db.exec(migration);
+await db.exec(readFileSync(new URL('../supabase/migrations/20261009151334_activate_record_permissions.sql',import.meta.url),'utf8'));
+await db.exec(readFileSync(new URL('../supabase/migrations/20261009151541_secure_privileged_actions.sql',import.meta.url),'utf8'));
+const org='00000000-0000-4000-8000-000000000001', owner='00000000-0000-4000-8000-000000000002', worker='00000000-0000-4000-8000-000000000003', order='00000000-0000-4000-8000-000000000004';
+await db.query("insert into zg_organization_members values ($1,$2,'owner','active','{}'),($1,$3,'workshop_supervisor','active','{}')",[org,owner,worker]);
+const original={id:order,total:550,paid:100,balance:450,grossProfit:200,phone:'private',status:'维修中',diagnosis:'old',laborItems:[{id:'labor',description:'换机油',rate:100,total:100}],partItems:[{id:'part',cost:40,price:60,qty:1}],notes:'sensitive'};
+await db.query("insert into zg_erp_records(organization_id,module,record_id,payload) values ($1,'workOrders',$2,$3)",[org,order,original]);
+await db.exec(`set role authenticated; set request.jwt.claim.sub='${worker}'`);
+assert.equal((await db.query('select * from zg_erp_records')).rows.length,0,'raw JSON must not be accessible');
+let rows=(await db.query('select * from zg_read_records($1)',[org])).rows;
+assert.equal(rows.length,1);
+assert.equal(rows[0].payload.total,undefined);
+assert.equal(rows[0].payload.partItems[0].cost,undefined);
+assert.equal(rows[0].payload.laborItems[0].rate,undefined);
+assert.equal(rows[0].payload.notes,undefined);
+await assert.rejects(db.query('select zg_write_records($1,$2)',[org,[{module:'payments',row:{id:order,amount:999}}]]),/权限/);
+await assert.rejects(db.query('select zg_record_payment($1,$2,$3)',[org,order,{amount:1}]),/收款权限/);
+await assert.rejects(db.query('select zg_set_oil_reward_count($1,5,$2)',[order,'test']),/活动管理权限/);
+await assert.rejects(db.query('select zg_create_customer_approval($1,$2,$3,$4,$5)',[org,order,'test@example.test','test',{}]),/报价确认/);
+await db.query('select zg_save_operational_order($1,$2)',[org,{...original,total:0,paid:0,diagnosis:'updated',partItems:[]}]);
+await db.exec(`set request.jwt.claim.sub='${owner}'`);
+rows=(await db.query('select * from zg_read_records($1)',[org])).rows;
+assert.equal(rows[0].payload.total,550,'price-free save must preserve total');
+assert.equal(rows[0].payload.paid,100);
+assert.equal(rows[0].payload.partItems.length,1);
+assert.equal(rows[0].payload.diagnosis,'updated');
+await db.exec("set request.jwt.claim.sub='00000000-0000-4000-8000-000000000099'");
+await assert.rejects(db.query('select * from zg_read_records($1)',[org]),/Not authorized/);
+await db.exec('reset role');
+await db.query("update zg_organization_members set status='disabled' where user_id=$1",[worker]);
+await db.exec(`set role authenticated; set request.jwt.claim.sub='${worker}'`);
+await assert.rejects(db.query('select zg_save_operational_order($1,$2)',[org,original]),/Not authorized/);
+await db.close();
+console.log('PASS: actual PostgreSQL RLS, redaction, forbidden payments, price-preserving operational save, cross-tenant and disabled-account denial');

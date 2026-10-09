@@ -8,13 +8,21 @@ const source = fs.readFileSync(new URL('../src/lib/cloud.ts', import.meta.url), 
 let pages = [], calls = [], signed = 0, failAt = -1;
 let batchCalls = [], batchError = null;
 const client = {
+  async rpc(name, args) {
+    if (name === 'zg_read_records') {
+      calls.push({ start: args.p_offset, since: args.p_since });
+      return args.p_offset === failAt ? { error: new Error('network failure') } : { data: pages[args.p_offset / 1000] || [] };
+    }
+    if (name === 'zg_write_records') { batchCalls.push(args); return { error: batchError }; }
+    throw new Error('Unexpected RPC: ' + name);
+  },
   from(table) {
     const query = {
       select() { return this; }, eq() { return this; }, order() { return this; },
       async upsert(rows, options) { batchCalls.push({ table, rows, options }); return { error: batchError }; },
       range(start) { this.start = start; return this; },
       gt(column, value) { this.since = value; return this; },
-      maybeSingle: async () => ({ data: { organization_id: 'org', role: 'owner', permissions: {} } }),
+      maybeSingle: async () => ({ data: { organization_id: 'org', role: 'owner', permissions: {}, status: 'active' } }),
       single: async () => ({ data: { name: 'Test' } }),
       then(resolve, reject) {
         calls.push({ start: this.start, since: this.since });
@@ -52,12 +60,11 @@ const records = [
 ];
 await session.saveWorkOrderRecords(records);
 assert.equal(batchCalls.length, 1, 'All save rows must use one request');
-assert.equal(batchCalls[0].rows.length, 4);
-assert.equal(batchCalls[0].options.onConflict, 'organization_id,module,record_id');
+assert.equal(batchCalls[0].p_records.length, 4);
+assert.equal(batchCalls[0].p_org, 'org');
 for (let i = 0; i < records.length; i++) {
-  assert.equal(batchCalls[0].rows[i].organization_id, 'org');
-  assert.equal(batchCalls[0].rows[i].updated_by, 'user');
-  assert.equal(batchCalls[0].rows[i].payload, records[i].row);
+  assert.equal(batchCalls[0].p_records[i].module, records[i].module);
+  assert.equal(batchCalls[0].p_records[i].row, records[i].row);
 }
 batchError = new Error('permission denied');
 await assert.rejects(session.saveWorkOrderRecords(records), /permission denied/);
