@@ -66,10 +66,12 @@ export type EvidencePhoto = {
 };
 
 export type WorkOrder = {
+  _cloudUpdatedAt?: string;
   id: string; number: string; date: string; customerId?: string; customer: string; phone?: string;
   vehicleId?: string; vehicle: string; plate?: string; vin?: string; mileage?: number;
   fleetId?: string; company?: string; driverId?: string; driver?: string; driverPhone?: string;
   authorizedContact?: string; po?: string; complaint?: string; diagnosis?: string; workPerformed?: string;
+  oilChangeCompleted?: boolean;
   technician?: string; status: WorkOrderStatus; laborItems: LaborItem[]; partItems: PartItem[];
   outsource: number; outsourceDescription?: string; discount: number; taxRate: number; taxOverride?: number; laborTotal: number; partsTotal: number;
   partsCost: number; tax: number; total: number; paid: number; balance: number; grossProfit: number;

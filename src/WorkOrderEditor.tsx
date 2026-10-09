@@ -6,6 +6,7 @@ import { recognizeVehiclePhoto } from './lib/ocr';
 import { SignaturePad } from './SignaturePad';
 import type { CloudSession, StaffMember } from './lib/cloud';
 import { storeCacheKey } from './lib/storeCache';
+import { legacyOilChangeCompleted, rewardReadyForRedemption } from './lib/oilRewards';
 import { supabase } from './lib/supabase';
 
 type Props = {
@@ -156,7 +157,7 @@ async function removeWorkOrderDraft(key: string) {
 
 export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, workOrders, parts, servicePackages, settings, nextNumber, onSave, onCancel, onCheckoutAndDeliver, onCreateVehicle, onSaveServicePackage, onDeleteServicePackage, onPrint, cloud, currentUser, currentUserId, technicians, canApproveReview, canAssignTechnician, canEditPricing, canViewFinancials, canCheckoutAndDeliver, canPrintDocuments, canPrintPricedDocuments }: Props) {
   const [order, setOrder] = useState<WorkOrder>(() => recalculateWorkOrder(value || {
-    id: uid(), number: '保存时自动分配', date: today(), customer: '', vehicle: '', status: '等待检查',
+    id: uid(), number: '保存时自动分配', date: today(), customer: '', vehicle: '', status: '等待检查', oilChangeCompleted: false,
     technician: canAssignTechnician ? '' : currentUser, technicianUserId: canAssignTechnician ? '' : currentUserId,
     laborItems: [], partItems: [], outsource: 0, discount: 0, taxRate: settings.defaultTaxRate,
   }));
@@ -186,6 +187,7 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, w
   const [packageSaving, setPackageSaving] = useState(false);
   const [rewardVehicleMatch, setRewardVehicleMatch] = useState<RewardVehicleMatch | null>(null);
   const [rewardVehicleChecking, setRewardVehicleChecking] = useState(false);
+  const [rewardVehicleError, setRewardVehicleError] = useState('');
   const rewardArrivalPromptKey = useRef('');
   const lastAutomaticTranslation = useRef<Record<TranslationSource, { source: string; translation: string }>>({
     complaint: { source: '', translation: '' }, diagnosis: { source: '', translation: '' }, workPerformed: { source: '', translation: '' },
@@ -292,25 +294,18 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, w
     let cancelled = false;
     const findRewardVehicle = async () => {
       setRewardVehicleMatch(null);
-      if (!selectedVehicle || !supabase) return;
+      setRewardVehicleError('');
+      setRewardVehicleChecking(false);
+      if (!order.vehicleId || !supabase) return;
       const client = supabase;
       setRewardVehicleChecking(true);
       try {
-        const fields = 'id,status,qualifying_count,reward_earned_at,reward_expires_at,reward_redeemed_at,vehicle_record_id,vin_normalized,plate_normalized,zg_reward_enrollments!inner(status)';
-        const readMatch = async (column: 'vehicle_record_id' | 'vin_normalized' | 'plate_normalized', value: string) => {
-          if (!value) return null;
-          const { data, error } = await client.from('zg_reward_vehicles').select(fields)
-            .eq(column, value).in('zg_reward_enrollments.status', ['pending', 'approved'])
-            .order('created_at', { ascending: false }).limit(1).maybeSingle();
-          if (error) throw error;
-          return data as unknown as Record<string, unknown> | null;
-        };
-        const row = await readMatch('vehicle_record_id', selectedVehicle.id)
-          || await readMatch('vin_normalized', normalizeVehicleIdentifier(selectedVehicle.vin))
-          || await readMatch('plate_normalized', normalizeVehicleIdentifier(selectedVehicle.plate));
+        const { data: row, error } = await client.rpc('zg_vehicle_reward_summary', {
+          p_org: cloud.organizationId, p_vehicle: order.vehicleId, p_order: value?.id || null,
+        });
+        if (error) throw error;
         if (!cancelled && row) {
-          const joined = row.zg_reward_enrollments as { status?: string } | Array<{ status?: string }> | undefined;
-          const enrollmentStatus = Array.isArray(joined) ? String(joined[0]?.status || '') : String(joined?.status || '');
+          const enrollmentStatus = String(row.enrollmentStatus || '');
           setRewardVehicleMatch({
             id: String(row.id), status: String(row.status || ''), qualifying_count: Number(row.qualifying_count || 0),
             reward_earned_at: row.reward_earned_at ? String(row.reward_earned_at) : null,
@@ -321,30 +316,24 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, w
         }
       } catch (error) {
         console.warn('活动车辆查询失败', error);
+        if (!cancelled) setRewardVehicleError('活动进度暂未读取成功，请重开工单核查后再确认是否兑换免费保养。');
       } finally {
         if (!cancelled) setRewardVehicleChecking(false);
       }
     };
     void findRewardVehicle();
     return () => { cancelled = true; };
-  }, [selectedVehicle?.id, selectedVehicle?.vin, selectedVehicle?.plate]);
-  const rewardReadyForSixthVisit = Boolean(
-    rewardVehicleMatch
-    && rewardVehicleMatch.enrollmentStatus === 'approved'
-    && rewardVehicleMatch.qualifying_count >= 5
-    && rewardVehicleMatch.reward_earned_at
-    && !rewardVehicleMatch.reward_redeemed_at
-    && (!rewardVehicleMatch.reward_expires_at || new Date(rewardVehicleMatch.reward_expires_at).getTime() >= Date.now())
-  );
+  }, [cloud.organizationId, order.vehicleId, value?.id, serverOrder?._cloudUpdatedAt]);
+  const rewardReadyForSixthVisit = rewardReadyForRedemption(rewardVehicleMatch);
   useEffect(() => {
-    if (!rewardReadyForSixthVisit || !rewardVehicleMatch || !selectedVehicle) return;
-    const promptKey = `${value?.id || 'new'}:${selectedVehicle.id}:${rewardVehicleMatch.id}`;
+    if (!rewardReadyForSixthVisit || !rewardVehicleMatch || !order.vehicleId) return;
+    const promptKey = `${value?.id || 'new'}:${order.vehicleId}:${rewardVehicleMatch.id}`;
     if (rewardArrivalPromptKey.current === promptKey) return;
     rewardArrivalPromptKey.current = promptKey;
     window.alert(
-      `🎁 第 6 次免费保养提醒\n\n车辆：${selectedVehicle.plate || selectedVehicle.vin || `${selectedVehicle.year} ${selectedVehicle.make} ${selectedVehicle.model}`}\n\n该车辆已经完成 5 次符合条件的换机油保养，本次可享免费保养。\n\n请工作人员在结账前与客户确认本次是否兑换。`,
+      `🎁 第 6 次免费保养提醒\n\n车辆：${order.plate || order.vin || order.vehicle}\n\n该车辆已累计 5 次活动记录，本次可享免费保养。\n\n请工作人员在结账前与客户确认本次是否兑换。`,
     );
-  }, [rewardReadyForSixthVisit, rewardVehicleMatch?.id, selectedVehicle?.id, value?.id]);
+  }, [rewardReadyForSixthVisit, rewardVehicleMatch?.id, order.vehicleId, value?.id]);
   const vehicleOptions = useMemo(() => vehicles.map(item => ({
     value: item.id,
     label: `${item.plate || '无车牌'} · ${item.year} ${item.make} ${item.model} · ${item.ownerName || '无所属账户'}`,
@@ -971,7 +960,8 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, w
         <label>当前里程（必填）<input type="number" inputMode="numeric" min="1" required value={vehicleDraft.mileage || ''} onChange={e => setVehicleDraft(current => ({ ...current, mileage: Number(e.target.value) }))} placeholder="读取仪表后填写" /></label>
       </div><div className="toolbar"><button type="button" onClick={() => setAddingVehicle(false)}>取消</button><button type="button" className="primary" onClick={createVehicle} disabled={vehicleSaving}>{vehicleSaving ? '保存中…' : '保存并选择车辆'}</button></div>
     </div>}{selectedVehicle && <div className="vehicle-strip"><b>{selectedVehicle.plate || '无车牌'}</b><span>VIN {selectedVehicle.vin || '—'}</span><span>Unit {selectedVehicle.unit || '—'}</span><span>{selectedVehicle.ownerName}</span></div>}
-      {rewardVehicleChecking && <div className="reward-vehicle-alert checking"><b>正在核对活动资格…</b><span>正在按车辆档案、VIN 和车牌查询。</span></div>}
+      {rewardVehicleChecking && <div className="reward-vehicle-alert checking"><b>正在核对活动资格…</b><span>仅查询当前车辆活动进度。</span></div>}
+      {rewardVehicleError && <div className="reward-vehicle-alert" role="alert">{rewardVehicleError}</div>}
       {rewardVehicleMatch && <div className={`reward-vehicle-alert ${rewardReadyForSixthVisit ? 'earned' : ''}`}>
         <b>🎁 此车辆已登记“5 次保养送 1 次保养”活动</b>
         {rewardVehicleMatch.enrollmentStatus === 'pending'
@@ -996,7 +986,10 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, w
       <label><span className="field-title">检查/诊断结果 <button type="button" onClick={() => dictate('diagnosis')}>🎤 语音</button></span><textarea value={order.diagnosis || ''} onChange={e => patch({ diagnosis: e.target.value })} /><small>English translation（打印显示）</small>{translationControls('diagnosis')}<textarea className="translation-input" value={order.diagnosisEn || ''} onChange={e => patch({ diagnosisEn: e.target.value })} placeholder="Diagnosis in English" /></label>
     </div></section>
 
-    <section className="form-section editor-panel panel-intake repair-content-section"><h3>完成的维修</h3><div className="form-grid voice-fields">
+    <section className="form-section editor-panel panel-intake repair-content-section"><h3>完成的维修</h3>
+      <label className="customer-photo-toggle"><input type="checkbox" checked={order.oilChangeCompleted ?? legacyOilChangeCompleted(order.workPerformed)} onChange={e => patch({ oilChangeCompleted: e.target.checked })} />本次已实际完成换机油（活动累计确认）</label>
+      <small>仅实际换机油后勾选；工单达到“已完成/已交车”才累计。同一工单重复保存不重复计数，取消或作废会撤销。{order.oilChangeCompleted === undefined ? ' 此为旧工单，当前按原维修记录判断，请核对。' : ''}</small>
+      <div className="form-grid voice-fields">
       <label><span className="field-title">完成的维修 <button type="button" onClick={() => dictate('workPerformed')}>🎤 语音</button></span><textarea value={order.workPerformed || ''} onChange={e => patch({ workPerformed: e.target.value })} /><small>English translation（打印显示）</small>{translationControls('workPerformed')}<textarea className="translation-input" value={order.workPerformedEn || ''} onChange={e => patch({ workPerformedEn: e.target.value })} placeholder="Work performed in English" /></label>
     </div><div className="form-grid two compact time-fields"><label>打印时间（可授权修改）<input type="datetime-local" value={order.printTime || ''} onChange={e => patch({ printTime: e.target.value })} /></label><label>做工时间备注<input value={order.workTimeNote || ''} onChange={e => patch({ workTimeNote: e.target.value })} placeholder="例如：2026/07/15 09:00–14:30" /></label></div></section>
 

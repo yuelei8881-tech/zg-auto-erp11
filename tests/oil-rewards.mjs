@@ -1,0 +1,16 @@
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { stripTypeScriptTypes } from 'node:module';
+const source=readFileSync(new URL('../src/lib/oilRewards.ts',import.meta.url),'utf8');
+const {legacyOilChangeCompleted,rewardReadyForRedemption}=await import(`data:text/javascript;base64,${Buffer.from(stripTypeScriptTypes(source)).toString('base64')}`);
+for(const text of ['换机油','更换发动机机油和滤芯','Oil change completed','change engine oil']) assert.equal(legacyOilChangeCompleted(text),true,text);
+for(const text of ['不换机油','未更换机油','oil change declined','oil change not performed','建议换机油','更换刹车油']) assert.equal(legacyOilChangeCompleted(text),false,text);
+const reward={status:'active',enrollmentStatus:'approved',qualifying_count:5,reward_earned_at:'2026-10-09T00:00:00Z',reward_expires_at:'2027-10-09T00:00:00Z'};
+const now=Date.parse('2026-10-10T00:00:00Z');
+assert.equal(rewardReadyForRedemption(reward,now),true);
+for(const patch of [{qualifying_count:4},{status:'inactive'},{enrollmentStatus:'pending'},{reward_redeemed_at:'2026-10-09T10:00:00Z'},{reward_expires_at:'2026-10-09T01:00:00Z'}]) assert.equal(rewardReadyForRedemption({...reward,...patch},now),false);
+const editor=readFileSync(new URL('../src/WorkOrderEditor.tsx',import.meta.url),'utf8');
+assert.ok(editor.includes("rpc('zg_vehicle_reward_summary'"));
+assert.ok(!editor.includes("from('zg_reward_vehicles')"),'editor must not download contact-linked reward tables');
+assert.ok(editor.includes('oilChangeCompleted: false'));
+console.log('PASS: bilingual legacy detection, active fifth-credit redemption, expired/redeemed exclusion, explicit new-order confirmation and single scoped query');
