@@ -15,7 +15,7 @@ export type CloudSession = {
   organizationName: string;
   role: string;
   permissions: Record<string, boolean>;
-  loadStore: (updatedSince?: string) => Promise<CloudStore>;
+  loadStore: (updatedSince?: string, skipPhotos?: boolean) => Promise<CloudStore>;
   upsertRecord: (module: string, row: CloudRow) => Promise<void>;
   reserveWorkOrderNumber: (recordId: string) => Promise<string>;
   recordPayment: (workOrderId: string, payment: CloudRow) => Promise<CloudRow>;
@@ -84,7 +84,7 @@ export async function openCloudSession(user: User): Promise<CloudSession> {
     .from('zg_organizations').select('name').eq('id', organizationId).single();
   if (organizationError) throw organizationError;
 
-  const loadStore = async (updatedSince?: string) => {
+  const loadStore = async (updatedSince?: string, skipPhotos = false) => {
     // Supabase limits a select response to 1,000 rows by default. The ERP now
     // contains more than that across all modules, so a single request silently
     // omitted older payments, expenses, customers and work orders. Read every
@@ -116,6 +116,7 @@ export async function openCloudSession(user: User): Promise<CloudSession> {
       const payload = (item.payload || {}) as Omit<CloudRow, 'id'>;
       (store[module] ||= []).push({ ...payload, id: String(item.record_id), _cloudUpdatedAt: String(item.updated_at || '') });
     }
+    if (skipPhotos) return store;
     const storedPhotos = (store.workOrders || []).flatMap(row => {
       const photos = Array.isArray(row.evidencePhotos) ? row.evidencePhotos : [];
       return photos.filter(photo => photo && typeof photo === 'object' && 'storagePath' in photo) as Array<Record<string, JsonValue>>;
@@ -216,8 +217,13 @@ export async function openCloudSession(user: User): Promise<CloudSession> {
     // reconciliation is handled by the cache age in the application layer.
     const onFocus = () => { if (Date.now() - lastRefreshAt > 30_000) queueRefresh(false); };
     window.addEventListener('focus', onFocus);
+    const onVisible = () => { if (document.visibilityState === 'visible') onFocus(); };
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('online', onFocus);
     return () => {
       window.removeEventListener('focus', onFocus);
+      document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('online', onFocus);
       if (refreshTimer) clearTimeout(refreshTimer);
       void client.removeChannel(channel);
     };

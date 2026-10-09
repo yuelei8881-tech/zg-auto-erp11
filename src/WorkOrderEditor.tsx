@@ -191,6 +191,20 @@ export function WorkOrderEditor({ value, customers, vehicles, fleets, drivers, w
   const translationRequestId = useRef<Record<TranslationSource, number>>({ complaint: 0, diagnosis: 0, workPerformed: 0 });
   const latestOrder = useRef(order);
   latestOrder.current = order;
+  const evidencePaths = JSON.stringify((order.evidencePhotos || []).map(photo => photo.storagePath).filter(Boolean));
+  useEffect(() => {
+    let active = true;
+    const paths = [...new Set(JSON.parse(evidencePaths) as string[])];
+    if (!paths.length || !supabase) return;
+    void supabase.storage.from('zg-evidence').createSignedUrls(paths, 3600).then(({ data, error }) => {
+      if (!active || error || !data) return;
+      const urls = new Map(data.map(item => [item.path, item.signedUrl]));
+      setOrder(current => ({ ...current, evidencePhotos: (current.evidencePhotos || []).map(photo => ({
+        ...photo, dataUrl: photo.storagePath && urls.get(photo.storagePath) || photo.dataUrl,
+      })) }));
+    });
+    return () => { active = false; };
+  }, [evidencePaths]);
   const draftKey = `work-order:${value?.id || 'new'}`;
   const allowLocalDraft = !value;
   const calculated = useMemo(() => recalculateWorkOrder(order), [order]);

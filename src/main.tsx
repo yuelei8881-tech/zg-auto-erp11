@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { FormalGate } from './FormalGate';
 import type { CloudRow, CloudSession, CloudStore, StaffMember } from './lib/cloud';
+import { supabase } from './lib/supabase';
 import { decodeVin, escapeHtml, money, recalculateWorkOrder, today, uid } from './lib/erp';
 import { MONTHLY_BILLING_TERM, MONTHLY_PAYMENT_METHOD, nextMonthlyBillingDate } from './lib/billing';
 import type { AppStore, ApprovalRequest, Campaign, ChangeLog, Customer, Driver, Expense, Fleet, InventoryLog, Part, Payment, ServicePackage, ShopSettings, Vehicle, Warranty, WorkOrder } from './types';
@@ -57,12 +58,12 @@ async function readStoreCache(organizationId: string): Promise<StoreCache | null
     });
   } catch { return null; }
 }
-async function writeStoreCache(organizationId: string, store: CloudStore, fullSyncedAt = Date.now()) {
+async function writeStoreCache(organizationId: string, store: CloudStore, fullSyncedAt = Date.now(), syncCursor = Date.now()) {
   try {
     const db = await openStoreCache();
     await new Promise<void>((resolve, reject) => {
       const transaction = db.transaction('stores', 'readwrite');
-      transaction.objectStore('stores').put({ savedAt: Date.now(), fullSyncedAt, store }, organizationId);
+      transaction.objectStore('stores').put({ savedAt: syncCursor, fullSyncedAt, store }, organizationId);
       transaction.oncomplete = () => resolve();
       transaction.onerror = () => reject(transaction.error);
     });
@@ -105,7 +106,12 @@ function compactWorkOrderSnapshot(value?: WorkOrder) {
   return { ...value, evidencePhotos: [] };
 }
 
-async function evidenceContent(value: string) {
+async function evidenceContent(value: string, storagePath?: string) {
+  if (storagePath && supabase) {
+    const { data, error } = await supabase.storage.from('zg-evidence').createSignedUrl(storagePath, 3600);
+    if (error) throw error;
+    value = data.signedUrl;
+  }
   if (value.startsWith('data:')) return value.split(',')[1] || '';
   const response = await fetch(value);
   if (!response.ok) throw new Error('无法读取证据照片附件。');
@@ -120,6 +126,8 @@ function App({ cloud }: { cloud: CloudSession }) {
   const [page, setPage] = useState<Page>('dashboard');
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
+  const [refreshState, setRefreshState] = useState<'loading' | 'ready' | 'error'>('loading');
+  const [refreshedAt, setRefreshedAt] = useState(0);
   const [search, setSearch] = useState('');
   const [searchDraft, setSearchDraft] = useState('');
   const [displayName, setDisplayName] = useState(cloud.user.name || cloud.user.email.split('@')[0]);
@@ -153,25 +161,36 @@ function App({ cloud }: { cloud: CloudSession }) {
       const shouldLoadFull = forceFull || !lastCloudSyncAt.current || Date.now() - lastFullSyncAt.current >= 6 * 60 * 60 * 1000;
       // Overlap two minutes so records committed near the cache timestamp can
       // never be skipped because of device/server clock differences.
-      const updatedSince = shouldLoadFull ? undefined : new Date(Math.max(0, lastCloudSyncAt.current - 120_000)).toISOString();
-      const changes = await cloud.loadStore(updatedSince);
+      setRefreshState('loading');
+      const requestStartedAt = Date.now();
+      const updatedSince = lastCloudSyncAt.current ? new Date(Math.max(0, lastCloudSyncAt.current - 120_000)).toISOString() : undefined;
+      // Update cached figures before waiting for historical reconciliation.
+      if (shouldLoadFull && updatedSince && !forceFull) {
+        const recent = await cloud.loadStore(updatedSince, true);
+        if (requestId !== refreshRequestId.current || mutationAtStart !== mutationGeneration.current) return;
+        setStore(current => mergeCloudStore(current, recent));
+      }
+      const changes = await cloud.loadStore(shouldLoadFull ? undefined : updatedSince, true);
       if (requestId !== refreshRequestId.current || mutationAtStart !== mutationGeneration.current) return;
       const syncedAt = Date.now();
       if (shouldLoadFull) {
         const loaded = normalizeStore(changes);
         setStore(loaded);
         lastFullSyncAt.current = syncedAt;
-        void writeStoreCache(cloud.organizationId, loaded as unknown as CloudStore, syncedAt);
+        void writeStoreCache(cloud.organizationId, loaded as unknown as CloudStore, syncedAt, requestStartedAt);
       } else {
         setStore(current => {
           const loaded = mergeCloudStore(current, changes);
-          void writeStoreCache(cloud.organizationId, loaded as unknown as CloudStore, lastFullSyncAt.current);
+          void writeStoreCache(cloud.organizationId, loaded as unknown as CloudStore, lastFullSyncAt.current, requestStartedAt);
           return loaded;
         });
       }
-      lastCloudSyncAt.current = syncedAt;
+      lastCloudSyncAt.current = requestStartedAt;
+      setRefreshedAt(syncedAt);
+      setRefreshState('ready');
     }
     catch (error) {
+      if (requestId === refreshRequestId.current) setRefreshState('error');
       if (!quiet) {
         const details = error instanceof Error
           ? error.message
@@ -883,7 +902,8 @@ function App({ cloud }: { cloud: CloudSession }) {
       <nav>{nav.filter(item => canOpenPage(cloud, item.id)).map(item => <button key={item.id} className={page === item.id ? 'active' : ''} onClick={() => { setPage(item.id); setSearch(''); setSearchDraft(''); }}><span>{item.icon}</span>{item.label}</button>)}</nav>
       <div className="side-foot"><small>{cloud.organizationName}</small><b>{actorName}</b><span>{cloud.user.email}</span><button onClick={() => confirm('确定退出当前账号？') && void cloud.signOut()}>退出登录</button></div>
     </aside>
-    <main className="main"><header className="topbar"><div className="global-search">⌕<input value={searchDraft} onChange={e => setSearchDraft(e.target.value)} onKeyDown={e => e.key === 'Enter' && runGlobalSearch()} placeholder="搜索客户、公司、电话、VIN、车牌、工单、司机…" /><button type="button" onClick={runGlobalSearch}>搜索</button>{searchSuggestions.length > 0 && <div className="search-suggestions">{searchSuggestions.map((item, index) => <button type="button" key={`${item.page}-${item.label}-${index}`} onClick={() => { setModal(null); setPage(item.page); setSearch(item.query); setSearchDraft(''); if (item.page !== 'customers' && item.page !== 'fleets' && item.modalType && item.record) openModal(item.modalType, item.record); }}><b>{item.label}</b><small>{item.meta}</small></button>)}</div>}</div><div className="top-status"><span className={syncing ? 'syncing' : ''}>{syncing ? '正在同步…' : '● 云端已同步'}</span><span>{actorName}</span><b>v0.82.4</b><button type="button" className="topbar-logout" onClick={() => confirm('确定退出当前账号？') && void cloud.signOut()}>退出</button></div></header>
+    <main className="main"><header className="topbar"><div className="global-search">⌕<input value={searchDraft} onChange={e => setSearchDraft(e.target.value)} onKeyDown={e => e.key === 'Enter' && runGlobalSearch()} placeholder="搜索客户、公司、电话、VIN、车牌、工单、司机…" /><button type="button" onClick={runGlobalSearch}>搜索</button>{searchSuggestions.length > 0 && <div className="search-suggestions">{searchSuggestions.map((item, index) => <button type="button" key={`${item.page}-${item.label}-${index}`} onClick={() => { setModal(null); setPage(item.page); setSearch(item.query); setSearchDraft(''); if (item.page !== 'customers' && item.page !== 'fleets' && item.modalType && item.record) openModal(item.modalType, item.record); }}><b>{item.label}</b><small>{item.meta}</small></button>)}</div>}</div><div className="top-status"><span className={syncing ? 'syncing' : ''}>{syncing || refreshState === 'loading' ? '正在同步…' : refreshState === 'error' ? '同步失败' : '● 云端已同步'}</span><span>{actorName}</span><b>v0.82.4</b><button type="button" className="topbar-logout" onClick={() => confirm('确定退出当前账号？') && void cloud.signOut()}>退出</button></div></header>
+      {page === 'dashboard' && !loading && <div className="dashboard-sync-status" role="status">{refreshState === 'loading' ? '正在更新金额，当前显示已缓存的数据…' : refreshState === 'error' ? '更新失败，当前金额可能不是最新，请重试。' : `金额已更新 · ${new Date(refreshedAt).toLocaleTimeString()}`} <button disabled={refreshState === 'loading'} onClick={() => void refresh(true)}>刷新金额</button></div>}
       {loading ? <div className="loading">正在读取正式服务器数据…</div> : <PageContent page={page} search={search} store={store} settings={settings} cloud={cloud} setPage={setPage} openModal={openModal} setEditingOrder={setEditingOrder} persist={persist} remove={remove} receiveStock={receiveStock} addPayment={addPayment} deleteWorkOrder={deleteWorkOrder} requestPaymentCorrection={requestPaymentCorrection} requestExpenseCorrection={requestExpenseCorrection} approveRequest={approveRequest} rejectRequest={rejectRequest} claimWorkOrder={claimWorkOrder} completeWorkOrder={completeWorkOrder} actorName={actorName} editOwnProfile={editOwnProfile} />}
     </main>
     {modal && <EntityModal state={modal} store={store} settings={settings} cloud={cloud} onClose={closeModal} onSave={saveModal} />}
@@ -1848,7 +1868,7 @@ function SendMenu({ order, settings, store, cloud }: { order: WorkOrder; setting
       ? `<tr><td>Payment Method / 支付方式</td><td style="text-align:right">${escapeHtml(order.paymentMethod)}</td></tr>`
       : '';
     const customerPhotos = (order.evidencePhotos || []).filter(photo => photo.customerVisible && !photo.archivedAt).slice(0, 8);
-    const attachments = await Promise.all(customerPhotos.map(async (photo, index) => ({ filename: `${order.number}-${photo.category}-${index + 1}.jpg`, content: await evidenceContent(photo.dataUrl), contentId: `evidence-${index + 1}` })));
+    const attachments = await Promise.all(customerPhotos.map(async (photo, index) => ({ filename: `${order.number}-${photo.category}-${index + 1}.jpg`, content: await evidenceContent(photo.dataUrl, photo.storagePath), contentId: `evidence-${index + 1}` })));
     const evidenceHtml = customerPhotos.length ? `<h3>Evidence Photos / 证据照片</h3><div>${customerPhotos.map((photo, index) => `<div style="margin:0 0 18px"><img src="cid:evidence-${index + 1}" alt="${escapeHtml(photo.category)}" style="max-width:100%;height:auto;border:1px solid #ccd3df"><p><b>${escapeHtml(photo.category)}</b> · ${escapeHtml(photo.note || '')}<br><small>${escapeHtml(new Date(photo.capturedAt).toLocaleString())}</small></p></div>`).join('')}</div>` : '';
     const baseHtml = `<div style="max-width:760px;margin:auto;font-family:Arial,sans-serif;color:#172033"><div style="text-align:center;border-bottom:3px solid #155eef;padding:18px"><h1 style="margin:0">Z&amp;G AUTO REPAIR</h1><p style="margin:14px 0 4px">${escapeHtml(settings.address)}</p><p style="margin:4px 0;white-space:nowrap">Tel / 电话：${escapeHtml(settings.phone)}</p><h2>${title}</h2><b>${escapeHtml(order.number)}</b></div><table style="width:100%;margin:18px 0;border-collapse:collapse"><tr><td><b>Customer / 客户</b><br>${escapeHtml(order.customer)}</td><td><b>Vehicle / 车辆</b><br>${escapeHtml(order.vehicle)} · ${escapeHtml(order.plate)}</td></tr><tr><td><b>Phone / 电话</b><br>${escapeHtml(order.phone)}</td><td><b>VIN</b><br>${escapeHtml(order.vin)}</td></tr></table><h3>Customer Concern / 客户描述</h3><p>${escapeHtml(order.complaint || '—')}</p><h3>Diagnosis &amp; Work / 检查与维修</h3><p>${escapeHtml(order.diagnosis || '—')}<br>${escapeHtml(order.workPerformed || '')}</p>${laborRows ? `<h3>Labor / 人工</h3><table style="width:100%;border-collapse:collapse" border="1" cellpadding="7"><tr><th>项目</th><th>工时/方式</th><th>金额</th></tr>${laborRows}</table>` : ''}${partRows ? `<h3>Parts / 配件</h3><table style="width:100%;border-collapse:collapse" border="1" cellpadding="7"><tr><th>编号</th><th>名称</th><th>数量</th><th>销售价</th><th>金额</th></tr>${partRows}</table>` : ''}<table style="width:360px;margin:20px 0 20px auto;border-collapse:collapse" border="1" cellpadding="8"><tr><td>Labor / 人工</td><td style="text-align:right">${money(order.laborTotal)}</td></tr><tr><td>Parts / 配件</td><td style="text-align:right">${money(order.partsTotal)}</td></tr><tr><td>Tax / 税</td><td style="text-align:right">${money(order.tax)}</td></tr><tr><td><b>${amountLabel}</b></td><td style="text-align:right"><b>${money(amount)}</b></td></tr>${kind === 'receipt' ? '' : `<tr><td>Balance Due / 欠款</td><td style="text-align:right">${money(order.balance)}</td></tr>`}</table><p style="text-align:center;color:#667085">${escapeHtml(settings.invoiceTerms || 'Thank you for your business.')}</p></div>`;
     const html = baseHtml

@@ -1,1 +1,2 @@
-.top-status>b::after{content:"v0.95.9"}
+.top-status>b::after{content:"v0.96.0"}
+.dashboard-sync-status{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 18px;background:#edf4ff;color:#365574;font-size:13px}.dashboard-sync-status button{white-space:nowrap;padding:7px 12px}
