@@ -91,6 +91,8 @@ await assert.rejects(db.query('select zg_save_operational_order($1,$2)',[org,ori
 await db.exec('reset role');
 await db.query("update zg_organization_members set status='active',role='technician',permissions='{}' where user_id=$1",[worker]);
 await db.exec(readFileSync(new URL('../supabase/migrations/20261009153733_verified_oil_service_credits.sql',import.meta.url),'utf8'));
+await db.exec('alter table zg_reward_vehicles add column vin text');
+await db.exec(readFileSync(new URL('../supabase/migrations/20261009154220_qualify_reward_lookup_variables.sql',import.meta.url),'utf8'));
 await db.exec("create trigger zg_sync_oil_reward_work_order after insert or update of payload on zg_erp_records for each row execute function zg_sync_oil_reward_work_order()");
 const vehicleA='00000000-0000-4000-8000-000000000011',vehicleB='00000000-0000-4000-8000-000000000012';
 const rewardA='00000000-0000-4000-8000-000000000021',rewardB='00000000-0000-4000-8000-000000000022';
