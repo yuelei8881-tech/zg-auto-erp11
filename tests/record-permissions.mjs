@@ -167,6 +167,7 @@ assert.ok(JSON.stringify(audit[1]).length<2000,'unchanged attachment bytes must 
 await db.query('delete from zg_erp_records where record_id=$1',[auditId]);
 assert.deepEqual((await db.query("select before_data from zg_audit_logs where action='DELETE'")).rows[0].before_data,auditUpdated);
 await db.exec(readFileSync(new URL('../supabase/migrations/20261009155245_lazy_workspace_records.sql',import.meta.url),'utf8'));
+await db.exec(readFileSync(new URL('../supabase/migrations/20261009185258_cache_workspace_owner_check.sql',import.meta.url),'utf8'));
 const detailId='00000000-0000-4000-8000-000000000091';
 const detailOrder={...original,id:detailId,technicianUserId:worker,customerSignature:'signed-original',evidencePhotos:[{id:'photo',dataUrl:'data:image/jpeg;base64,original',storagePath:'org/photo.jpg'}]};
 await db.query("insert into zg_erp_records(organization_id,module,record_id,payload) values($1,'workOrders',$2,$3)",[org,detailId,detailOrder]);

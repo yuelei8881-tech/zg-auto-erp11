@@ -36,7 +36,7 @@ const client = {
 };
 const exports = {};
 vm.runInNewContext(stripTypeScriptTypes(source).replace(/^import .*;$/gm, '').replace('export async function', 'async function') + '\nexports.openCloudSession = openCloudSession;',
-  { exports, supabase: client, console, Map, Set, Date });
+  { exports, supabase: client, console, Map, Set, Date, setTimeout, clearTimeout });
 const session = await exports.openCloudSession({ id: 'user', email: 'test@example.test' });
 const row = i => ({ module: 'workOrders', record_id: String(i), updated_at: '2026-10-09', payload: { total: i, evidencePhotos: [{ storagePath: `org/${i}.jpg`, dataUrl: 'old' }] } });
 pages = [Array.from({ length: 1000 }, (_, i) => row(i)), [row(1000)]];

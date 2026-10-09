@@ -413,7 +413,10 @@ export async function openCloudSession(user: User): Promise<CloudSession> {
     role: String(membership.role),
     permissions: (membership.permissions || {}) as Record<string, boolean>,
     loadStore, upsertRecord, saveRecords, saveWorkOrderRecords,
-    loadWorkspace: updatedSince => loadStore(updatedSince, true, undefined, true),
+    loadWorkspace: updatedSince => new Promise<CloudStore>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('读取服务器超过 60 秒，请检查网络后点击刷新重试；不要重复新建工单。')), 60_000);
+      loadStore(updatedSince, true, undefined, true).then(resolve, reject).finally(() => clearTimeout(timer));
+    }),
     readWorkOrder: async id => {
       const { data, error } = await client.rpc('zg_read_work_order', { p_org: organizationId, p_id: id });
       if (error) throw new Error(error.message);
