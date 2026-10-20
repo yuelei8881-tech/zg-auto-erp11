@@ -19,6 +19,7 @@ export type CloudSession = {
   loadStore: (updatedSince?: string, skipPhotos?: boolean) => Promise<CloudStore>;
   loadWorkspace: (updatedSince?: string) => Promise<CloudStore>;
   readWorkOrder: (id: string) => Promise<CloudRow>;
+  transferVehicle: (vehicleId: string, targetModule: string, targetId: string, expectedVersion: string, note: string, requestId: string) => Promise<CloudRow>;
   upsertRecord: (module: string, row: CloudRow) => Promise<CloudRow>;
   saveRecords: (records: Array<{ module: string; row: CloudRow }>) => Promise<Array<{ module: string; row: CloudRow }>>;
   saveWorkOrderRecords: (records: Array<{ module: string; row: CloudRow }>) => Promise<Array<{ module: string; row: CloudRow }>>;
@@ -413,6 +414,15 @@ export async function openCloudSession(user: User): Promise<CloudSession> {
     role: String(membership.role),
     permissions: (membership.permissions || {}) as Record<string, boolean>,
     loadStore, upsertRecord, saveRecords, saveWorkOrderRecords,
+    transferVehicle: async (vehicleId, targetModule, targetId, expectedVersion, note, requestId) => {
+      const { data, error } = await client.rpc('zg_transfer_vehicle', {
+        p_org: organizationId, p_vehicle: vehicleId, p_target_module: targetModule,
+        p_target: targetId, p_expected_updated_at: expectedVersion, p_note: note, p_request_id: requestId,
+      });
+      if (error) throw new Error(error.message);
+      if (!data?.id || !data?._cloudUpdatedAt) throw new Error('未收到过户确认，请勿更改选项，使用原请求重试。');
+      return data as CloudRow;
+    },
     loadWorkspace: updatedSince => new Promise<CloudStore>((resolve, reject) => {
       const timer = setTimeout(() => reject(new Error('读取服务器超过 60 秒，请检查网络后点击刷新重试；不要重复新建工单。')), 60_000);
       loadStore(updatedSince, true, undefined, true).then(resolve, reject).finally(() => clearTimeout(timer));
