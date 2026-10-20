@@ -14,7 +14,7 @@ $$select nullif(current_setting('request.jwt.claim.sub',true),'')::uuid$$;
 grant usage on schema auth to authenticated;
 create table auth.users(id uuid primary key);
 create table zg_organizations(id uuid primary key,name text,created_at timestamptz default now());
-create table zg_organization_members(organization_id uuid,user_id uuid,role text,status text);
+create table zg_organization_members(organization_id uuid,user_id uuid,role text,status text,permissions jsonb default '{}');
 create table zg_erp_records(organization_id uuid,module text,record_id uuid,payload jsonb,
  created_by uuid default auth.uid(),updated_by uuid default auth.uid(),
  created_at timestamptz default clock_timestamp(),updated_at timestamptz default clock_timestamp(),
@@ -45,7 +45,7 @@ await db.exec(sql('20261020183215_vehicle_ownership_transfer.sql'));
 const org=randomUUID(), owner=randomUUID(), worker=randomUUID(), oldCompany=randomUUID(), company=randomUUID(), fleet=randomUUID(), car=randomUUID(), otherCar=randomUUID();
 await db.query("insert into auth.users values($1),($2)",[owner,worker]);
 await db.query("insert into zg_organizations(id,name) values($1,'Z&G test')",[org]);
-await db.query("insert into zg_organization_members values($1,$2,'owner','active'),($1,$3,'technician','active')",[org,owner,worker]);
+await db.query("insert into zg_organization_members(organization_id,user_id,role,status) values($1,$2,'owner','active'),($1,$3,'technician','active')",[org,owner,worker]);
 await db.query("select set_config('request.jwt.claim.sub',$1,false)",[owner]);
 const put=async(module,id,payload,date)=>db.query(`insert into zg_erp_records(organization_id,module,record_id,payload,created_at)
 values($1,$2,$3,$4,coalesce($5::timestamptz,clock_timestamp()))`,[org,module,id,{id,...payload},date||null]);
@@ -126,5 +126,20 @@ assert.equal((await db.query("select count(*)::int n from zg_private.vehicle_tra
 await db.query("update zg_organization_members set status='disabled' where user_id=$1",[owner]);
 await assert.rejects(transfer(randomUUID(),'customers',company,await version(car)),/只有店主/);
 assert.equal((await db.query("select has_function_privilege('anon','public.zg_transfer_vehicle(uuid,uuid,text,uuid,timestamptz,text,uuid)','EXECUTE') allowed")).rows[0].allowed,false);
+await db.exec(sql('20261020194004_vehicle_transfer_permission.sql'));
+await db.query("select set_config('request.jwt.claim.sub',$1,false)",[worker]);
+await assert.rejects(transfer(),/没有车辆过户权限/);
+await db.query("update zg_organization_members set permissions='{\"transferVehicle\":true}' where user_id=$1",[worker]);
+const employeeVersion=await version(car);
+await db.exec('set role authenticated');
+// A retry is authorized by the same live guard as a new operation.
+assert.equal((await transfer()).rows[0].result.ownerId,company);
+await transfer(randomUUID(),'customers',company,employeeVersion);
+await db.exec('reset role');
+await db.query("update zg_organization_members set permissions='{\"transferVehicle\":false}' where user_id=$1",[worker]);
+await assert.rejects(transfer(),/没有车辆过户权限/);
+await db.query("update zg_organization_members set permissions='{\"transferVehicle\":true}',status='disabled' where user_id=$1",[worker]);
+await assert.rejects(transfer(),/没有车辆过户权限/);
 await db.close();
+console.log('PASS: explicit employee transfer grant, authorized transfer, revocation and disabled-account denial');
 console.log('PASS: owner-only atomic transfer, invalid target/stale version, retry idempotency, zero new cycle, welcome suppression, old history/finance preserved, separate tokens, archived cycle frozen, old/backdated/wrong-owner orders excluded, completed oil change exactly once, repeat transfer');

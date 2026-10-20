@@ -9,6 +9,7 @@ const roles = [
 ];
 const permissionItems = [
   ['customers', '查看客户与车辆'], ['customerContact', '查看客户电话与地址'],
+  ['transferVehicle', '车辆过户（活动清零；需同时开启查看客户与车辆）'],
   ['workOrders', '查看全部工单'], ['assignedWorkOrders', '仅查看分配给自己的工单'],
   ['createWorkOrders', '新建工单'], ['diagnosis', '填写诊断与维修记录'],
   ['pricing', '查看和修改价格'], ['assignTechnician', '分配技师'],
