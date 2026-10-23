@@ -6,10 +6,10 @@ import { stripTypeScriptTypes } from 'node:module';
 // Exercise the actual cloud loader without contacting production.
 const source = fs.readFileSync(new URL('../src/lib/cloud.ts', import.meta.url), 'utf8');
 let pages = [], calls = [], signed = 0, failAt = -1;
-let batchCalls = [], batchError = null;
+let batchCalls = [], batchError = null, role = 'owner';
 const client = {
   async rpc(name, args) {
-    if (name === 'zg_read_records' || name === 'zg_read_workspace') {
+    if (name === 'zg_read_records' || name === 'zg_read_workspace' || name === 'zg_read_workspace_core') {
       calls.push({ name, start: args.p_offset, since: args.p_since });
       return args.p_offset === failAt ? { error: new Error('network failure') } : { data: pages[args.p_offset / 1000] || [] };
     }
@@ -23,7 +23,7 @@ const client = {
       async upsert(rows, options) { batchCalls.push({ table, rows, options }); return { error: batchError }; },
       range(start) { this.start = start; return this; },
       gt(column, value) { this.since = value; return this; },
-      maybeSingle: async () => ({ data: { organization_id: 'org', role: 'owner', permissions: {}, status: 'active' } }),
+      maybeSingle: async () => ({ data: { organization_id: 'org', role, permissions: {}, status: 'active' } }),
       single: async () => ({ data: { name: 'Test' } }),
       then(resolve, reject) {
         calls.push({ start: this.start, since: this.since });
@@ -76,3 +76,17 @@ await assert.rejects(session.saveWorkOrderRecords(records), /permission denied/)
 await assert.rejects(session.saveWorkOrderRecords([{ module: 'customers', row: { id: 'customer' } }]), /不支持/);
 assert.equal(batchCalls.length, 2, 'Invalid module must never be submitted');
 console.log('PASS: single batch request, preserved audit/inventory payload, organization scope, error propagation');
+role = 'workshop_supervisor';
+const employee = await exports.openCloudSession({ id: 'user', email: 'test@example.test' });
+calls=[]; pages=[Array.from({length:1000},(_,i)=>row(i)),[row(1000)]];
+const employeeStore=await employee.loadWorkspace();
+assert.equal(employeeStore.workOrders.length,1001,'Employee startup must retain complete work order pagination');
+assert.ok(calls.every(x=>x.name==='zg_read_workspace_core'));
+calls=[]; pages=[[row(1)]];
+await employee.loadWorkspace('2026-10-08T00:00:00Z',true);
+assert.equal(calls[0].name,'zg_read_workspace');
+assert.equal(calls[0].since,'2026-10-08T00:00:00Z');
+calls=[];
+await employee.loadStore(undefined,true);
+assert.equal(calls[0].name,'zg_read_records','Exports must still read all authorized records');
+console.log('PASS: employee lightweight startup, full pagination, explicit history and unchanged full export');

@@ -17,7 +17,7 @@ export type CloudSession = {
   role: string;
   permissions: Record<string, boolean>;
   loadStore: (updatedSince?: string, skipPhotos?: boolean) => Promise<CloudStore>;
-  loadWorkspace: (updatedSince?: string) => Promise<CloudStore>;
+  loadWorkspace: (updatedSince?: string, includeHistory?: boolean) => Promise<CloudStore>;
   readWorkOrder: (id: string) => Promise<CloudRow>;
   transferVehicle: (vehicleId: string, targetModule: string, targetId: string, expectedVersion: string, note: string, requestId: string) => Promise<CloudRow>;
   upsertRecord: (module: string, row: CloudRow) => Promise<CloudRow>;
@@ -93,7 +93,7 @@ export async function openCloudSession(user: User): Promise<CloudSession> {
     .from('zg_organizations').select('name').eq('id', organizationId).single();
   if (organizationError) throw organizationError;
 
-  const loadStore = async (updatedSince?: string, skipPhotos = false, onlyModule?: string, workspace = false) => {
+  const loadStore = async (updatedSince?: string, skipPhotos = false, onlyModule?: string, workspace = false, deferHistory = false) => {
     const current = await findMembership().catch(async error => {
       if (error instanceof Error && error.message.includes('账号已停用')) {
         await clearStoreCache().catch(() => undefined);
@@ -121,7 +121,7 @@ export async function openCloudSession(user: User): Promise<CloudSession> {
     // whole ERP fail to open. Uploads remain parallel, but the authoritative
     // accounting/customer store is loaded conservatively and completely.
     for (let from = 0; ; from += pageSize) {
-      const { data: page, error } = await client.rpc(workspace ? 'zg_read_workspace' : 'zg_read_records', {
+      const { data: page, error } = await client.rpc(workspace ? (deferHistory ? 'zg_read_workspace_core' : 'zg_read_workspace') : 'zg_read_records', {
         p_org: organizationId, p_since: updatedSince || null, p_offset: from, p_limit: pageSize, p_module: onlyModule || null,
       });
       if (error) throw error;
@@ -423,9 +423,9 @@ export async function openCloudSession(user: User): Promise<CloudSession> {
       if (!data?.id || !data?._cloudUpdatedAt) throw new Error('未收到过户确认，请勿更改选项，使用原请求重试。');
       return data as CloudRow;
     },
-    loadWorkspace: updatedSince => new Promise<CloudStore>((resolve, reject) => {
+    loadWorkspace: (updatedSince, includeHistory = false) => new Promise<CloudStore>((resolve, reject) => {
       const timer = setTimeout(() => reject(new Error('读取服务器超过 60 秒，请检查网络后点击刷新重试；不要重复新建工单。')), 60_000);
-      loadStore(updatedSince, true, undefined, true).then(resolve, reject).finally(() => clearTimeout(timer));
+      loadStore(updatedSince, true, undefined, true, membership.role !== 'owner' && !includeHistory).then(resolve, reject).finally(() => clearTimeout(timer));
     }),
     readWorkOrder: async id => {
       const { data, error } = await client.rpc('zg_read_work_order', { p_org: organizationId, p_id: id });

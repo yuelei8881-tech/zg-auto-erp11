@@ -94,6 +94,8 @@ function App({ cloud }: { cloud: CloudSession }) {
   const [page, setPage] = useState<Page>('dashboard');
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
+  const historyRequested = useRef(cloud.role === 'owner');
+  const [historyReady, setHistoryReady] = useState(cloud.role === 'owner');
   const [syncing, setSyncing] = useState(false);
   const [refreshState, setRefreshState] = useState<'loading' | 'ready' | 'error'>('loading');
   const [refreshedAt, setRefreshedAt] = useState(0);
@@ -143,6 +145,7 @@ function App({ cloud }: { cloud: CloudSession }) {
   const performRefresh = async (quiet = false, forceFull = false) => {
     const requestId = ++refreshRequestId.current;
     const mutationAtStart = mutationGeneration.current;
+    const includeHistory = historyRequested.current;
     if (!quiet) setLoading(true);
     try {
       const shouldLoadFull = forceFull || !lastCloudSyncAt.current || Date.now() - lastFullSyncAt.current >= 6 * 60 * 60 * 1000;
@@ -154,17 +157,18 @@ function App({ cloud }: { cloud: CloudSession }) {
       const updatedSince = lastCloudSyncAt.current ? new Date(Math.max(0, lastCloudSyncAt.current - 120_000)).toISOString() : undefined;
       // Update cached figures before waiting for historical reconciliation.
       if (shouldLoadFull && updatedSince && !forceFull) {
-        const recent = await cloud.loadWorkspace(updatedSince);
+        const recent = await cloud.loadWorkspace(updatedSince, includeHistory);
         if (requestId !== refreshRequestId.current || mutationAtStart !== mutationGeneration.current) return;
         setStore(current => mergeCloudStore(current, recent));
       }
-      const changes = await cloud.loadWorkspace(shouldLoadFull ? undefined : updatedSince);
+      const changes = await cloud.loadWorkspace(shouldLoadFull ? undefined : updatedSince, includeHistory);
       if (requestId !== refreshRequestId.current || mutationAtStart !== mutationGeneration.current) return;
       const syncedAt = Date.now();
       if (shouldLoadFull) {
         const loaded = normalizeStore(changes);
         setStore(loaded);
         lastFullSyncAt.current = syncedAt;
+        if (includeHistory) setHistoryReady(true);
         void writeStoreCache(cloud, loaded as unknown as CloudStore, syncedAt, requestStartedAt);
       } else {
         setStore(current => {
@@ -198,16 +202,31 @@ function App({ cloud }: { cloud: CloudSession }) {
   if (!refreshQueue.current) refreshQueue.current = coalesceRefresh(performRefresh);
   const refresh = refreshQueue.current;
 
+  const loadHistory = () => {
+    historyRequested.current = true;
+    void refresh(false, true);
+  };
+
+  // Inventory returns depend on complete purchase history. Do not mount its
+  // actions until history is confirmed; a failed fetch stays retryable.
+  useEffect(() => {
+    if (page === 'parts' && !loading && !historyRequested.current) loadHistory();
+  }, [page, loading]);
+
   useEffect(() => {
     let active = true;
     void (async () => {
       // IndexedDB can stall in mobile/private browsing. Optional cache must
       // never prevent the authoritative server request from starting.
       let cacheTimer: ReturnType<typeof setTimeout> | undefined;
-      const cached = await Promise.race([
-        readStoreCache(cloud),
+      const cacheRead = readStoreCache(cloud);
+      const cached = cloud.role === 'owner' ? await Promise.race([
+        cacheRead,
         new Promise<null>(resolve => { cacheTimer = setTimeout(() => resolve(null), 1500); }),
-      ]).finally(() => clearTimeout(cacheTimer));
+      ]).finally(() => clearTimeout(cacheTimer)) : null;
+      // Employees never read cached business data. Clear legacy cache in the
+      // background instead of delaying their authenticated server request.
+      if (cloud.role !== 'owner') void cacheRead.catch(() => undefined);
       if (!active) return;
       if (cached) {
         setStore(normalizeStore(cached.store));
@@ -951,7 +970,7 @@ function App({ cloud }: { cloud: CloudSession }) {
       setSearchDraft('');
       setPage('customers');
       const verificationRequestId = ++refreshRequestId.current;
-      const confirmedStore = normalizeStore(await cloud.loadWorkspace());
+      const confirmedStore = normalizeStore(await cloud.loadWorkspace(undefined, historyRequested.current));
       const confirmed = confirmedStore.customers.some(item => item.id === row.id && !(item as Customer & { archived?: boolean }).archived);
       if (!confirmed) throw new Error('服务器没有确认客户记录，请检查网络后重新保存。');
       if (verificationRequestId === refreshRequestId.current) setStore(confirmedStore);
@@ -969,7 +988,7 @@ function App({ cloud }: { cloud: CloudSession }) {
     <main className="main"><header className="topbar"><div className="global-search">⌕<input value={searchDraft} onChange={e => setSearchDraft(e.target.value)} onKeyDown={e => e.key === 'Enter' && runGlobalSearch()} placeholder="搜索客户、公司、电话、VIN、车牌、工单、司机…" /><button type="button" onClick={runGlobalSearch}>搜索</button>{searchSuggestions.length > 0 && <div className="search-suggestions">{searchSuggestions.map((item, index) => <button type="button" key={`${item.page}-${item.label}-${index}`} onClick={() => { setModal(null); setPage(item.page); setSearch(item.query); setSearchDraft(''); if (item.page !== 'customers' && item.page !== 'fleets' && item.modalType && item.record) openModal(item.modalType, item.record); }}><b>{item.label}</b><small>{item.meta}</small></button>)}</div>}</div><div className="top-status"><span className={syncing ? 'syncing' : ''}>{syncing || refreshState === 'loading' ? '正在同步…' : refreshState === 'error' ? '同步失败' : '● 云端已同步'}</span><span>{actorName}</span><b>v0.82.4</b><button type="button" className="topbar-logout" onClick={() => confirm('确定退出当前账号？') && void cloud.signOut()}>退出</button></div></header>
       {saveNotice && page === 'workOrders' && <div className="dashboard-sync-status" role="status">{saveNotice}<button onClick={() => setSaveNotice('')}>关闭</button></div>}
       {page === 'dashboard' && !loading && <div className="dashboard-sync-status" role="status">{refreshState === 'loading' ? '正在更新金额，当前显示已缓存的数据…' : refreshState === 'error' ? '更新失败，当前金额可能不是最新，请重试。' : `金额已更新 · ${new Date(refreshedAt).toLocaleTimeString()}`} <button disabled={refreshState === 'loading'} onClick={() => void refresh(true)}>刷新金额</button></div>}
-{!loading && loadError && !lastFullSyncAt.current ? <section className="form-section" role="alert"><h3>数据尚未读取成功</h3><p>{loadError}</p><p>当前不显示金额，避免把未加载的数据误认为零。请勿重复录入工单或收款。</p><button className="primary" onClick={() => void refresh(false, true)}>重新连接服务器</button></section> : loading ? <div className="loading">正在读取正式服务器数据…</div> : <PageContent page={page} search={search} store={store} settings={settings} cloud={cloud} setPage={setPage} openModal={openModal} setEditingOrder={setEditingOrder} persist={persist} remove={remove} receiveStock={receiveStock} addPayment={addPayment} deleteWorkOrder={deleteWorkOrder} requestPaymentCorrection={requestPaymentCorrection} requestExpenseCorrection={requestExpenseCorrection} approveRequest={approveRequest} rejectRequest={rejectRequest} claimWorkOrder={claimWorkOrder} completeWorkOrder={completeWorkOrder} actorName={actorName} editOwnProfile={editOwnProfile} onVehicleTransferred={vehicle => { setStore(current => ({ ...current, vehicles: upsertLocal(current.vehicles, vehicle) })); void refresh(false, true); }} />}
+{!loading && loadError && !lastFullSyncAt.current ? <section className="form-section" role="alert"><h3>数据尚未读取成功</h3><p>{loadError}</p><p>当前不显示金额，避免把未加载的数据误认为零。请勿重复录入工单或收款。</p><button className="primary" onClick={() => void refresh(false, true)}>重新连接服务器</button></section> : loading ? <div className="loading">正在读取正式服务器数据…</div> : <PageContent historyReady={historyReady} loadHistory={loadHistory} page={page} search={search} store={store} settings={settings} cloud={cloud} setPage={setPage} openModal={openModal} setEditingOrder={setEditingOrder} persist={persist} remove={remove} receiveStock={receiveStock} addPayment={addPayment} deleteWorkOrder={deleteWorkOrder} requestPaymentCorrection={requestPaymentCorrection} requestExpenseCorrection={requestExpenseCorrection} approveRequest={approveRequest} rejectRequest={rejectRequest} claimWorkOrder={claimWorkOrder} completeWorkOrder={completeWorkOrder} actorName={actorName} editOwnProfile={editOwnProfile} onVehicleTransferred={vehicle => { setStore(current => ({ ...current, vehicles: upsertLocal(current.vehicles, vehicle) })); void refresh(false, true); }} />}
     </main>
     {orderDetailLoading && <div className="modal-backdrop"><div className="modal" role="status"><h3>正在读取这张工单的完整资料…</h3><p>照片和签名仅在需要时加载；请等待后再编辑。</p><button onClick={() => setEditingOrder(null)}>取消</button></div></div>}
     {modal && <EntityModal state={modal} store={store} settings={settings} cloud={cloud} onClose={closeModal} onSave={saveModal} />}
@@ -977,6 +996,7 @@ function App({ cloud }: { cloud: CloudSession }) {
 }
 
 type ContentProps = {
+  historyReady: boolean; loadHistory: () => void;
   page: Page; search: string; store: AppStore; settings: ShopSettings; cloud: CloudSession;
   setPage: (page: Page) => void; openModal: (type: NonNullable<ModalState>['type'], value?: object) => void;
   setEditingOrder: (value: WorkOrder | 'new' | null) => void;
@@ -998,7 +1018,7 @@ function PageContent(props: ContentProps) {
   if (page === 'fleets') return <Fleets {...props} />;
   if (page === 'vehicles') return <Vehicles {...props} />;
   if (page === 'workOrders') return <WorkOrders {...props} />;
-  if (page === 'parts') return <Inventory {...props} />;
+  if (page === 'parts') return props.historyReady ? <Inventory {...props} /> : <section className="panel"><h3>正在准备库存历史记录</h3><p>采购退货需要核对完整流水；读取成功前不会开放库存操作。</p><button onClick={props.loadHistory}>重新读取库存历史</button></section>;
   if (page === 'finance') return <Finance {...props} />;
   if (page === 'taxReports') return <TaxReports {...props} />;
   if (page === 'campaigns') return <ActivityCenter organizationId={props.cloud.organizationId} canReview={can(props.cloud, 'approve')} campaigns={store.campaigns} warranties={store.warranties} vehicles={store.vehicles} onAddCampaign={() => props.openModal('campaign')} onEditCampaign={item => props.openModal('campaign', item)} onAddWarranty={() => props.openModal('warranty')} onEditWarranty={item => props.openModal('warranty', item)} onRemoveCampaign={id => props.remove('campaigns', id)} onRemoveWarranty={id => props.remove('warranties', id)} />;
@@ -1275,7 +1295,7 @@ function Vehicles({ store, search, openModal, remove, setEditingOrder, settings,
   </>;
 }
 
-function WorkOrders({ store, search, settings, cloud, setEditingOrder, addPayment, deleteWorkOrder, requestPaymentCorrection, approveRequest, rejectRequest, claimWorkOrder, completeWorkOrder, actorName }: ContentProps) {
+function WorkOrders({ store, search, settings, cloud, setEditingOrder, addPayment, deleteWorkOrder, requestPaymentCorrection, approveRequest, rejectRequest, claimWorkOrder, completeWorkOrder, actorName, historyReady, loadHistory }: ContentProps) {
   const requestOrderPaymentCorrection = async (order: WorkOrder) => {
     const payments = store.payments
       .filter(item => item.workOrderId === order.id && !item.archivedAt)
@@ -1327,7 +1347,7 @@ function WorkOrders({ store, search, settings, cloud, setEditingOrder, addPaymen
   return <div className="page"><div className="page-title"><div><p className="eyebrow">Z&G AUTO ERP</p><h2>{assignedOnly ? '我的维修任务' : '维修工单'}</h2></div>{can(cloud, 'createWorkOrders') && <button className="primary" onClick={() => setEditingOrder('new')}>＋ 新建工单</button>}</div>
     {!!pending.length && <section className="panel approval-panel"><div className="section-title"><div><h3>待双人授权</h3><span>申请人与批准人必须是两个不同账号；所有决定永久记入日志</span></div><b>{pending.length} 项</b></div>{pending.map(item => <article className="approval-row" key={item.id}><div><b>{item.type === '删除工单' ? '作废/归档工单' : item.type} · {item.workOrderNumber}</b><small>申请人 {item.requestedBy} · {new Date(item.requestedAt).toLocaleString()}</small><p>{item.reason}</p></div><div className="actions">{canApprove && item.requestedById !== cloud.user.id ? <><button className="primary" onClick={() => void approveRequest(item)}>批准并执行</button><button onClick={() => void rejectRequest(item)}>拒绝</button></> : <span className="muted">{item.requestedById === cloud.user.id ? '等待另一账号批准' : '需要审批权限'}</span>}</div></article>)}</section>}
     <section className="panel work-order-table"><table><thead><tr><th>工单/日期</th><th>客户与车辆</th><th>技师/状态</th><th>检查/审查</th>{showFinance && <><th>总价</th><th>已付/欠款</th></>}<th /></tr></thead><tbody>{rows.map(order => { const checks = Object.values(order.inspectionChecklist || {}).filter(Boolean).length; const evidenceCount = (order.evidencePhotos || []).filter(item => !item.archivedAt).length; const isMine = order.technicianUserId === cloud.user.id || order.technician === actorName || order.technician === cloud.user.email; const isUnassigned = !order.technicianUserId && !order.technician; const isFinished = order.status === '已完成' || order.status === '已交车'; const visibleBalance = Math.abs(order.balance) < .01 ? 0 : order.balance; const hasPaymentLedger = store.payments.some(item => item.workOrderId === order.id && !item.archivedAt); return <tr key={order.id} className={order.archivedAt ? 'archived-row' : ''}><td><b>{order.number}</b><small>{order.date} {order.po ? `· PO ${order.po}` : ''}</small>{order.archivedAt && <small className="archive-badge">已作废并归档</small>}</td><td>{order.customer}<small>{order.plate} · {order.vehicle}{order.driver ? ` · 司机 ${order.driver}` : ''}</small><small>证据 {evidenceCount} 张</small></td><td>{order.technician || (isFinished ? '未分配' : '未分配（可领取）')}<small><Status value={order.status} /></small>{order.completedBy && <small className="success-text">完成：{order.completedBy}{order.technicianCompletedAt ? ` · ${new Date(order.technicianCompletedAt).toLocaleString()}` : ''}</small>}</td><td><b>{checks}/5</b><small><span className={`review-badge review-${order.reviewStatus || '未提交'}`}>{order.reviewStatus || '未提交'}</span></small><small className={`approval-state approval-${order.customerApprovalStatus || '未发送'}`}>客户：{order.customerApprovalStatus || '未发送'}</small></td>{showFinance && <><td><b>{money(order.total)}</b><small>毛利 {money(order.grossProfit)}</small></td><td>{money(order.paid)}<small className={visibleBalance > 0 ? 'warning-text' : ''}>欠 {money(visibleBalance)}</small></td></>}<td className="actions">{assignedOnly && isUnassigned && !isFinished && order.status !== '已取消' && !order.archivedAt && <button className="primary" onClick={() => void claimWorkOrder(order)}>领取工单</button>}{assignedOnly && isMine && !isFinished && !order.archivedAt && <button className="primary" onClick={() => void completeWorkOrder(order)}>维修完成</button>}{canEdit && <button className={order.reviewStatus === '待审查' && canApprove ? 'primary' : ''} onClick={() => setEditingOrder(order)}>{order.reviewStatus === '待审查' && canApprove ? '审查' : '查看/编辑'}</button>}{can(cloud, 'collectPayment') && !order.archivedAt && (order.balance > .009 ? <button onClick={() => addPayment(order)}>收款</button> : <button onClick={() => void requestOrderPaymentCorrection(order)} disabled={!hasPaymentLedger}>修改收款</button>)}{canPrint && <PrintMenu cloud={cloud} order={withCurrentCustomerName(order, store.customers)} settings={settings} payments={store.payments} hidePrices={!canPrintPriced} />}{canSend && !order.archivedAt && <SendMenu order={order} settings={settings} store={store} cloud={cloud} />}{can(cloud, 'archive') && !order.archivedAt && <button className="danger-link" onClick={() => deleteWorkOrder(order)}>申请作废</button>}{order.archivedAt && <small title={order.archiveReason}>原因：{order.archiveReason || '未填写'}</small>}</td></tr>})}</tbody></table>{!rows.length && <Empty text={assignedOnly ? '目前没有可领取或已分配给您的工单。' : '没有找到工单。'} />}</section>
-    {(canApprove || cloud.role === 'owner' || cloud.role === 'manager') && <section className="panel"><div className="section-title"><h3>最近修改记录</h3><span>保留修改人、时间、内容以及授权结果，不允许清除</span></div><div className="change-log-list">{[...visibleLogs].sort((a,b) => b.at.localeCompare(a.at)).slice(0,50).map(log => <div key={log.id}><b>{log.workOrderNumber} · {log.action}</b><span>{log.actor} · {new Date(log.at).toLocaleString()}</span><small>{log.detail}</small></div>)}</div>{!visibleLogs.length && <Empty text="尚无工单修改记录。" />}</section>}
+    {(canApprove || cloud.role === 'owner' || cloud.role === 'manager') && <section className="panel"><div className="section-title"><h3>最近修改记录</h3><span>保留修改人、时间、内容以及授权结果，不允许清除</span></div>{!historyReady ? <button onClick={loadHistory}>点击读取历史修改记录</button> : <><div className="change-log-list">{[...visibleLogs].sort((a,b) => b.at.localeCompare(a.at)).slice(0,50).map(log => <div key={log.id}><b>{log.workOrderNumber} · {log.action}</b><span>{log.actor} · {new Date(log.at).toLocaleString()}</span><small>{log.detail}</small></div>)}</div>{!visibleLogs.length && <Empty text="尚无工单修改记录。" />}</>}</section>}
   </div>;
 }
 
