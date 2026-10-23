@@ -31,6 +31,20 @@ create function zg_create_customer_approval(uuid,uuid,text,text,jsonb) returns t
 `);
 const migration = readFileSync(new URL('../supabase/migrations/20261009150337_enforce_record_permissions.sql', import.meta.url),'utf8');
 await db.exec(migration);
+const oldRedactor=(await db.query("select pg_get_functiondef('zg_private.redact(jsonb,boolean,boolean,boolean)'::regprocedure) as definition")).rows[0].definition;
+await db.exec(oldRedactor.replaceAll('zg_private.redact','zg_private.redact_reference'));
+await db.exec(readFileSync(new URL('../supabase/migrations/20261023030324_optimize_employee_redaction.sql',import.meta.url),'utf8'));
+const protectedKeys=['price','rate','flatAmount','total','tax','taxRate','taxOverride','discount','settlementTotal','laborTotal','partsTotal','outsource','defaultLaborRate','defaultTaxRate','markupPercent','amount','oldValue','newValue','creditLimit','notes','note','before','after','proposedOrder','proposedExpense','proposedPayment','documentSendHistory','customerApprovalUrl','cost','costTotal','partsCost','grossProfit','unitCost','totalCost','paid','balance','paymentMethod','reconciliationSnapshot','phone','secondaryPhone','driverPhone','email','billingEmail','address','licenseLast4','customerSignature'];
+const sensitive=Object.fromEntries(protectedKeys.map((key,i)=>[key,i%2?123.45:'private']));
+const samples=[null,{},[],true,0,'中文保养',sensitive,{...sensitive,normal:'keep',items:[null,1,false,'keep',sensitive,[sensitive,{},[]]],nested:{...sensitive,public:{status:'维修中'}}},Object.fromEntries(Array.from({length:100},(_,i)=>['field'+i,i]))];
+for(const prices of [false,true,null]) for(const finances of [false,true,null]) for(const contacts of [false,true,null]) {
+ for(const sample of samples) {
+  const result=(await db.query('select zg_private.redact($1::jsonb,$2,$3,$4) is not distinct from zg_private.redact_reference($1::jsonb,$2,$3,$4) as same',[JSON.stringify(sample),prices,finances,contacts])).rows[0];
+  assert.equal(result.same,true,'redaction equivalence: '+JSON.stringify([sample,prices,finances,contacts]));
+ }
+}
+assert.equal((await db.query('select zg_private.redact(null,false,false,false)=zg_private.redact_reference(null,false,false,false) as same')).rows[0].same,true);
+console.log('PASS: optimized redaction matches old implementation for all protected keys, nested arrays/objects, nulls, scalars and 27 permission combinations');
 await db.exec(readFileSync(new URL('../supabase/migrations/20261009151334_activate_record_permissions.sql',import.meta.url),'utf8'));
 await db.exec(readFileSync(new URL('../supabase/migrations/20261009151541_secure_privileged_actions.sql',import.meta.url),'utf8'));
 const org='00000000-0000-4000-8000-000000000001', owner='00000000-0000-4000-8000-000000000002', worker='00000000-0000-4000-8000-000000000003', order='00000000-0000-4000-8000-000000000004';
@@ -170,6 +184,8 @@ await db.exec(readFileSync(new URL('../supabase/migrations/20261009155245_lazy_w
 await db.exec(readFileSync(new URL('../supabase/migrations/20261009185258_cache_workspace_owner_check.sql',import.meta.url),'utf8'));
 await db.exec(readFileSync(new URL('../supabase/migrations/20261009190012_cache_workspace_permissions.sql',import.meta.url),'utf8'));
 await db.exec(readFileSync(new URL('../supabase/migrations/20261023021011_employee_workspace_core.sql',import.meta.url),'utf8'));
+await db.exec(readFileSync(new URL('../supabase/migrations/20261023030516_precompute_restricted_workspace.sql',import.meta.url),'utf8'));
+await db.exec("update zg_private.workspace_records set restricted_payload=zg_private.redact(payload,false,false,false) where module='workOrders'");
 const detailId='00000000-0000-4000-8000-000000000091';
 const detailOrder={...original,id:detailId,technicianUserId:worker,customerSignature:'signed-original',evidencePhotos:[{id:'photo',dataUrl:'data:image/jpeg;base64,original',storagePath:'org/photo.jpg'}]};
 await db.query("insert into zg_erp_records(organization_id,module,record_id,payload) values($1,'workOrders',$2,$3)",[org,detailId,detailOrder]);
@@ -186,6 +202,13 @@ await db.query('select zg_write_records_v2($1,$2)',[org,[{module:'workOrders',ro
 detailRow=(await db.query('select zg_read_work_order($1,$2) as p',[org,detailId])).rows[0].p;
 assert.equal(detailRow.customerSignature,'signed-original');assert.equal(detailRow.evidencePhotos[0].dataUrl,'data:image/jpeg;base64,original');
 lightweight=await workspaceRow();assert.equal(lightweight.payload.diagnosis,'list action','read model updated in same transaction');
+await db.exec('reset role');
+const cachedRestricted=(await db.query('select restricted_payload,payload from zg_private.workspace_records where record_id=$1',[detailId])).rows[0];
+assert.equal(cachedRestricted.restricted_payload.diagnosis,'list action','restricted projection updates atomically with original');
+assert.equal(cachedRestricted.restricted_payload.total,undefined);
+assert.equal(cachedRestricted.restricted_payload.phone,undefined);
+assert.equal(cachedRestricted.payload.total,550,'original prices preserved');
+await db.exec('set role authenticated');
 await db.exec(`set request.jwt.claim.sub='${worker}'`);
 lightweight=await workspaceRow();assert.equal(lightweight.payload.total,undefined,'summary must retain financial restrictions');
 await db.query('select zg_save_operational_order($1,$2)',[org,{...lightweight.payload,id:detailId,diagnosis:'worker list action',_cloudUpdatedAt:lightweight.version}]);
