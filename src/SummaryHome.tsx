@@ -16,7 +16,7 @@ export function SummaryHome({summary, name, financial, customers, createOrder, e
  return <div className="page">
   <div className="hero"><h1>{name}，欢迎回来</h1><div className="toolbar">{customers && <button onClick={()=>navigate('customers')}>＋ 新客户</button>}{createOrder && <button className="primary" onClick={newOrder}>＋ 新建工单</button>}</div></div>
   <div className="dashboard-actions">{actions.map(action=><button key={action.label} onClick={action.onClick}><b>{action.label}</b><span>点击查看详情</span></button>)}</div>
-  <div className="dashboard-sync-status" role="status">{error ? '汇总读取失败，请重试；未加载数据不会显示成零。' : summary ? `汇总已更新 · ${new Date(summary.generatedAt).toLocaleTimeString()} · 明细按需读取` : '正在读取首页汇总，无需等待全部明细…'}<button onClick={refresh}>刷新汇总</button></div>
+  <div className="dashboard-sync-status" role="status">{error ? '数据更新失败，请重试；已显示的汇总可能不是最新。' : summary ? `汇总已更新 · ${new Date(summary.generatedAt).toLocaleTimeString()} · 业务资料后台加载` : '正在读取首页汇总，无需等待全部明细…'}<button onClick={refresh}>刷新 / 重试</button></div>
   {error && <section className="panel" role="alert">{error}</section>}
   {customers && <details className="relationship-overview relationship-overview-collapsible"><summary><span><b>客户与车辆统计</b><small>点击展开统计，点击数字查看资料</small></span></summary><div className="relationship-overview-body"><div className="kpi-grid">{[
    ['customers','客户档案','customers'],['fleets','公司 / 车队','fleets'],['vehicles','车辆档案','vehicles'],['newVehiclesThisMonth','本月新增车辆','vehicles'],['servicedVehicles','有维修记录车辆','vehicles']
@@ -24,6 +24,6 @@ export function SummaryHome({summary, name, financial, customers, createOrder, e
   <div className="kpi-grid">{financial ? amounts.filter(([key])=>!summary || key in summary.metrics).map(([key,label])=>card(key,label,summary ? money(summary.metrics[key]) : '加载中…',()=>openMetric(key))) : [
    ['orders','可查看工单'],['waiting','等待检查'],['repairing','维修中'],['completed','今日完成']
   ].map(([key,label])=>card(key,label,summary ? String(summary.operations[key]) : '加载中…',()=>navigate('workOrders')))}</div>
-  <section className="panel"><h3>工单与详细记录</h3><p>首页只读取汇总数字。需要查看具体客户、车辆、工单或金额组成时，再加载完整明细。</p><button onClick={()=>navigate('workOrders')}>查看维修工单</button></section>
+  <section className="panel"><h3>工单与详细记录</h3><p>系统正在后台准备您有权限的业务资料，完成后切换页面可直接使用。照片与附件仍按需读取。</p><button onClick={()=>navigate('workOrders')}>查看维修工单</button></section>
  </div>;
 }

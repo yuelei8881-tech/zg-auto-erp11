@@ -7,6 +7,7 @@ import { LoadDiagnostics } from './LoadDiagnostics';
 import { readStoreCache, writeStoreCache, storeCacheKey } from './lib/storeCache';
 import { financialStore } from './lib/financialRecords';
 import { coalesceRefresh } from './lib/refreshQueue';
+import { sharedLoad } from './lib/sharedLoad';
 import { businessExport } from './lib/businessExport';
 import { supabase } from './lib/supabase';
 import { decodeVin, escapeHtml, money, recalculateWorkOrder, today, uid } from './lib/erp';
@@ -99,6 +100,10 @@ function App({ cloud }: { cloud: CloudSession }) {
   const workspaceRequested = useRef(false);
   const workspaceReady = useRef(false);
   const workspaceStore = useRef<AppStore>(emptyStore);
+  const workspaceLoader = useRef<(() => Promise<AppStore>) | null>(null);
+  const [preloading, setPreloading] = useState(false);
+  const [pendingPage, setPendingPage] = useState<Page | null>(null);
+  const navigationRequest = useRef(0);
   const [initialMetric, setInitialMetric] = useState<string | null>(null);
   const [loadError, setLoadError] = useState('');
   const [loadProgress, setLoadProgress] = useState<CloudLoadProgress | null>(null);
@@ -229,17 +234,31 @@ function App({ cloud }: { cloud: CloudSession }) {
     if (workspaceReady.current && page === 'dashboard' && initialMetric) setInitialMetric(null);
   }, [store, page, initialMetric]);
 
-  const ensureWorkspace = async () => {
-    if (workspaceReady.current) return workspaceStore.current;
+  if (!workspaceLoader.current) workspaceLoader.current = sharedLoad(async () => {
     workspaceRequested.current = true;
-    await refresh(false, true);
-    if (!workspaceReady.current) throw new Error('明细未读取完成，请重试。');
-    return workspaceStore.current;
+    setPreloading(true);
+    try {
+      await refresh(true, true);
+      if (!workspaceReady.current) throw new Error('明细未读取完成，请重试。');
+      return workspaceStore.current;
+    } finally { setPreloading(false); }
+  });
+  const ensureWorkspace = () => {
+    if (workspaceReady.current) return Promise.resolve(workspaceStore.current);
+    return workspaceLoader.current!();
   };
   const setPage = (next: Page) => {
     if (!canOpenPage(cloud, next)) return;
+    const request = ++navigationRequest.current;
+    if (next !== 'dashboard' && !workspaceReady.current) {
+      setPendingPage(next);
+      void ensureWorkspace().then(() => {
+        if (request === navigationRequest.current) { setPageState(next); setPendingPage(null); }
+      }).catch(() => { if (request === navigationRequest.current) setPendingPage(null); });
+      return;
+    }
+    setPendingPage(null);
     setPageState(next);
-    if (next !== 'dashboard' && !workspaceReady.current) void ensureWorkspace().catch(() => undefined);
   };
 
   const loadHistory = () => {
@@ -250,7 +269,7 @@ function App({ cloud }: { cloud: CloudSession }) {
   // Inventory returns depend on complete purchase history. Do not mount its
   // actions until history is confirmed; a failed fetch stays retryable.
   useEffect(() => {
-    if (page === 'parts' && !loading && !historyRequested.current) loadHistory();
+    if (page === 'parts' && workspaceReady.current && !loading && !historyRequested.current) loadHistory();
   }, [page, loading]);
 
   useEffect(() => {
@@ -261,6 +280,9 @@ function App({ cloud }: { cloud: CloudSession }) {
       if (cloud.role !== 'owner') void readStoreCache(cloud).catch(() => undefined);
       if (!active) return;
       await refresh(true);
+      // Publish the summary first, then warm the permitted business workspace.
+      // Navigation joins this exact preload instead of starting a second read.
+      if (active) void ensureWorkspace().catch(() => undefined);
     })();
     void cloud.listStaff().then(data => setStaffMembers(data.members.filter(item => item.status === 'active'))).catch(() => undefined);
     const unsubscribe = cloud.subscribe(requiresFullRefresh => { void refresh(true, Boolean(requiresFullRefresh)); });
@@ -1019,7 +1041,8 @@ function App({ cloud }: { cloud: CloudSession }) {
     <main className="main"><header className="topbar"><div className="global-search">⌕<input value={searchDraft} onChange={e => setSearchDraft(e.target.value)} onKeyDown={e => e.key === 'Enter' && runGlobalSearch()} placeholder="搜索客户、公司、电话、VIN、车牌、工单、司机…" /><button type="button" onClick={runGlobalSearch}>搜索</button>{searchSuggestions.length > 0 && <div className="search-suggestions">{searchSuggestions.map((item, index) => <button type="button" key={`${item.page}-${item.label}-${index}`} onClick={() => { setModal(null); setPage(item.page); setSearch(item.query); setSearchDraft(''); if (item.page !== 'customers' && item.page !== 'fleets' && item.modalType && item.record) openModal(item.modalType, item.record); }}><b>{item.label}</b><small>{item.meta}</small></button>)}</div>}</div><div className="top-status"><span className={syncing ? 'syncing' : ''}>{syncing || refreshState === 'loading' ? '正在同步…' : refreshState === 'error' ? '同步失败' : '● 云端已同步'}</span><span>{actorName}</span><b>v0.82.4</b><button type="button" className="topbar-logout" onClick={() => confirm('确定退出当前账号？') && void cloud.signOut()}>退出</button></div></header>
       {saveNotice && page === 'workOrders' && <div className="dashboard-sync-status" role="status">{saveNotice}<button onClick={() => setSaveNotice('')}>关闭</button></div>}
       {page === 'dashboard' && workspaceReady.current && !loading && <div className="dashboard-sync-status" role="status">{refreshState === 'loading' ? '正在更新金额，当前显示已缓存的数据…' : refreshState === 'error' ? '更新失败，当前金额可能不是最新，请重试。' : `金额已更新 · ${new Date(refreshedAt).toLocaleTimeString()}`} <button disabled={refreshState === 'loading'} onClick={() => void refresh(true)}>刷新金额</button></div>}
-{(loading || page === 'dashboard') && <LoadDiagnostics progress={loadProgress} loading={loading} />}
+{preloading && <div className="dashboard-sync-status" role="status">{pendingPage ? `正在准备${nav.find(item => item.id === pendingPage)?.label || '页面'}，完成后自动打开；首页仍可查看。` : '正在后台准备工单、客户、车辆和套餐…'}{loadProgress ? ` 已收到 ${loadProgress.records} 条资料。` : ''}{pendingPage && <button onClick={() => setPage('dashboard')}>留在首页</button>}</div>}
+{!preloading && (loading || page === 'dashboard') && <LoadDiagnostics progress={loadProgress} loading={loading} />}
 {page === 'dashboard' && !workspaceReady.current ? <SummaryHome actions={nav.filter(item => ['workOrders','parts','finance','campaigns'].includes(item.id) && canOpenPage(cloud,item.id)).map(item => ({label:item.label,onClick:()=>setPage(item.id)}))} summary={summary} name={actorName} financial={can(cloud,'pricing') || can(cloud,'finance')} customers={can(cloud,'customers')} createOrder={can(cloud,'createWorkOrders')} error={loadError} refresh={() => void refresh(true)} navigate={setPage} newOrder={() => setEditingOrder('new')} openMetric={key => { setInitialMetric(key); void ensureWorkspace().catch(() => undefined); }} /> : !loading && loadError && !lastFullSyncAt.current ? <section className="form-section" role="alert"><h3>数据尚未读取成功</h3><p>{loadError}</p><p>当前不显示金额，避免把未加载的数据误认为零。请勿重复录入工单或收款。</p><button className="primary" onClick={() => void refresh(false, true)}>重新连接服务器</button></section> : loading || !workspaceReady.current ? null : <PageContent initialMetric={initialMetric} historyReady={historyReady} loadHistory={loadHistory} page={page} search={search} store={store} settings={settings} cloud={cloud} setPage={setPage} openModal={openModal} setEditingOrder={setEditingOrder} persist={persist} remove={remove} receiveStock={receiveStock} addPayment={addPayment} deleteWorkOrder={deleteWorkOrder} requestPaymentCorrection={requestPaymentCorrection} requestExpenseCorrection={requestExpenseCorrection} approveRequest={approveRequest} rejectRequest={rejectRequest} claimWorkOrder={claimWorkOrder} completeWorkOrder={completeWorkOrder} actorName={actorName} editOwnProfile={editOwnProfile} onVehicleTransferred={vehicle => { setStore(current => ({ ...current, vehicles: upsertLocal(current.vehicles, vehicle) })); void refresh(false, true); }} />}
     </main>
     {orderDetailLoading && <div className="modal-backdrop"><div className="modal" role="status"><h3>正在读取这张工单的完整资料…</h3><p>照片和签名仅在需要时加载；请等待后再编辑。</p><button onClick={() => setEditingOrder(null)}>取消</button></div></div>}
