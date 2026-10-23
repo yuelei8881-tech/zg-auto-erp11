@@ -5,6 +5,7 @@ import { clearStoreCache } from './storeCache';
 export type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
 export type CloudRow = { id: string; [key: string]: JsonValue };
 export type CloudStore = Record<string, CloudRow[]>;
+export type CloudLoadProgress = { phase: string; startedAt: number; elapsedMs: number; membershipMs: number; downloadMs: number; processingMs: number; pages: number; records: number };
 
 export type CloudUser = { id: string; email: string; name?: string };
 export type StaffMember = { userId: string; displayName: string; phone: string; role: string; status: string; permissions: Record<string, boolean> };
@@ -17,7 +18,7 @@ export type CloudSession = {
   role: string;
   permissions: Record<string, boolean>;
   loadStore: (updatedSince?: string, skipPhotos?: boolean) => Promise<CloudStore>;
-  loadWorkspace: (updatedSince?: string, includeHistory?: boolean) => Promise<CloudStore>;
+  loadWorkspace: (updatedSince?: string, includeHistory?: boolean, onProgress?: (progress: CloudLoadProgress) => void) => Promise<CloudStore>;
   readWorkOrder: (id: string) => Promise<CloudRow>;
   transferVehicle: (vehicleId: string, targetModule: string, targetId: string, expectedVersion: string, note: string, requestId: string) => Promise<CloudRow>;
   upsertRecord: (module: string, row: CloudRow) => Promise<CloudRow>;
@@ -93,7 +94,10 @@ export async function openCloudSession(user: User): Promise<CloudSession> {
     .from('zg_organizations').select('name').eq('id', organizationId).single();
   if (organizationError) throw organizationError;
 
-  const loadStore = async (updatedSince?: string, skipPhotos = false, onlyModule?: string, workspace = false, deferHistory = false) => {
+  const loadStore = async (updatedSince?: string, skipPhotos = false, onlyModule?: string, workspace = false, deferHistory = false, onProgress?: (progress: CloudLoadProgress) => void) => {
+    const progress: CloudLoadProgress = { phase: '验证员工权限', startedAt: Date.now(), elapsedMs: 0, membershipMs: 0, downloadMs: 0, processingMs: 0, pages: 0, records: 0 };
+    const report = (phase: string) => { progress.phase = phase; progress.elapsedMs = Date.now() - progress.startedAt; onProgress?.({ ...progress }); };
+    report('验证员工权限');
     const current = await findMembership().catch(async error => {
       if (error instanceof Error && error.message.includes('账号已停用')) {
         await clearStoreCache().catch(() => undefined);
@@ -110,31 +114,43 @@ export async function openCloudSession(user: User): Promise<CloudSession> {
       window.dispatchEvent(new Event('zg-permissions-changed'));
       throw new Error('账号权限已更新，正在重新连接。');
     }
+    progress.membershipMs = Date.now() - progress.startedAt;
     // Supabase limits a select response to 1,000 rows by default. The ERP now
     // contains more than that across all modules, so a single request silently
     // omitted older payments, expenses, customers and work orders. Read every
     // page to keep financial totals and historical records complete.
     const data: Array<{ module: string; record_id: string; payload: JsonValue; updated_at: string }> = [];
-    const pageSize = 1000;
+    const batchRead = workspace && deferHistory;
+    const pageSize = batchRead ? 3000 : 1000;
     // Use sequential pages here. Some mobile networks and Supabase gateways
     // intermittently reject a burst of parallel range requests, which made the
     // whole ERP fail to open. Uploads remain parallel, but the authoritative
     // accounting/customer store is loaded conservatively and completely.
     for (let from = 0; ; from += pageSize) {
-      const { data: page, error } = await client.rpc(workspace ? (deferHistory ? 'zg_read_workspace_core' : 'zg_read_workspace') : 'zg_read_records', {
+      report(`读取第 ${progress.pages + 1} 批资料`);
+      const pageStarted = Date.now();
+      const { data: page, error } = await client.rpc(workspace ? (deferHistory ? 'zg_read_workspace_batch' : 'zg_read_workspace') : 'zg_read_records', {
         p_org: organizationId, p_since: updatedSince || null, p_offset: from, p_limit: pageSize, p_module: onlyModule || null,
       });
       if (error) throw error;
-      const rows = (page || []) as typeof data;
+      if (batchRead && !Array.isArray(page?.rows)) throw new Error('服务器返回的数据不完整，请重试。');
+      const rows = (batchRead ? page.rows : (page || [])) as typeof data;
       data.push(...rows);
+      progress.pages++;
+      progress.records = data.length;
+      progress.downloadMs += Date.now() - pageStarted;
       if (rows.length < pageSize) break;
     }
     const store: CloudStore = {};
+    report('整理显示资料');
+    const processingStarted = Date.now();
     for (const item of data) {
       const module = String(item.module);
       const payload = (item.payload || {}) as Omit<CloudRow, 'id'>;
       (store[module] ||= []).push({ ...payload, id: String(item.record_id), _cloudUpdatedAt: String(item.updated_at || '') });
     }
+    progress.processingMs = Date.now() - processingStarted;
+    report('读取完成');
     if (skipPhotos) return store;
     const storedPhotos = (store.workOrders || []).flatMap(row => {
       const photos = Array.isArray(row.evidencePhotos) ? row.evidencePhotos : [];
@@ -423,9 +439,9 @@ export async function openCloudSession(user: User): Promise<CloudSession> {
       if (!data?.id || !data?._cloudUpdatedAt) throw new Error('未收到过户确认，请勿更改选项，使用原请求重试。');
       return data as CloudRow;
     },
-    loadWorkspace: (updatedSince, includeHistory = false) => new Promise<CloudStore>((resolve, reject) => {
+    loadWorkspace: (updatedSince, includeHistory = false, onProgress) => new Promise<CloudStore>((resolve, reject) => {
       const timer = setTimeout(() => reject(new Error('读取服务器超过 60 秒，请检查网络后点击刷新重试；不要重复新建工单。')), 60_000);
-      loadStore(updatedSince, true, undefined, true, membership.role !== 'owner' && !includeHistory).then(resolve, reject).finally(() => clearTimeout(timer));
+      loadStore(updatedSince, true, undefined, true, membership.role !== 'owner' && !includeHistory, onProgress).then(resolve, reject).finally(() => clearTimeout(timer));
     }),
     readWorkOrder: async id => {
       const { data, error } = await client.rpc('zg_read_work_order', { p_org: organizationId, p_id: id });

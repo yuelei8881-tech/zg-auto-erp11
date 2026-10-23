@@ -185,6 +185,7 @@ await db.exec(readFileSync(new URL('../supabase/migrations/20261009185258_cache_
 await db.exec(readFileSync(new URL('../supabase/migrations/20261009190012_cache_workspace_permissions.sql',import.meta.url),'utf8'));
 await db.exec(readFileSync(new URL('../supabase/migrations/20261023021011_employee_workspace_core.sql',import.meta.url),'utf8'));
 await db.exec(readFileSync(new URL('../supabase/migrations/20261023030516_precompute_restricted_workspace.sql',import.meta.url),'utf8'));
+await db.exec(readFileSync(new URL('../supabase/migrations/20261023031705_batch_employee_workspace_reads.sql',import.meta.url),'utf8'));
 await db.exec("update zg_private.workspace_records set restricted_payload=zg_private.redact(payload,false,false,false) where module='workOrders'");
 const detailId='00000000-0000-4000-8000-000000000091';
 const detailOrder={...original,id:detailId,technicianUserId:worker,customerSignature:'signed-original',evidencePhotos:[{id:'photo',dataUrl:'data:image/jpeg;base64,original',storagePath:'org/photo.jpg'}]};
@@ -233,6 +234,8 @@ for (const role of ['owner','finance','workshop_supervisor','technician','wareho
     const originalCore=(await db.query("select * from zg_read_workspace($1) where module not in ('changeLogs','inventoryLogs') order by module,record_id",[org])).rows;
     const core=(await db.query('select * from zg_read_workspace_core($1) order by module,record_id',[org])).rows;
     assert.deepEqual(core,originalCore,'core visibility AND field redaction must match: '+role+JSON.stringify(permissions));
+    const batch=(await db.query('select zg_read_workspace_batch($1) as result',[org])).rows[0].result.rows;
+    assert.deepEqual(batch.map(x=>[x.module,x.record_id,x.payload]).sort(),core.map(x=>[x.module,x.record_id,x.payload]).sort(),'batch must preserve exact permitted fields');
   }
 }
 await db.exec('reset role');
@@ -246,15 +249,19 @@ for(let offset=0;;offset+=1000){
  coreAll.push(...page);if(page.length<1000)break;
 }
 assert.equal(coreAll.filter(x=>x.module==='customers').length,1001);
+const envelope=(await db.query('select zg_read_workspace_batch($1) as result',[org])).rows[0].result;
+assert.equal(envelope.rows.filter(x=>x.module==='customers').length,1001,'JSON envelope retains more than 1000 records');
 assert.equal(coreAll.some(x=>['changeLogs','inventoryLogs'].includes(x.module)),false);
 assert.ok((await db.query("select * from zg_read_workspace($1,null,0,1000,'changeLogs')",[org])).rows.length>0,'history remains available');
 await assert.rejects(db.query('select * from zg_read_workspace_core($1)',['00000000-0000-4000-8000-000000000099']),/Not authorized/);
+await assert.rejects(db.query('select zg_read_workspace_batch($1)',['00000000-0000-4000-8000-000000000099']),/Not authorized/);
 await db.exec('reset role');
 await db.query("update zg_organization_members set status='disabled' where user_id=$1",[worker]);
 await db.exec('set role authenticated');
 await assert.rejects(db.query('select * from zg_read_workspace_core($1)',[org]),/Not authorized/);
 await db.exec('reset role; set role anon');
 await assert.rejects(db.query('select * from zg_read_workspace_core($1)',[org]),/permission denied/);
+await assert.rejects(db.query('select zg_read_workspace_batch($1)',[org]),/permission denied/);
 console.log('PASS: deferred logs filtered before pagination, 1001 customers retained, history readable, cross-org/disabled/anonymous access denied');
 await db.close();
 console.log('PASS: cached permission rules match original visibility across 24 role/permission combinations');
