@@ -1,7 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { FormalGate } from './FormalGate';
-import type { CloudRow, CloudSession, CloudStore, StaffMember, CloudLoadProgress } from './lib/cloud';
+import type { CloudRow, CloudSession, CloudStore, StaffMember, CloudLoadProgress, DashboardSummary } from './lib/cloud';
+import { SummaryHome } from './SummaryHome';
 import { LoadDiagnostics } from './LoadDiagnostics';
 import { readStoreCache, writeStoreCache, storeCacheKey } from './lib/storeCache';
 import { financialStore } from './lib/financialRecords';
@@ -92,8 +93,13 @@ async function evidenceContent(value: string, storagePath?: string) {
 
 function App({ cloud }: { cloud: CloudSession }) {
   const [store, setStore] = useState<AppStore>(emptyStore);
-  const [page, setPage] = useState<Page>('dashboard');
-  const [loading, setLoading] = useState(true);
+  const [page, setPageState] = useState<Page>('dashboard');
+  const [loading, setLoading] = useState(false);
+  const [summary, setSummary] = useState<DashboardSummary | null>(null);
+  const workspaceRequested = useRef(false);
+  const workspaceReady = useRef(false);
+  const workspaceStore = useRef<AppStore>(emptyStore);
+  const [initialMetric, setInitialMetric] = useState<string | null>(null);
   const [loadError, setLoadError] = useState('');
   const [loadProgress, setLoadProgress] = useState<CloudLoadProgress | null>(null);
   const historyRequested = useRef(cloud.role === 'owner');
@@ -110,6 +116,10 @@ function App({ cloud }: { cloud: CloudSession }) {
   const [orderDetailLoading, setOrderDetailLoading] = useState(false);
   const detailRequest = useRef(0);
   const setEditingOrder = (value: WorkOrder | 'new' | null) => {
+    if (value && !workspaceReady.current) {
+      void ensureWorkspace().then(() => setEditingOrder(value)).catch(() => undefined);
+      return;
+    }
     const request = ++detailRequest.current;
     setOrderDetailLoading(false);
     if (!value || value === 'new' || !value._detailsDeferred) { setEditingOrderState(value); return; }
@@ -148,8 +158,18 @@ function App({ cloud }: { cloud: CloudSession }) {
     const requestId = ++refreshRequestId.current;
     const mutationAtStart = mutationGeneration.current;
     const includeHistory = historyRequested.current;
-    if (!quiet) setLoading(true);
+    if (!quiet && workspaceRequested.current) setLoading(true);
     try {
+      if (!workspaceRequested.current) {
+        setRefreshState('loading');
+        setLoadError('');
+        const next = await cloud.loadSummary();
+        if (requestId !== refreshRequestId.current) return;
+        setSummary(next);
+        setRefreshedAt(Date.now());
+        setRefreshState('ready');
+        return;
+      }
       const shouldLoadFull = forceFull || !lastCloudSyncAt.current || Date.now() - lastFullSyncAt.current >= 6 * 60 * 60 * 1000;
       // Overlap two minutes so records committed near the cache timestamp can
       // never be skipped because of device/server clock differences.
@@ -168,6 +188,8 @@ function App({ cloud }: { cloud: CloudSession }) {
       const syncedAt = Date.now();
       if (shouldLoadFull) {
         const loaded = normalizeStore(changes);
+        workspaceStore.current = loaded;
+        workspaceReady.current = true;
         setStore(loaded);
         lastFullSyncAt.current = syncedAt;
         if (includeHistory) setHistoryReady(true);
@@ -203,6 +225,22 @@ function App({ cloud }: { cloud: CloudSession }) {
 
   if (!refreshQueue.current) refreshQueue.current = coalesceRefresh(performRefresh);
   const refresh = refreshQueue.current;
+  useEffect(() => {
+    if (workspaceReady.current && page === 'dashboard' && initialMetric) setInitialMetric(null);
+  }, [store, page, initialMetric]);
+
+  const ensureWorkspace = async () => {
+    if (workspaceReady.current) return workspaceStore.current;
+    workspaceRequested.current = true;
+    await refresh(false, true);
+    if (!workspaceReady.current) throw new Error('明细未读取完成，请重试。');
+    return workspaceStore.current;
+  };
+  const setPage = (next: Page) => {
+    if (!canOpenPage(cloud, next)) return;
+    setPageState(next);
+    if (next !== 'dashboard' && !workspaceReady.current) void ensureWorkspace().catch(() => undefined);
+  };
 
   const loadHistory = () => {
     historyRequested.current = true;
@@ -218,25 +256,11 @@ function App({ cloud }: { cloud: CloudSession }) {
   useEffect(() => {
     let active = true;
     void (async () => {
-      // IndexedDB can stall in mobile/private browsing. Optional cache must
-      // never prevent the authoritative server request from starting.
-      let cacheTimer: ReturnType<typeof setTimeout> | undefined;
-      const cacheRead = readStoreCache(cloud);
-      const cached = cloud.role === 'owner' ? await Promise.race([
-        cacheRead,
-        new Promise<null>(resolve => { cacheTimer = setTimeout(() => resolve(null), 1500); }),
-      ]).finally(() => clearTimeout(cacheTimer)) : null;
-      // Employees never read cached business data. Clear legacy cache in the
-      // background instead of delaying their authenticated server request.
-      if (cloud.role !== 'owner') void cacheRead.catch(() => undefined);
+      // No business-store download or cache hydration on homepage startup.
+      // Employee legacy cache cleanup must not delay the compact summary.
+      if (cloud.role !== 'owner') void readStoreCache(cloud).catch(() => undefined);
       if (!active) return;
-      if (cached) {
-        setStore(normalizeStore(cached.store));
-        lastCloudSyncAt.current = cached.savedAt;
-        lastFullSyncAt.current = cached.fullSyncedAt;
-        setLoading(false);
-      }
-      await refresh(Boolean(cached));
+      await refresh(true);
     })();
     void cloud.listStaff().then(data => setStaffMembers(data.members.filter(item => item.status === 'active'))).catch(() => undefined);
     const unsubscribe = cloud.subscribe(requiresFullRefresh => { void refresh(true, Boolean(requiresFullRefresh)); });
@@ -259,17 +283,22 @@ function App({ cloud }: { cloud: CloudSession }) {
     return candidates.filter(item => normalizeSearch(item.haystack).includes(query)).slice(0, 8);
   }, [searchDraft, store, cloud]);
 
-  const runGlobalSearch = () => {
+  const runGlobalSearch = async () => {
     const query = searchDraft.trim();
+    if (!query) { setSearch(''); return; }
+    let searchStore = store;
+    if (!workspaceReady.current) {
+      try { searchStore = await ensureWorkspace(); } catch { return; }
+    }
     setModal(null);
     setSearch(query);
     if (!query) return;
     const matches = (rows: object[]) => filterRows(rows, query).length > 0;
-    if (matches(store.vehicles)) setPage('vehicles');
-    else if (matches(store.workOrders)) setPage('workOrders');
-    else if (matches(store.customers)) setPage('customers');
-    else if (matches([...store.fleets, ...store.drivers])) setPage('fleets');
-    else if (matches(store.parts)) setPage('parts');
+    if (matches(searchStore.vehicles)) setPage('vehicles');
+    else if (matches(searchStore.workOrders)) setPage('workOrders');
+    else if (matches(searchStore.customers)) setPage('customers');
+    else if (matches([...searchStore.fleets, ...searchStore.drivers])) setPage('fleets');
+    else if (matches(searchStore.parts)) setPage('parts');
   };
 
   const editOwnProfile = async () => {
@@ -989,9 +1018,9 @@ function App({ cloud }: { cloud: CloudSession }) {
     </aside>
     <main className="main"><header className="topbar"><div className="global-search">⌕<input value={searchDraft} onChange={e => setSearchDraft(e.target.value)} onKeyDown={e => e.key === 'Enter' && runGlobalSearch()} placeholder="搜索客户、公司、电话、VIN、车牌、工单、司机…" /><button type="button" onClick={runGlobalSearch}>搜索</button>{searchSuggestions.length > 0 && <div className="search-suggestions">{searchSuggestions.map((item, index) => <button type="button" key={`${item.page}-${item.label}-${index}`} onClick={() => { setModal(null); setPage(item.page); setSearch(item.query); setSearchDraft(''); if (item.page !== 'customers' && item.page !== 'fleets' && item.modalType && item.record) openModal(item.modalType, item.record); }}><b>{item.label}</b><small>{item.meta}</small></button>)}</div>}</div><div className="top-status"><span className={syncing ? 'syncing' : ''}>{syncing || refreshState === 'loading' ? '正在同步…' : refreshState === 'error' ? '同步失败' : '● 云端已同步'}</span><span>{actorName}</span><b>v0.82.4</b><button type="button" className="topbar-logout" onClick={() => confirm('确定退出当前账号？') && void cloud.signOut()}>退出</button></div></header>
       {saveNotice && page === 'workOrders' && <div className="dashboard-sync-status" role="status">{saveNotice}<button onClick={() => setSaveNotice('')}>关闭</button></div>}
-      {page === 'dashboard' && !loading && <div className="dashboard-sync-status" role="status">{refreshState === 'loading' ? '正在更新金额，当前显示已缓存的数据…' : refreshState === 'error' ? '更新失败，当前金额可能不是最新，请重试。' : `金额已更新 · ${new Date(refreshedAt).toLocaleTimeString()}`} <button disabled={refreshState === 'loading'} onClick={() => void refresh(true)}>刷新金额</button></div>}
+      {page === 'dashboard' && workspaceReady.current && !loading && <div className="dashboard-sync-status" role="status">{refreshState === 'loading' ? '正在更新金额，当前显示已缓存的数据…' : refreshState === 'error' ? '更新失败，当前金额可能不是最新，请重试。' : `金额已更新 · ${new Date(refreshedAt).toLocaleTimeString()}`} <button disabled={refreshState === 'loading'} onClick={() => void refresh(true)}>刷新金额</button></div>}
 {(loading || page === 'dashboard') && <LoadDiagnostics progress={loadProgress} loading={loading} />}
-{!loading && loadError && !lastFullSyncAt.current ? <section className="form-section" role="alert"><h3>数据尚未读取成功</h3><p>{loadError}</p><p>当前不显示金额，避免把未加载的数据误认为零。请勿重复录入工单或收款。</p><button className="primary" onClick={() => void refresh(false, true)}>重新连接服务器</button></section> : loading ? null : <PageContent historyReady={historyReady} loadHistory={loadHistory} page={page} search={search} store={store} settings={settings} cloud={cloud} setPage={setPage} openModal={openModal} setEditingOrder={setEditingOrder} persist={persist} remove={remove} receiveStock={receiveStock} addPayment={addPayment} deleteWorkOrder={deleteWorkOrder} requestPaymentCorrection={requestPaymentCorrection} requestExpenseCorrection={requestExpenseCorrection} approveRequest={approveRequest} rejectRequest={rejectRequest} claimWorkOrder={claimWorkOrder} completeWorkOrder={completeWorkOrder} actorName={actorName} editOwnProfile={editOwnProfile} onVehicleTransferred={vehicle => { setStore(current => ({ ...current, vehicles: upsertLocal(current.vehicles, vehicle) })); void refresh(false, true); }} />}
+{page === 'dashboard' && !workspaceReady.current ? <SummaryHome actions={nav.filter(item => ['workOrders','parts','finance','campaigns'].includes(item.id) && canOpenPage(cloud,item.id)).map(item => ({label:item.label,onClick:()=>setPage(item.id)}))} summary={summary} name={actorName} financial={can(cloud,'pricing') || can(cloud,'finance')} customers={can(cloud,'customers')} createOrder={can(cloud,'createWorkOrders')} error={loadError} refresh={() => void refresh(true)} navigate={setPage} newOrder={() => setEditingOrder('new')} openMetric={key => { setInitialMetric(key); void ensureWorkspace().catch(() => undefined); }} /> : !loading && loadError && !lastFullSyncAt.current ? <section className="form-section" role="alert"><h3>数据尚未读取成功</h3><p>{loadError}</p><p>当前不显示金额，避免把未加载的数据误认为零。请勿重复录入工单或收款。</p><button className="primary" onClick={() => void refresh(false, true)}>重新连接服务器</button></section> : loading || !workspaceReady.current ? null : <PageContent initialMetric={initialMetric} historyReady={historyReady} loadHistory={loadHistory} page={page} search={search} store={store} settings={settings} cloud={cloud} setPage={setPage} openModal={openModal} setEditingOrder={setEditingOrder} persist={persist} remove={remove} receiveStock={receiveStock} addPayment={addPayment} deleteWorkOrder={deleteWorkOrder} requestPaymentCorrection={requestPaymentCorrection} requestExpenseCorrection={requestExpenseCorrection} approveRequest={approveRequest} rejectRequest={rejectRequest} claimWorkOrder={claimWorkOrder} completeWorkOrder={completeWorkOrder} actorName={actorName} editOwnProfile={editOwnProfile} onVehicleTransferred={vehicle => { setStore(current => ({ ...current, vehicles: upsertLocal(current.vehicles, vehicle) })); void refresh(false, true); }} />}
     </main>
     {orderDetailLoading && <div className="modal-backdrop"><div className="modal" role="status"><h3>正在读取这张工单的完整资料…</h3><p>照片和签名仅在需要时加载；请等待后再编辑。</p><button onClick={() => setEditingOrder(null)}>取消</button></div></div>}
     {modal && <EntityModal state={modal} store={store} settings={settings} cloud={cloud} onClose={closeModal} onSave={saveModal} />}
@@ -999,6 +1028,7 @@ function App({ cloud }: { cloud: CloudSession }) {
 }
 
 type ContentProps = {
+  initialMetric?: string | null;
   historyReady: boolean; loadHistory: () => void;
   page: Page; search: string; store: AppStore; settings: ShopSettings; cloud: CloudSession;
   setPage: (page: Page) => void; openModal: (type: NonNullable<ModalState>['type'], value?: object) => void;
@@ -1038,10 +1068,10 @@ function greetingForNow() {
   return '晚上好';
 }
 
-function Dashboard({ store: rawStore, setPage, setEditingOrder, cloud, actorName, editOwnProfile }: ContentProps) {
+function Dashboard({ store: rawStore, setPage, setEditingOrder, cloud, actorName, editOwnProfile, initialMetric }: ContentProps) {
   const store = useMemo(() => financialStore(rawStore), [rawStore]);
   const metrics = useMemo(() => dashboardMetrics(store), [store]);
-  const [selectedMetric, setSelectedMetric] = useState<string | null>(null);
+  const [selectedMetric, setSelectedMetric] = useState<string | null>(initialMetric || null);
   const [trendMode, setTrendMode] = useState<'daily' | 'monthly'>('daily');
   const financialTrend = useMemo(() => buildFinancialTrend(store, trendMode), [store, trendMode]);
   const laToday = losAngelesDateKey(new Date().toISOString());

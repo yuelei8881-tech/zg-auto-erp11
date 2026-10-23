@@ -263,6 +263,8 @@ await db.exec('reset role; set role anon');
 await assert.rejects(db.query('select * from zg_read_workspace_core($1)',[org]),/permission denied/);
 await assert.rejects(db.query('select zg_read_workspace_batch($1)',[org]),/permission denied/);
 console.log('PASS: deferred logs filtered before pagination, 1001 customers retained, history readable, cross-org/disabled/anonymous access denied');
+await db.exec('reset role');
+await (await import('./summary-first.mjs')).verifySummary(db);
 await db.close();
 console.log('PASS: cached permission rules match original visibility across 24 role/permission combinations');
 console.log('PASS: lightweight read model, private access denial, on-demand full details, unchanged financials, attachment-safe priced/operational writes, transactional update/delete');

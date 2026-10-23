@@ -5,6 +5,7 @@ import { clearStoreCache } from './storeCache';
 export type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
 export type CloudRow = { id: string; [key: string]: JsonValue };
 export type CloudStore = Record<string, CloudRow[]>;
+export type DashboardSummary = { generatedAt: string; metrics: Record<string, number>; operations: Record<string, number>; relationships: Record<string, number> | null };
 export type CloudLoadProgress = { phase: string; startedAt: number; elapsedMs: number; membershipMs: number; downloadMs: number; processingMs: number; pages: number; records: number };
 
 export type CloudUser = { id: string; email: string; name?: string };
@@ -18,6 +19,7 @@ export type CloudSession = {
   role: string;
   permissions: Record<string, boolean>;
   loadStore: (updatedSince?: string, skipPhotos?: boolean) => Promise<CloudStore>;
+  loadSummary: () => Promise<DashboardSummary>;
   loadWorkspace: (updatedSince?: string, includeHistory?: boolean, onProgress?: (progress: CloudLoadProgress) => void) => Promise<CloudStore>;
   readWorkOrder: (id: string) => Promise<CloudRow>;
   transferVehicle: (vehicleId: string, targetModule: string, targetId: string, expectedVersion: string, note: string, requestId: string) => Promise<CloudRow>;
@@ -430,6 +432,24 @@ export async function openCloudSession(user: User): Promise<CloudSession> {
     role: String(membership.role),
     permissions: (membership.permissions || {}) as Record<string, boolean>,
     loadStore, upsertRecord, saveRecords, saveWorkOrderRecords,
+    loadSummary: async () => {
+      const current = await findMembership().catch(async error => {
+        if (error instanceof Error && error.message.includes('账号已停用')) {
+          await clearStoreCache().catch(() => undefined);
+          window.dispatchEvent(new Event('zg-permissions-changed'));
+        }
+        throw error;
+      });
+      if (!current || current.organization_id !== membership.organization_id || current.role !== membership.role || JSON.stringify(current.permissions) !== JSON.stringify(membership.permissions)) {
+        await clearStoreCache().catch(() => undefined);
+        window.dispatchEvent(new Event('zg-permissions-changed'));
+        throw new Error('账号权限已更新，正在重新连接。');
+      }
+      const { data, error } = await client.rpc('zg_dashboard_summary', { p_org: organizationId }).abortSignal(AbortSignal.timeout(30_000));
+      if (error) throw new Error(error.message);
+      if (!data?.generatedAt || !data?.metrics || !data?.operations) throw new Error('首页汇总未完整返回，请重试。');
+      return data as DashboardSummary;
+    },
     transferVehicle: async (vehicleId, targetModule, targetId, expectedVersion, note, requestId) => {
       const { data, error } = await client.rpc('zg_transfer_vehicle', {
         p_org: organizationId, p_vehicle: vehicleId, p_target_module: targetModule,

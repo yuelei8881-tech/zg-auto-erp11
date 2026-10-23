@@ -40,7 +40,7 @@ const client = {
 };
 const exports = {};
 vm.runInNewContext(stripTypeScriptTypes(source).replace(/^import .*;$/gm, '').replace('export async function', 'async function') + '\nexports.openCloudSession = openCloudSession;',
-  { exports, supabase: client, console, Map, Set, Date, setTimeout, clearTimeout });
+  { exports, supabase: client, console, Map, Set, Date, setTimeout, clearTimeout, AbortSignal });
 const session = await exports.openCloudSession({ id: 'user', email: 'test@example.test' });
 const row = i => ({ module: 'workOrders', record_id: String(i), updated_at: '2026-10-09', payload: { total: i, evidencePhotos: [{ storagePath: `org/${i}.jpg`, dataUrl: 'old' }] } });
 pages = [Array.from({ length: 1000 }, (_, i) => row(i)), [row(1000)]];
@@ -99,3 +99,16 @@ calls=[];
 await employee.loadStore(undefined,true);
 assert.equal(calls[0].name,'zg_read_records','Exports must still read all authorized records');
 console.log('PASS: employee lightweight startup, full pagination, explicit history and unchanged full export');
+const originalRpc=client.rpc;
+let summaryError=null;
+client.rpc=(name,args)=>name==='zg_dashboard_summary' ? {abortSignal:async signal=>{
+ assert.ok(signal);calls.push({name,org:args.p_org});
+ return {data:{generatedAt:new Date().toISOString(),metrics:{todaySales:100},operations:{orders:3},relationships:null},error:summaryError};
+}} : originalRpc(name,args);
+calls=[];
+const summary=await employee.loadSummary();
+assert.equal(summary.metrics.todaySales,100);
+assert.deepEqual(calls,[{name:'zg_dashboard_summary',org:'org'}],'summary must never download workspace pages');
+summaryError={message:'summary unavailable'};
+await assert.rejects(employee.loadSummary(),/summary unavailable/);
+console.log('PASS: compact summary RPC, organization scope, abort signal, no detail downloads and no fabricated zeros on failure');
