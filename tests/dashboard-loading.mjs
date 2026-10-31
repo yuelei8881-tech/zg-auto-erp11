@@ -14,7 +14,7 @@ const client = {
       return args.p_offset===failAt ? {error:new Error('network failure')} : {data:{rows:pages[args.p_offset/3000]||[]}};
     }
     if (name === 'zg_read_records' || name === 'zg_read_workspace' || name === 'zg_read_workspace_core') {
-      calls.push({ name, start: args.p_offset, since: args.p_since });
+      calls.push({ name, start: args.p_offset, since: args.p_since, module: args.p_module });
       return args.p_offset === failAt ? { error: new Error('network failure') } : { data: pages[args.p_offset / 1000] || [] };
     }
     if (name === 'zg_write_records_v2') { batchCalls.push(args); return { data: args.p_records, error: batchError }; }
@@ -114,6 +114,11 @@ calls=[];
 await employee.loadStore(undefined,true);
 assert.equal(calls[0].name,'zg_read_records','Exports must still read all authorized records');
 console.log('PASS: employee lightweight startup, full pagination, explicit history and unchanged full export');
+calls=[]; pages=[];
+await employee.loadHistoryRecords();
+assert.deepEqual(calls.map(call => call.module), ['inventoryLogs', 'changeLogs']);
+assert.ok(calls.every(call => call.name === 'zg_read_workspace'));
+console.log('PASS: history reads only inventory and change logs, never reloads the full workspace');
 const originalRpc=client.rpc;
 let summaryError=null;
 client.rpc=(name,args)=>name==='zg_dashboard_summary' ? {abortSignal:async signal=>{

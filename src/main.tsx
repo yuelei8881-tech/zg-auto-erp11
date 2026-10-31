@@ -108,6 +108,7 @@ function App({ cloud }: { cloud: CloudSession }) {
   const [loadError, setLoadError] = useState('');
   const [loadProgress, setLoadProgress] = useState<CloudLoadProgress | null>(null);
   const historyRequested = useRef(cloud.role === 'owner');
+  const historyLoading = useRef(false);
   const [historyReady, setHistoryReady] = useState(cloud.role === 'owner');
   const [syncing, setSyncing] = useState(false);
   const [refreshState, setRefreshState] = useState<'loading' | 'ready' | 'error'>('loading');
@@ -251,10 +252,12 @@ function App({ cloud }: { cloud: CloudSession }) {
   const setPage = (next: Page) => {
     if (!canOpenPage(cloud, next)) return;
     const request = ++navigationRequest.current;
+    // Navigation must not wait for a network round trip.
+    setPageState(next);
     if (next !== 'dashboard' && !workspaceReady.current) {
       setPendingPage(next);
       void ensureWorkspace().then(() => {
-        if (request === navigationRequest.current) { setPageState(next); setPendingPage(null); }
+        if (request === navigationRequest.current) { setPendingPage(null); }
       }).catch(() => { if (request === navigationRequest.current) setPendingPage(null); });
       return;
     }
@@ -263,8 +266,15 @@ function App({ cloud }: { cloud: CloudSession }) {
   };
 
   const loadHistory = () => {
+    if (historyLoading.current) return;
+    historyLoading.current = true;
     historyRequested.current = true;
-    void refresh(false, true);
+    void cloud.loadHistoryRecords().then(history => {
+      setStore(current => ({ ...current, inventoryLogs: history.inventoryLogs as unknown as AppStore['inventoryLogs'], changeLogs: history.changeLogs as unknown as AppStore['changeLogs'] }));
+      setHistoryReady(true);
+    }).catch(error => {
+      alert(`库存历史读取失败，请重试：${error instanceof Error ? error.message : String(error)}`);
+    }).finally(() => { historyLoading.current = false; });
   };
 
   // Inventory returns depend on complete purchase history. Do not mount its
@@ -1044,7 +1054,8 @@ function App({ cloud }: { cloud: CloudSession }) {
     <main className="main"><header className="topbar"><div className="global-search">⌕<input value={searchDraft} onChange={e => setSearchDraft(e.target.value)} onKeyDown={e => e.key === 'Enter' && runGlobalSearch()} placeholder="搜索客户、公司、电话、VIN、车牌、工单、司机…" /><button type="button" onClick={runGlobalSearch}>搜索</button>{searchSuggestions.length > 0 && <div className="search-suggestions">{searchSuggestions.map((item, index) => <button type="button" key={`${item.page}-${item.label}-${index}`} onClick={() => { setModal(null); setPage(item.page); setSearch(item.query); setSearchDraft(''); if (item.page !== 'customers' && item.page !== 'fleets' && item.modalType && item.record) openModal(item.modalType, item.record); }}><b>{item.label}</b><small>{item.meta}</small></button>)}</div>}</div><div className="top-status"><span className={syncing ? 'syncing' : ''}>{syncing || refreshState === 'loading' ? '正在同步…' : refreshState === 'error' ? '同步失败' : '● 云端已同步'}</span><span>{actorName}</span><b>v0.82.4</b><button type="button" className="topbar-logout" onClick={() => confirm('确定退出当前账号？') && void cloud.signOut()}>退出</button></div></header>
       {saveNotice && page === 'workOrders' && <div className="dashboard-sync-status" role="status">{saveNotice}<button onClick={() => setSaveNotice('')}>关闭</button></div>}
       {page === 'dashboard' && workspaceReady.current && !loading && <div className="dashboard-sync-status" role="status">{refreshState === 'loading' ? '正在更新金额，当前显示已缓存的数据…' : refreshState === 'error' ? '更新失败，当前金额可能不是最新，请重试。' : `金额已更新 · ${new Date(refreshedAt).toLocaleTimeString()}`} <button disabled={refreshState === 'loading'} onClick={() => void refresh(true)}>刷新金额</button></div>}
-{preloading && <div className="dashboard-sync-status" role="status">{pendingPage ? `正在准备${nav.find(item => item.id === pendingPage)?.label || '页面'}，完成后自动打开；首页仍可查看。` : '正在后台准备工单、客户、车辆和套餐…'}{loadProgress ? ` 已收到 ${loadProgress.records} 条资料。` : ''}{pendingPage && <button onClick={() => setPage('dashboard')}>留在首页</button>}</div>}
+{preloading && <div className="dashboard-sync-status" role="status">{pendingPage ? `正在准备${nav.find(item => item.id === pendingPage)?.label || '页面'}的数据，可随时切换其他功能。` : '正在后台准备工单、客户、车辆和套餐…'}{loadProgress ? ` 已收到 ${loadProgress.records} 条资料。` : ''}{pendingPage && <button onClick={() => setPage('dashboard')}>返回首页</button>}</div>}
+{page !== 'dashboard' && !workspaceReady.current && <section className="panel" aria-busy={!loadError}><h2>{nav.find(item => item.id === page)?.label}</h2><p>{loadError || '正在读取此页面所需资料，底部导航仍可使用。'}</p>{loadError && <button onClick={() => void ensureWorkspace().catch(() => undefined)}>重新读取</button>}</section>}
 {!preloading && (loading || page === 'dashboard') && <LoadDiagnostics progress={loadProgress} loading={loading} />}
 {page === 'dashboard' && !workspaceReady.current ? <SummaryHome actions={nav.filter(item => ['workOrders','parts','finance','campaigns'].includes(item.id) && canOpenPage(cloud,item.id)).map(item => ({label:item.label,onClick:()=>setPage(item.id)}))} summary={summary} name={actorName} financial={can(cloud,'pricing') || can(cloud,'finance')} customers={can(cloud,'customers')} createOrder={can(cloud,'createWorkOrders')} error={loadError} refresh={() => void refresh(true)} navigate={setPage} newOrder={() => setEditingOrder('new')} openMetric={key => { setInitialMetric(key); void ensureWorkspace().catch(() => undefined); }} /> : !loading && loadError && !lastFullSyncAt.current ? <section className="form-section" role="alert"><h3>数据尚未读取成功</h3><p>{loadError}</p><p>当前不显示金额，避免把未加载的数据误认为零。请勿重复录入工单或收款。</p><button className="primary" onClick={() => void refresh(false, true)}>重新连接服务器</button></section> : loading || !workspaceReady.current ? null : <PageContent initialMetric={initialMetric} historyReady={historyReady} loadHistory={loadHistory} page={page} search={search} store={store} settings={settings} cloud={cloud} setPage={setPage} openModal={openModal} setEditingOrder={setEditingOrder} persist={persist} remove={remove} receiveStock={receiveStock} addPayment={addPayment} deleteWorkOrder={deleteWorkOrder} requestPaymentCorrection={requestPaymentCorrection} requestExpenseCorrection={requestExpenseCorrection} approveRequest={approveRequest} rejectRequest={rejectRequest} claimWorkOrder={claimWorkOrder} completeWorkOrder={completeWorkOrder} actorName={actorName} editOwnProfile={editOwnProfile} onVehicleTransferred={vehicle => { setStore(current => ({ ...current, vehicles: upsertLocal(current.vehicles, vehicle) })); void refresh(false, true); }} />}
     </main>

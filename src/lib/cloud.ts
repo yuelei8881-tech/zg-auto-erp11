@@ -20,6 +20,7 @@ export type CloudSession = {
   permissions: Record<string, boolean>;
   loadStore: (updatedSince?: string, skipPhotos?: boolean) => Promise<CloudStore>;
   loadSummary: () => Promise<DashboardSummary>;
+  loadHistoryRecords: () => Promise<CloudStore>;
   loadWorkspace: (updatedSince?: string, includeHistory?: boolean, onProgress?: (progress: CloudLoadProgress) => void) => Promise<CloudStore>;
   readWorkOrder: (id: string) => Promise<CloudRow>;
   transferVehicle: (vehicleId: string, targetModule: string, targetId: string, expectedVersion: string, note: string, requestId: string) => Promise<CloudRow>;
@@ -446,6 +447,15 @@ export async function openCloudSession(user: User): Promise<CloudSession> {
     role: String(membership.role),
     permissions: (membership.permissions || {}) as Record<string, boolean>,
     loadStore, upsertRecord, saveRecords, saveWorkOrderRecords,
+    loadHistoryRecords: async () => {
+      const signal = AbortSignal.timeout(60_000);
+      const history: CloudStore = {};
+      for (const module of ['inventoryLogs', 'changeLogs']) {
+        const result = await loadStore(undefined, true, module, true, false, undefined, signal);
+        history[module] = result[module] || [];
+      }
+      return history;
+    },
     loadSummary: async () => {
       const current = await findMembership().catch(async error => {
         if (error instanceof Error && error.message.includes('账号已停用')) {

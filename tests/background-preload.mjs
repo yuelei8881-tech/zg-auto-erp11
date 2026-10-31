@@ -17,6 +17,9 @@ await assert.rejects(retry(),/offline/);fail=false;assert.equal(await retry(),'r
 const app=readFileSync(new URL('../src/main.tsx',import.meta.url),'utf8');
 assert.match(app,/await refresh\(true\);[\s\S]*?if \(active\) void ensureWorkspace\(\)/);
 assert.match(app,/workspaceLoader.current = sharedLoad/);
+assert.match(app,/const request = \+\+navigationRequest.current;\s*\/\/[^\n]*\n\s*setPageState\(next\);/);
+assert.doesNotMatch(app,/request === navigationRequest.current\) \{ setPageState\(next\)/);
+assert.match(app,/void cloud.loadHistoryRecords\(\)/);
 assert.match(app,/await refresh\(true, true\)/);
 assert.match(app,/ensureWorkspace\(\).then\(\(\) => \{\s*if \(request === navigationRequest.current\)/);
 assert.match(app,/!preloading && \(loading \|\| page === 'dashboard'\)/);
