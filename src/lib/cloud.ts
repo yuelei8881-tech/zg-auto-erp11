@@ -96,7 +96,7 @@ export async function openCloudSession(user: User): Promise<CloudSession> {
     .from('zg_organizations').select('name').eq('id', organizationId).single();
   if (organizationError) throw organizationError;
 
-  const loadStore = async (updatedSince?: string, skipPhotos = false, onlyModule?: string, workspace = false, deferHistory = false, onProgress?: (progress: CloudLoadProgress) => void) => {
+  const loadStore = async (updatedSince?: string, skipPhotos = false, onlyModule?: string, workspace = false, deferHistory = false, onProgress?: (progress: CloudLoadProgress) => void, signal?: AbortSignal) => {
     const progress: CloudLoadProgress = { phase: '验证员工权限', startedAt: Date.now(), elapsedMs: 0, membershipMs: 0, downloadMs: 0, processingMs: 0, pages: 0, records: 0 };
     const report = (phase: string) => { progress.phase = phase; progress.elapsedMs = Date.now() - progress.startedAt; onProgress?.({ ...progress }); };
     report('验证员工权限');
@@ -129,11 +129,13 @@ export async function openCloudSession(user: User): Promise<CloudSession> {
     // whole ERP fail to open. Uploads remain parallel, but the authoritative
     // accounting/customer store is loaded conservatively and completely.
     for (let from = 0; ; from += pageSize) {
+      signal?.throwIfAborted();
       report(`读取第 ${progress.pages + 1} 批资料`);
       const pageStarted = Date.now();
-      const { data: page, error } = await client.rpc(workspace ? (deferHistory ? 'zg_read_workspace_batch' : 'zg_read_workspace') : 'zg_read_records', {
+      const request = client.rpc(workspace ? (deferHistory ? 'zg_read_workspace_batch' : 'zg_read_workspace') : 'zg_read_records', {
         p_org: organizationId, p_since: updatedSince || null, p_offset: from, p_limit: pageSize, p_module: onlyModule || null,
       });
+      const { data: page, error } = await (signal ? request.abortSignal(signal) : request);
       if (error) throw error;
       if (batchRead && !Array.isArray(page?.rows)) throw new Error('服务器返回的数据不完整，请重试。');
       const rows = (batchRead ? page.rows : (page || [])) as typeof data;
@@ -217,10 +219,22 @@ export async function openCloudSession(user: User): Promise<CloudSession> {
     return saved[0].row;
   };
 
+  const conflictedVersions = new Map<string, string>();
   const saveRecords = async (records: Array<{ module: string; row: CloudRow }>) => {
     if (!records.length) return [];
+    for (const { module, row } of records) {
+      if (conflictedVersions.get(`${module}:${row.id}`) === String(row._cloudUpdatedAt || '')) {
+        throw new Error('资料已被其他操作更新，请重新打开最新资料后再保存；当前修改不会自动覆盖服务器。');
+      }
+    }
     const { data, error } = await client.rpc('zg_write_records_v2', { p_org: organizationId, p_records: records });
-    if (error) throw new Error(error.message);
+    if (error) {
+      if (error.code === '40001') {
+        for (const { module, row } of records) conflictedVersions.set(`${module}:${row.id}`, String(row._cloudUpdatedAt || ''));
+      }
+      throw new Error(error.message);
+    }
+    for (const { module, row } of records) conflictedVersions.delete(`${module}:${row.id}`);
     if (!Array.isArray(data) || data.length !== records.length) throw new Error('服务器保存确认不完整，请刷新核对，不要重复提交。');
     return data as Array<{ module: string; row: CloudRow }>;
   };
@@ -459,10 +473,8 @@ export async function openCloudSession(user: User): Promise<CloudSession> {
       if (!data?.id || !data?._cloudUpdatedAt) throw new Error('未收到过户确认，请勿更改选项，使用原请求重试。');
       return data as CloudRow;
     },
-    loadWorkspace: (updatedSince, includeHistory = false, onProgress) => new Promise<CloudStore>((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error('读取服务器超过 60 秒，请检查网络后点击刷新重试；不要重复新建工单。')), 60_000);
-      loadStore(updatedSince, true, undefined, true, membership.role !== 'owner' && !includeHistory, onProgress).then(resolve, reject).finally(() => clearTimeout(timer));
-    }),
+    loadWorkspace: (updatedSince, includeHistory = false, onProgress) =>
+      loadStore(updatedSince, true, undefined, true, membership.role !== 'owner' && !includeHistory, onProgress, AbortSignal.timeout(60_000)),
     readWorkOrder: async id => {
       const { data, error } = await client.rpc('zg_read_work_order', { p_org: organizationId, p_id: id });
       if (error) throw new Error(error.message);

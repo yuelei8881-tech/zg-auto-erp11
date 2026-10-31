@@ -39,6 +39,12 @@ const client = {
   storage: { from: () => ({ createSignedUrls: async paths => { signed++; return { data: paths.map(path => ({ path, signedUrl: `signed:${path}` })) }; } }) },
 };
 const exports = {};
+const mockRpc = client.rpc;
+client.rpc = (name, args) => {
+  const result = mockRpc(name, args);
+  result.abortSignal = signal => { assert.ok(signal instanceof AbortSignal); return result; };
+  return result;
+};
 vm.runInNewContext(stripTypeScriptTypes(source).replace(/^import .*;$/gm, '').replace('export async function', 'async function') + '\nexports.openCloudSession = openCloudSession;',
   { exports, supabase: client, console, Map, Set, Date, setTimeout, clearTimeout, AbortSignal });
 const session = await exports.openCloudSession({ id: 'user', email: 'test@example.test' });
@@ -80,6 +86,15 @@ await assert.rejects(session.saveWorkOrderRecords(records), /permission denied/)
 await assert.rejects(session.saveWorkOrderRecords([{ module: 'customers', row: { id: 'customer' } }]), /不支持/);
 assert.equal(batchCalls.length, 2, 'Invalid module must never be submitted');
 console.log('PASS: single batch request, preserved audit/inventory payload, organization scope, error propagation');
+batchError = { code: '40001', message: 'version conflict' };
+const stale = [{ module: 'workOrders', row: { id: 'conflict', _cloudUpdatedAt: 'v1' } }];
+await assert.rejects(session.saveRecords(stale), /version conflict/);
+const conflictCalls = batchCalls.length;
+await assert.rejects(session.saveRecords(stale), /重新打开/);
+assert.equal(batchCalls.length, conflictCalls, 'Stale version must not hit server repeatedly');
+batchError = null;
+await session.saveRecords([{ module: 'workOrders', row: { id: 'conflict', _cloudUpdatedAt: 'v2' } }]);
+assert.equal(batchCalls.length, conflictCalls + 1);
 role = 'workshop_supervisor';
 const employee = await exports.openCloudSession({ id: 'user', email: 'test@example.test' });
 calls=[]; pages=[Array.from({length:3000},(_,i)=>row(i)),[row(3000)]];

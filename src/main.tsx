@@ -143,6 +143,7 @@ function App({ cloud }: { cloud: CloudSession }) {
   const mutationGeneration = useRef(0);
   const paymentInFlight = useRef(new Set<string>());
   const numberRepairInFlight = useRef(false);
+  const numberRepairAttempted = useRef(new Set<string>());
   const lastCloudSyncAt = useRef(0);
   const lastFullSyncAt = useRef(0);
   const refreshQueue = useRef<ReturnType<typeof coalesceRefresh> | null>(null);
@@ -530,7 +531,7 @@ function App({ cloud }: { cloud: CloudSession }) {
 
   useEffect(() => {
     if (loading || cloud.role !== 'owner' || numberRepairInFlight.current) return;
-    const unnumberedOrders = store.workOrders.filter(order => !/^RO-\d{4}-\d+$/i.test(String(order.number || '')));
+    const unnumberedOrders = store.workOrders.filter(order => !numberRepairAttempted.current.has(order.id) && !/^RO-\d{4}-\d+$/i.test(String(order.number || '')));
     if (!unnumberedOrders.length) return;
     numberRepairInFlight.current = true;
     void (async () => {
@@ -538,6 +539,8 @@ function App({ cloud }: { cloud: CloudSession }) {
       try {
         setSyncing(true);
         for (const order of unnumberedOrders) {
+          // Never repeatedly write the same stale version after a refresh.
+          numberRepairAttempted.current.add(order.id);
           const number = await cloud.reserveWorkOrderNumber(order.id);
           const repaired = { ...order, number };
           await cloud.upsertRecord('workOrders', repaired as unknown as CloudRow);
