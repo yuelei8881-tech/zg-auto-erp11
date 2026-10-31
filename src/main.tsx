@@ -279,9 +279,10 @@ function App({ cloud }: { cloud: CloudSession }) {
 
   // Inventory returns depend on complete purchase history. Do not mount its
   // actions until history is confirmed; a failed fetch stays retryable.
+  const inventoryWorkspaceReady = workspaceReady.current;
   useEffect(() => {
-    if (page === 'parts' && workspaceReady.current && !loading && !historyRequested.current) loadHistory();
-  }, [page, loading]);
+    if (page === 'parts' && inventoryWorkspaceReady && !loading && !historyRequested.current) loadHistory();
+  }, [page, loading, inventoryWorkspaceReady]);
 
   useEffect(() => {
     let active = true;

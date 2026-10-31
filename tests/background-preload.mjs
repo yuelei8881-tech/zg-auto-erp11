@@ -20,6 +20,13 @@ assert.match(app,/workspaceLoader.current = sharedLoad/);
 assert.match(app,/const request = \+\+navigationRequest.current;\s*\/\/[^\n]*\n\s*setPageState\(next\);/);
 assert.doesNotMatch(app,/request === navigationRequest.current\) \{ setPageState\(next\)/);
 assert.match(app,/void cloud.loadHistoryRecords\(\)/);
+assert.match(app,/const inventoryWorkspaceReady = workspaceReady.current/);
+assert.match(app,/\[page, loading, inventoryWorkspaceReady\]/);
+// A user can enter Inventory before a quiet preload finishes. Neither page
+// nor loading changes when it finishes; readiness must retrigger the effect.
+const before = ['parts', false, false];
+const after = ['parts', false, true];
+assert.ok(after.some((value, index) => !Object.is(value, before[index])));
 assert.match(app,/await refresh\(true, true\)/);
 assert.match(app,/ensureWorkspace\(\).then\(\(\) => \{\s*if \(request === navigationRequest.current\)/);
 assert.match(app,/!preloading && \(loading \|\| page === 'dashboard'\)/);
