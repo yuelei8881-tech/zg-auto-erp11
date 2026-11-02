@@ -72,6 +72,7 @@ assert.equal(rows[0].payload.partItems.length,1);
 assert.equal(rows[0].payload.diagnosis,'updated');
 await db.exec('reset role');
 await db.exec(readFileSync(new URL('../supabase/migrations/20261009151922_versioned_atomic_saves.sql',import.meta.url),'utf8'));
+await db.exec(readFileSync(new URL('../supabase/migrations/20261102213243_nonretryable_record_conflict.sql',import.meta.url),'utf8'));
 await db.exec(readFileSync(new URL('../supabase/migrations/20261009152208_activate_versioned_writes.sql',import.meta.url),'utf8'));
 const part='00000000-0000-4000-8000-000000000005';
 await db.query("insert into zg_erp_records(organization_id,module,record_id,payload) values($1,'parts',$2,$3)",[org,part,{id:part,qty:10}]);
@@ -90,7 +91,7 @@ const currentOrder=ack.find(x=>x.module==='workOrders').row;
 await assert.rejects(db.query('select zg_write_records_v2($1,$2)',[org,[
  {module:'workOrders',row:{...currentOrder,total:650}},
  {module:'parts',row:{...batch[0].row,qty:8}},
-]]),/其他操作更新/);
+]]),error => error.code === 'PT409' && /其他操作更新/.test(error.message));
 snapshotRows=await snapshot();
 assert.equal(snapshotRows.find(x=>x.module==='workOrders').payload.total,600,'batch failure must roll back order');
 assert.equal(snapshotRows.find(x=>x.module==='parts').payload.qty,9,'stale inventory must not overwrite stock');

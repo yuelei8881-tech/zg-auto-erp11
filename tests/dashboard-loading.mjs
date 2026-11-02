@@ -86,7 +86,7 @@ await assert.rejects(session.saveWorkOrderRecords(records), /permission denied/)
 await assert.rejects(session.saveWorkOrderRecords([{ module: 'customers', row: { id: 'customer' } }]), /不支持/);
 assert.equal(batchCalls.length, 2, 'Invalid module must never be submitted');
 console.log('PASS: single batch request, preserved audit/inventory payload, organization scope, error propagation');
-batchError = { code: '40001', message: 'version conflict' };
+batchError = { code: 'PT409', message: 'version conflict' };
 const stale = [{ module: 'workOrders', row: { id: 'conflict', _cloudUpdatedAt: 'v1' } }];
 await assert.rejects(session.saveRecords(stale), /version conflict/);
 const conflictCalls = batchCalls.length;

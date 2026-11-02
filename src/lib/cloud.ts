@@ -230,7 +230,7 @@ export async function openCloudSession(user: User): Promise<CloudSession> {
     }
     const { data, error } = await client.rpc('zg_write_records_v2', { p_org: organizationId, p_records: records });
     if (error) {
-      if (error.code === '40001') {
+      if (error.code === '40001' || error.code === 'PT409') {
         for (const { module, row } of records) conflictedVersions.set(`${module}:${row.id}`, String(row._cloudUpdatedAt || ''));
       }
       throw new Error(error.message);
